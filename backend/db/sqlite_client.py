@@ -1116,15 +1116,27 @@ class SQLiteClient:
         raw_path = str(path_input or "").strip()
         if not raw_path:
             return None
-        base = FilePath(raw_path).expanduser().resolve()
+        try:
+            base = FilePath(raw_path).expanduser().resolve(strict=False)
+        except OSError:
+            return None
         candidates = [base]
         if base.suffix == "":
             candidates.extend(
                 FilePath(str(base) + suffix) for suffix in (".dylib", ".so", ".dll")
             )
         for candidate in candidates:
-            if candidate.exists():
-                return candidate
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate
+            except OSError:
+                continue
         return None
 
     def _probe_sqlite_vec_capability(self) -> Dict[str, Any]:
@@ -4428,15 +4440,6 @@ class SQLiteClient:
                     self._append_degrade_reason(
                         degrade_reasons, "sqlite_vec_fallback_legacy"
                     )
-                if selected_vector_engine == "vec":
-                    self._append_degrade_reason(
-                        degrade_reasons, "sqlite_vec_fallback_legacy"
-                    )
-                    self._append_degrade_reason(
-                        degrade_reasons,
-                        f"sqlite_vec_status:{vector_engine_metadata['sqlite_vec_status']}",
-                    )
-                    vector_engine_metadata["vector_engine_selected"] = "legacy"
 
                 query_embedding = await self._get_embedding(
                     session,

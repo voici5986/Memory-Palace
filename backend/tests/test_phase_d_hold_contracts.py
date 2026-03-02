@@ -27,6 +27,19 @@ async def _active_counts(client: SQLiteClient) -> tuple[int, int]:
         )
 
 
+async def _memory_access_snapshot(
+    client: SQLiteClient, memory_id: int
+) -> dict[str, object]:
+    async with client.session() as session:
+        memory = await session.get(Memory, memory_id)
+        assert memory is not None
+        return {
+            "access_count": int(memory.access_count or 0),
+            "vitality_score": float(memory.vitality_score or 0.0),
+            "last_accessed_at": memory.last_accessed_at,
+        }
+
+
 def test_phase_d_hold_http_and_mcp_contracts() -> None:
     business_paths = [
         route.path
@@ -167,6 +180,7 @@ async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
     uri = f"{created['domain']}://{created['path']}"
 
     before_counts = await _active_counts(client)
+    before_access = await _memory_access_snapshot(client, int(created["id"]))
 
     flush_tracker = mcp_server.runtime_state.flush_tracker
     original_trigger_chars = flush_tracker._trigger_chars
@@ -192,9 +206,36 @@ async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
         )
         search_payload = json.loads(search_raw)
         assert search_payload["ok"] is True
+        assert search_payload["count"] >= 1
+        assert any(
+            int(item.get("memory_id") or -1) == int(created["id"])
+            for item in search_payload.get("results", [])
+        )
+
+        after_search_access = await _memory_access_snapshot(client, int(created["id"]))
+        assert after_search_access["access_count"] >= (
+            int(before_access["access_count"]) + 1
+        )
+        assert float(after_search_access["vitality_score"]) >= float(
+            before_access["vitality_score"]
+        )
+        if before_access["last_accessed_at"] is None:
+            assert after_search_access["last_accessed_at"] is not None
+        else:
+            assert after_search_access["last_accessed_at"] >= before_access["last_accessed_at"]
 
         read_raw = await mcp_server.read_memory(uri)
         assert "hold_boundary_node" in read_raw
+
+        after_read_access = await _memory_access_snapshot(client, int(created["id"]))
+        assert after_read_access["access_count"] > int(
+            after_search_access["access_count"]
+        )
+        assert float(after_read_access["vitality_score"]) >= float(
+            after_search_access["vitality_score"]
+        )
+        assert after_read_access["last_accessed_at"] is not None
+        assert after_read_access["last_accessed_at"] >= after_search_access["last_accessed_at"]
 
         after_counts = await _active_counts(client)
         assert after_counts == before_counts

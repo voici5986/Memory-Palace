@@ -67,6 +67,26 @@ def test_sqlite_vec_probe_resolves_platform_suffix_and_attempts_load(
     assert payload["extension_path_exists"] is True
 
 
+def test_sqlite_vec_probe_prefers_extension_file_over_same_name_directory(
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "sqlite_vec"
+    base.mkdir()
+    fake_extension_file = tmp_path / "sqlite_vec.dylib"
+    fake_extension_file.write_bytes(b"not-a-real-extension")
+
+    payload = run_sqlite_vec_probe(sqlite_vec_extension_path=str(base))
+
+    assert payload["diag_code"] != "path_not_file"
+    assert payload["status"] in {
+        "extension_load_failed",
+        "extension_loading_unavailable",
+        "sqlite_runtime_error",
+        "ok",
+    }
+    assert str(payload.get("extension_path", "")).endswith(".dylib")
+
+
 def test_write_lane_wal_probe_returns_regression_metrics_and_gate() -> None:
     payload = run_write_lane_wal_probe(
         workers=2,

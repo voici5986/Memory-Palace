@@ -345,13 +345,25 @@ def _default_wal_thresholds(load_profile: str) -> Dict[str, Union[int, float]]:
 
 
 def _resolve_sqlite_extension_file(path_input: str) -> Optional[Path]:
-    raw = Path(path_input).expanduser().resolve()
+    try:
+        raw = Path(path_input).expanduser().resolve(strict=False)
+    except OSError:
+        return None
     candidates = [raw]
     if raw.suffix == "":
         candidates.extend(Path(str(raw) + suffix) for suffix in (".dylib", ".so", ".dll"))
     for candidate in candidates:
-        if candidate.exists():
-            return candidate
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                return candidate
+        except OSError:
+            continue
     return None
 
 
