@@ -1,0 +1,199 @@
+import json
+from pathlib import Path
+
+import pytest
+from sqlalchemy import func, select
+
+import main
+import mcp_server
+from db.sqlite_client import Memory, Path as PathModel, SQLiteClient
+
+
+def _sqlite_url(db_path: Path) -> str:
+    return f"sqlite+aiosqlite:///{db_path}"
+
+
+async def _active_counts(client: SQLiteClient) -> tuple[int, int]:
+    async with client.session() as session:
+        memory_count_result = await session.execute(
+            select(func.count()).select_from(Memory).where(Memory.deprecated == False)
+        )
+        path_count_result = await session.execute(
+            select(func.count()).select_from(PathModel)
+        )
+        return (
+            int(memory_count_result.scalar() or 0),
+            int(path_count_result.scalar() or 0),
+        )
+
+
+def test_phase_d_hold_external_import_has_no_runtime_entry_http_and_mcp() -> None:
+    business_paths = [
+        route.path
+        for route in main.app.routes
+        if route.path.startswith(("/browse", "/review", "/maintenance"))
+    ]
+    allowed_business_paths = {
+        "/browse/node",
+        "/review/deprecated",
+        "/review/diff",
+        "/review/memories/{memory_id}",
+        "/review/sessions",
+        "/review/sessions/{session_id}",
+        "/review/sessions/{session_id}/diff/{resource_id:path}",
+        "/review/sessions/{session_id}/rollback/{resource_id:path}",
+        "/review/sessions/{session_id}/snapshots",
+        "/review/sessions/{session_id}/snapshots/{resource_id:path}",
+        "/maintenance/index/job/{job_id}",
+        "/maintenance/index/job/{job_id}/cancel",
+        "/maintenance/index/job/{job_id}/retry",
+        "/maintenance/index/rebuild",
+        "/maintenance/index/reindex/{memory_id}",
+        "/maintenance/index/sleep-consolidation",
+        "/maintenance/index/worker",
+        "/maintenance/observability/search",
+        "/maintenance/observability/summary",
+        "/maintenance/orphans",
+        "/maintenance/orphans/{memory_id}",
+        "/maintenance/vitality/candidates/query",
+        "/maintenance/vitality/cleanup/confirm",
+        "/maintenance/vitality/cleanup/prepare",
+        "/maintenance/vitality/decay",
+    }
+    assert set(business_paths) == allowed_business_paths
+
+    tools = mcp_server.mcp._tool_manager.list_tools()
+    tool_names = {tool.name for tool in tools}
+    assert tool_names == {
+        "read_memory",
+        "create_memory",
+        "update_memory",
+        "delete_memory",
+        "add_alias",
+        "search_memory",
+        "compact_context",
+        "rebuild_index",
+        "index_status",
+    }
+
+
+def _load_env_pairs(file_path: Path) -> dict[str, str]:
+    pairs: dict[str, str] = {}
+    for raw_line in file_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        pairs[key.strip()] = value.strip()
+    return pairs
+
+
+def test_phase_d_hold_default_flags_off_in_env_and_profiles() -> None:
+    expected_defaults = {
+        "EXTERNAL_IMPORT_ENABLED": "false",
+        "EXTERNAL_IMPORT_ALLOWED_ROOTS": "",
+        "EXTERNAL_IMPORT_ALLOWED_EXTS": ".md,.txt,.json",
+        "EXTERNAL_IMPORT_MAX_TOTAL_BYTES": "5242880",
+        "EXTERNAL_IMPORT_MAX_FILES": "200",
+        "AUTO_LEARN_EXPLICIT_ENABLED": "false",
+        "AUTO_LEARN_ALLOWED_DOMAINS": "notes",
+        "AUTO_LEARN_REQUIRE_REASON": "true",
+        "EMBEDDING_PROVIDER_CHAIN_ENABLED": "false",
+        "EMBEDDING_PROVIDER_FAIL_OPEN": "false",
+        "EMBEDDING_PROVIDER_FALLBACK": "hash",
+        "RETRIEVAL_SQLITE_VEC_ENABLED": "false",
+        "RETRIEVAL_SQLITE_VEC_EXTENSION_PATH": "",
+        "RETRIEVAL_VECTOR_ENGINE": "legacy",
+        "RETRIEVAL_SQLITE_VEC_READ_RATIO": "0",
+        "RUNTIME_WRITE_WAL_ENABLED": "false",
+        "RUNTIME_WRITE_JOURNAL_MODE": "delete",
+        "RUNTIME_WRITE_WAL_SYNCHRONOUS": "normal",
+        "RUNTIME_WRITE_BUSY_TIMEOUT_MS": "120",
+        "RUNTIME_WRITE_WAL_AUTOCHECKPOINT": "1000",
+    }
+
+    project_root = Path(__file__).resolve().parents[2]
+    expected_profile_files = [
+        project_root / "deploy" / "profiles" / platform / f"profile-{label}.env"
+        for platform in ("docker", "macos", "windows")
+        for label in ("a", "b", "c", "d")
+    ]
+    profile_files = sorted(
+        (project_root / "deploy" / "profiles").glob("*/profile-*.env")
+    )
+    expected_profiles_set = set(expected_profile_files)
+    found_profiles_set = set(profile_files)
+    missing_profiles = sorted(expected_profiles_set - found_profiles_set)
+    unexpected_profiles = sorted(found_profiles_set - expected_profiles_set)
+    assert not missing_profiles and not unexpected_profiles, (
+        f"profile matrix mismatch; missing={missing_profiles}, "
+        f"unexpected={unexpected_profiles}"
+    )
+
+    contract_files = [project_root / ".env.example", *expected_profile_files]
+
+    assert contract_files, "expected env contracts to exist"
+    for contract_file in contract_files:
+        pairs = _load_env_pairs(contract_file)
+        missing = [key for key in expected_defaults if key not in pairs]
+        assert not missing, f"{contract_file} missing defaults: {missing}"
+        for key, expected in expected_defaults.items():
+            assert pairs[key] == expected, (
+                f"{contract_file} expects {key}={expected}, got {pairs[key]!r}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "phase-d-hold-no-implicit-write.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+    created = await client.create_memory(
+        parent_path="",
+        content="phase d hold boundary sample",
+        priority=1,
+        title="hold_boundary_node",
+        domain="core",
+    )
+    uri = f"{created['domain']}://{created['path']}"
+
+    before_counts = await _active_counts(client)
+
+    flush_tracker = mcp_server.runtime_state.flush_tracker
+    original_trigger_chars = flush_tracker._trigger_chars
+    original_min_events = flush_tracker._min_events
+    original_max_events = flush_tracker._max_events
+    session_id = "phase_d_hold_no_implicit_write"
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: session_id)
+    monkeypatch.setattr(mcp_server, "AUTO_FLUSH_ENABLED", True)
+
+    flush_tracker._trigger_chars = 1
+    flush_tracker._min_events = 1
+    flush_tracker._max_events = max(10, original_max_events)
+
+    try:
+        await flush_tracker.mark_flushed(session_id=session_id)
+
+        search_raw = await mcp_server.search_memory(
+            query="phase d hold boundary sample",
+            mode="hybrid",
+            include_session=False,
+        )
+        search_payload = json.loads(search_raw)
+        assert search_payload["ok"] is True
+
+        read_raw = await mcp_server.read_memory(uri)
+        assert "hold_boundary_node" in read_raw
+
+        after_counts = await _active_counts(client)
+        assert after_counts == before_counts
+    finally:
+        flush_tracker._trigger_chars = original_trigger_chars
+        flush_tracker._min_events = original_min_events
+        flush_tracker._max_events = original_max_events
+        await flush_tracker.mark_flushed(session_id=session_id)
+        await client.close()
