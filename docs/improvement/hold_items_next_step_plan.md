@@ -258,7 +258,7 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse -
 bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
 ```
 
-说明：上述本地联调口径使用该 `.env` 中的 embedding/reranker 与 LLM（`gpt-5.2`）字段；注入仅覆盖 API/密钥/模型键，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND=router` 等模板策略键。
+说明：上述本地联调口径使用该 `.env` 中的 embedding/reranker 与 LLM（`gpt-5.2`）字段；注入仅覆盖 API/密钥/模型键及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`，不覆盖 `RETRIEVAL_EMBEDDING_BACKEND=router` 等模板策略键。
 
 ## 5.3 Full Gate（发布前）
 

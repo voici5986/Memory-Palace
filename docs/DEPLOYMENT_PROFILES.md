@@ -51,7 +51,7 @@
 >
 > **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
 >
-> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，可通过 `--allow-runtime-env-injection` 把当前进程环境变量注入 `.env.docker`（适配 CI secrets 注入）；若同时显式传入 `--runtime-env-file`，会先加载该文件再注入（不做自动探测）。注入范围仅限 API 地址/密钥/模型字段，不会覆盖模板中的路由策略键（如 `RETRIEVAL_EMBEDDING_BACKEND`）。
+> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，可通过 `--allow-runtime-env-injection` 把当前进程环境变量注入 `.env.docker`（适配 CI secrets 注入）；若同时显式传入 `--runtime-env-file`，会先加载该文件再注入（不做自动探测）。注入范围仅限 API 地址/密钥/模型字段及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`，不会覆盖模板中的路由策略键（如 `RETRIEVAL_EMBEDDING_BACKEND`）。
 >
 > **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker 时，C/D 本地联调使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 配置；LLM 相关字段统一使用该文件中的 `gpt-5.2` 口径。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env`（`profile d` 同理）。
 >
@@ -390,9 +390,26 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 |---|---|
 | 检索效果差 | 确认 `SEARCH_DEFAULT_MODE` 是否为 `hybrid`；C/D 档位检查 `RETRIEVAL_RERANKER_WEIGHT` 是否合理 |
 | 模型服务不可用 | 系统会自动降级，检查响应中的 `degrade_reasons` 字段定位具体原因 |
+| C/D 出现 `embedding_request_failed` / `embedding_fallback_hash` | 通常是外部 embedding/reranker 链路不可达（例如本机 router 未部署模型），不是后端主流程崩溃；按下方“C/D 降级信号快速排查”处理 |
 | Docker 端口冲突 | 一键脚本会自动寻找空闲端口；也可手动指定（bash：`--frontend-port` / `--backend-port`，PowerShell：`-FrontendPort` / `-BackendPort`） |
 | SSE 启动失败 `address already in use` | 释放占用的端口，或通过 `PORT=<空闲端口>` 切换 |
 | 升级后数据库丢失 | 后端启动时会自动从历史文件名（`agent_memory.db` / `nocturne_memory.db` / `nocturne.db`）恢复 |
+
+### C/D 降级信号快速排查（本地联调）
+
+```bash
+# 以 profile c 为例；profile d 只需把 --docker-profile c 改成 d
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
+```
+
+1. 如果日志里仍有 `embedding_request_failed` / `embedding_fallback_hash`，先检查外部 embedding/reranker 服务本身是否可达、API key 是否有效。
+2. 用下面命令确认 `.env.docker` 已注入预期模型（本地约定为 `gpt-5.2`）：
+
+```bash
+rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|COMPACT_GIST_LLM_MODEL" Memory-Palace/.env.docker
+```
+
+3. 这套注入方式只用于本地联调；上线时仍以客户环境的 `router` 配置为准，缺失模型时按系统 fallback 链路降级。
 
 ### 调参提示
 
