@@ -1,6 +1,7 @@
 import inspect
 import os
 import sqlite3
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -23,11 +24,20 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
+_DEFAULT_CORS_ALLOW_ORIGINS: tuple[str, ...] = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+_LEGACY_REQUIRED_TABLE_NAMES: tuple[str, ...] = ("memories",)
+
+
 def _resolve_cors_config() -> tuple[list[str], bool]:
-    raw_origins = str(os.getenv("CORS_ALLOW_ORIGINS", "*") or "*")
+    raw_origins = str(os.getenv("CORS_ALLOW_ORIGINS", "") or "")
     origins = [item.strip() for item in raw_origins.split(",") if item.strip()]
     if not origins:
-        origins = ["*"]
+        origins = list(_DEFAULT_CORS_ALLOW_ORIGINS)
 
     allow_credentials = _env_bool("CORS_ALLOW_CREDENTIALS", True)
     if "*" in origins and allow_credentials:
@@ -53,6 +63,44 @@ def _extract_sqlite_file_path(database_url: Optional[str]) -> Optional[Path]:
     return Path(raw_path)
 
 
+def _is_regular_file_no_symlink(path: Path) -> bool:
+    try:
+        file_mode = path.stat(follow_symlinks=False).st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(file_mode)
+
+
+def _sqlite_quick_check_ok(conn: sqlite3.Connection) -> bool:
+    try:
+        rows = conn.execute("PRAGMA quick_check(1)").fetchall()
+    except sqlite3.Error:
+        return False
+    if len(rows) != 1 or not rows[0]:
+        return False
+    return str(rows[0][0]).strip().lower() == "ok"
+
+
+def _sqlite_has_required_legacy_tables(conn: sqlite3.Connection) -> bool:
+    placeholders = ",".join("?" for _ in _LEGACY_REQUIRED_TABLE_NAMES)
+    if not placeholders:
+        return True
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+              AND name IN ({placeholders})
+            LIMIT 1
+            """,
+            tuple(_LEGACY_REQUIRED_TABLE_NAMES),
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    return bool(rows)
+
+
 def _try_restore_legacy_sqlite_file(database_url: Optional[str]) -> None:
     """
     Compatibility helper:
@@ -75,10 +123,43 @@ def _try_restore_legacy_sqlite_file(database_url: Optional[str]) -> None:
         legacy_path = target_dir / legacy_name
         if not legacy_path.exists():
             continue
+
+        if not _is_regular_file_no_symlink(legacy_path):
+            print(
+                f"[compat] Skipped legacy database file {legacy_path}: "
+                "not a regular file"
+            )
+            continue
+
         target_dir.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(f"file:{legacy_path}?mode=ro", uri=True) as source_conn:
-            with sqlite3.connect(target_path) as target_conn:
-                source_conn.backup(target_conn)
+        try:
+            with sqlite3.connect(f"file:{legacy_path}?mode=ro", uri=True) as source_conn:
+                if not _sqlite_quick_check_ok(source_conn):
+                    print(
+                        f"[compat] Skipped legacy database file {legacy_path}: "
+                        "sqlite quick_check failed"
+                    )
+                    continue
+                if not _sqlite_has_required_legacy_tables(source_conn):
+                    print(
+                        f"[compat] Skipped legacy database file {legacy_path}: "
+                        "missing expected legacy tables"
+                    )
+                    continue
+                with sqlite3.connect(target_path) as target_conn:
+                    source_conn.backup(target_conn)
+        except sqlite3.Error as exc:
+            print(
+                f"[compat] Skipped legacy database file {legacy_path}: "
+                f"sqlite error: {exc}"
+            )
+            if target_path.exists():
+                try:
+                    target_path.unlink()
+                except OSError:
+                    pass
+            continue
+
         print(
             f"[compat] Restored legacy database file from {legacy_path} "
             f"to {target_path}"

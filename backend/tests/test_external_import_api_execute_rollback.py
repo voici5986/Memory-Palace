@@ -358,7 +358,7 @@ def test_external_import_execute_and_rollback_recover_from_runtime_meta_after_me
         assert rollback.json().get("status") == "rolled_back"
 
 
-def test_external_import_execute_rejects_when_source_changed_since_prepare(
+def test_external_import_execute_uses_prepared_snapshot_even_when_source_file_changes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     client_stub = _ImportClientStub()
@@ -387,9 +387,50 @@ def test_external_import_execute_rejects_when_source_changed_since_prepare(
             headers=headers,
             json={"job_id": job_id},
         )
+        assert execute.status_code == 200
+        assert execute.json().get("status") == "executed"
+        assert client_stub.memories[1]["content"] == "Import content v1"
+
+        status = client.get(f"/maintenance/import/jobs/{job_id}", headers=headers)
+        assert status.status_code == 200
+        assert status.json().get("status") == "executed"
+
+
+def test_external_import_execute_rejects_when_prepared_snapshot_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client_stub = _ImportClientStub()
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
+    monkeypatch.setenv("MCP_API_KEY", "import-secret")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ALLOWED_ROOTS", str(tmp_path))
+    headers = {"X-MCP-API-Key": "import-secret"}
+
+    file_path = tmp_path / "memo.md"
+    file_path.write_text("Import content v1", encoding="utf-8")
+
+    with _build_client() as client:
+        prepare = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_path),
+        )
+        assert prepare.status_code == 200
+        job_id = str(prepare.json().get("job_id") or "")
+        assert job_id
+
+        maintenance_api._IMPORT_JOBS[job_id]["files"][0].pop("content", None)
+        execute = client.post(
+            "/maintenance/import/execute",
+            headers=headers,
+            json={"job_id": job_id},
+        )
         assert execute.status_code == 409
         detail = execute.json().get("detail") or {}
-        assert detail.get("reason") == "source_changed_since_prepare"
+        assert detail.get("reason") == "prepared_snapshot_invalid"
+        source_mismatch = detail.get("source_mismatch") or []
+        assert source_mismatch
+        assert source_mismatch[0].get("reason") == "prepared_snapshot_incomplete"
 
         status = client.get(f"/maintenance/import/jobs/{job_id}", headers=headers)
         assert status.status_code == 200

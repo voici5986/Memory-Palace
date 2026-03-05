@@ -25,6 +25,17 @@ _MCP_API_KEY_HEADER = "X-MCP-API-Key"
 _MCP_API_KEY_ALLOW_INSECURE_LOCAL_ENV = "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on", "enabled"}
 _LOOPBACK_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_FORWARDED_HEADER_NAMES = {
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-forwarded-port",
+    "x-real-ip",
+    "x-client-ip",
+    "true-client-ip",
+    "cf-connecting-ip",
+}
 
 
 def _get_configured_mcp_api_key() -> str:
@@ -39,7 +50,16 @@ def _allow_insecure_local_without_api_key() -> bool:
 def _is_loopback_request(request: Request) -> bool:
     client = getattr(request, "client", None)
     host = str(getattr(client, "host", "") or "").strip().lower()
-    return host in _LOOPBACK_CLIENT_HOSTS
+    if host not in _LOOPBACK_CLIENT_HOSTS:
+        return False
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return True
+    for header_name in _FORWARDED_HEADER_NAMES:
+        header_value = headers.get(header_name)
+        if isinstance(header_value, str) and header_value.strip():
+            return False
+    return True
 
 
 def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
@@ -430,11 +450,14 @@ def _clone_import_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _clone_import_payload_for_persistence(payload: Dict[str, Any]) -> Dict[str, Any]:
     persisted_payload = _clone_import_payload(payload)
+    status = str(persisted_payload.get("status") or "").strip().lower()
+    keep_snapshot_content = status in {"prepared", "executing"}
     files = persisted_payload.get("files")
     if isinstance(files, list):
         for item in files:
             if isinstance(item, dict):
-                item.pop("content", None)
+                if not keep_snapshot_content:
+                    item.pop("content", None)
     return persisted_payload
 
 
@@ -2274,41 +2297,30 @@ async def execute_external_import(payload: ImportExecuteRequest):
         if not isinstance(item, dict):
             continue
         source_path = str(item.get("source_path") or "").strip()
-        resolved_path = str(item.get("resolved_path") or "").strip()
         expected_hash = str(item.get("source_hash") or "").strip()
         title = str(item.get("title") or "").strip()
-        if not resolved_path or not expected_hash or not title:
+        snapshot_content = item.get("content")
+        if not expected_hash or not title or not isinstance(snapshot_content, str):
             source_mismatch.append(
                 {
                     "path": source_path,
-                    "reason": "prepared_file_incomplete",
+                    "reason": "prepared_snapshot_incomplete",
                 }
             )
             continue
-        try:
-            current_content = Path(resolved_path).read_text(encoding="utf-8")
-        except Exception as exc:
+        current_hash = _build_import_source_hash(snapshot_content)
+        if not hmac.compare_digest(current_hash, expected_hash):
             source_mismatch.append(
                 {
                     "path": source_path,
-                    "reason": "file_read_failed",
-                    "detail": type(exc).__name__,
-                }
-            )
-            continue
-        current_hash = _build_import_source_hash(current_content)
-        if current_hash != expected_hash:
-            source_mismatch.append(
-                {
-                    "path": source_path,
-                    "reason": "source_changed_since_prepare",
+                    "reason": "prepared_snapshot_hash_mismatch",
                 }
             )
             continue
 
         try:
             guard_decision = await client.write_guard(
-                content=current_content,
+                content=snapshot_content,
                 domain=domain,
                 path_prefix=parent_path or None,
             )
@@ -2338,7 +2350,7 @@ async def execute_external_import(payload: ImportExecuteRequest):
             {
                 "source_path": source_path,
                 "title": title,
-                "content": current_content,
+                "content": snapshot_content,
                 "target_path": str(item.get("target_path") or ""),
                 "target_uri": str(item.get("target_uri") or ""),
                 "source_hash": expected_hash,
@@ -2347,7 +2359,7 @@ async def execute_external_import(payload: ImportExecuteRequest):
 
     if source_mismatch or guard_errors or guard_blocked:
         reason = (
-            "source_changed_since_prepare"
+            "prepared_snapshot_invalid"
             if source_mismatch
             else ("write_guard_unavailable" if guard_errors else "write_guard_blocked")
         )

@@ -54,6 +54,29 @@ def test_maintenance_auth_rejects_insecure_local_override_for_non_loopback_clien
     assert detail.get("reason") == "insecure_local_override_requires_loopback"
 
 
+@pytest.mark.parametrize(
+    "forwarded_headers",
+    [
+        {"X-Forwarded-For": "203.0.113.10"},
+        {"Forwarded": "for=203.0.113.10;proto=https"},
+    ],
+)
+def test_maintenance_auth_rejects_insecure_local_override_when_forwarding_headers_present(
+    monkeypatch, forwarded_headers: dict[str, str]
+) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
+    with _build_client(monkeypatch, client=("127.0.0.1", 50000)) as client:
+        response = client.post(
+            "/maintenance/vitality/decay",
+            headers=forwarded_headers,
+        )
+    assert response.status_code == 401
+    detail = response.json().get("detail") or {}
+    assert detail.get("error") == "maintenance_auth_failed"
+    assert detail.get("reason") == "insecure_local_override_requires_loopback"
+
+
 def test_maintenance_auth_rejects_when_api_key_missing(monkeypatch) -> None:
     monkeypatch.setenv("MCP_API_KEY", "week6-secret")
     with _build_client(monkeypatch) as client:

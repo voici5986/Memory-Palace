@@ -117,7 +117,9 @@ resolve_data_volume() {
 get_env_value_from_file() {
   local env_file="$1"
   local key="$2"
-  awk -F= -v target="${key}" '$1==target {print substr($0, index($0, "=") + 1)}' "${env_file}" | tail -n 1
+  local raw
+  raw="$(awk -F= -v target="${key}" '$1==target {print substr($0, index($0, "=") + 1)}' "${env_file}" | tail -n 1)"
+  echo "${raw%$'\r'}"
 }
 
 upsert_env_value_in_file() {
