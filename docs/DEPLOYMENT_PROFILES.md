@@ -51,11 +51,11 @@
 >
 > **本地开发临时策略（重要）**：为降低本地联调复杂度，可临时将 `RETRIEVAL_EMBEDDING_BACKEND=api`，并显式配置 `RETRIEVAL_EMBEDDING_*` 与 `RETRIEVAL_RERANKER_*`。该策略仅用于本地开发；面向客户交付前，应根据客户环境回切到目标部署口径（通常为 C/D 模板的 `router` 路线）。
 >
-> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，可通过 `--allow-runtime-env-injection` 把当前进程环境变量注入 `.env.docker`（适配 CI secrets 注入）；若同时显式传入 `--runtime-env-file`，会先加载该文件再注入（不做自动探测）。注入范围仅限 API 地址/密钥/模型字段及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`，不会覆盖模板中的路由策略键（如 `RETRIEVAL_EMBEDDING_BACKEND`）。
+> **本仓本地联调补充（记录）**：`new/run_post_change_checks.sh` 在 `--docker-profile c|d` 下默认 `--runtime-env-mode none`（不加载本地 runtime 覆盖）；仅在显式传入 `--runtime-env-mode auto|file` 且附加 `--allow-runtime-env-debug` 时，才会加载覆盖文件（优先 `Memory-Palace/.env`，其次 `~/Desktop/clawmemo/nocturne_memory/.env`）。若保持 `--runtime-env-mode none`，注入模式必须同时提供 `--allow-runtime-env-injection` 与 `--runtime-env-file /abs/path/.env`；脚本会先加载该文件，再把允许的环境变量注入 `.env.docker`（不做自动探测，适配 CI secrets 注入）。在 `profile c/d` 的注入模式下，脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`，避免本机 router 缺 embedding/reranker 时误判失败；其余仍注入 API 地址/密钥/模型字段及 `WRITE_GUARD_LLM_ENABLED`、`COMPACT_GIST_LLM_ENABLED`。
 >
 > **当前本地开发约定（避免重复踩坑）**：当本机 router 未部署 embedding/reranker 时，C/D 本地联调使用 `/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env` 提供 embedding/reranker 配置；LLM 相关字段统一使用该文件中的 `gpt-5.2` 口径。推荐命令：`bash new/run_post_change_checks.sh --with-docker --docker-profile c --runtime-env-mode file --runtime-env-file /Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env --allow-runtime-env-debug`（`profile d` 同理）。
 >
-> `runtime-env-mode none + --allow-runtime-env-injection` 适用于“保持 C/D router 策略不变，仅注入地址/密钥/模型字段”的场景；若本地 router 本身没有 embedding/reranker，可预期会出现 `embedding_request_failed` / `embedding_fallback_hash` 的 degraded 信号。
+> `runtime-env-mode none + --allow-runtime-env-injection + --runtime-env-file` 适用于本地 C/D API 联调（脚本会强制 `RETRIEVAL_EMBEDDING_BACKEND=api`）；若要验证“保持 router 策略不变”的发布场景，请使用 `runtime-env-mode none` 且**不要**附加注入参数。
 >
 > **上线口径不变**：面向客户环境时仍以 C/D 模板中的 `router` 作为默认入口；若 router 侧未提供 embedding/reranker/llm，系统按既有降级链路 fallback，不因缺失而直接中断。
 >
@@ -151,17 +151,30 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 >
 > **回切提醒**：本地开发阶段若临时改为 `RETRIEVAL_EMBEDDING_BACKEND=api`，在客户部署前需按目标环境恢复（通常恢复为模板中的 `router` 口径），并重新验证 C/D profile 烟测。
 
-上线前建议固定执行以下回切验收：
+上线前回切 `router` 标准 SOP（固定模板）：
 
 ```bash
 # 以下命令在仓库根目录（clawanti）执行
-# 1) 确认模板仍为 router 默认（不允许被开发联调改写）
+# 0) 变量准备（按你的本地实际路径替换）
+RUNTIME_ENV_FILE=/Users/yangjunjie/Desktop/clawmemo/nocturne_memory/.env
+
+# 1) 可选：本地 C/D API 联调（router 缺 embedding/reranker 时使用）
+bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file "${RUNTIME_ENV_FILE}"
+bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none --allow-runtime-env-injection --runtime-env-file "${RUNTIME_ENV_FILE}"
+
+# 2) 必做：确认模板仍为 router 默认（不允许被开发联调改写）
 bash new/run_post_change_checks.sh --skip-frontend --skip-sse
 
-# 2) 在不加载本地 runtime 覆盖的环境下，复验 C/D 烟测
+# 3) 必做：发布前回切 router 口径复验（不加载本地 runtime 覆盖/不注入）
 bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse --runtime-env-mode none
 bash new/run_post_change_checks.sh --with-docker --docker-profile d --skip-sse --runtime-env-mode none
 ```
+
+结果判定口径：
+
+1. 第 1 步通过，只说明“本地 API 联调链路可用”，不代表发布口径通过。
+2. 第 3 步通过，才代表“router 发布口径通过”。
+3. 若第 3 步在占位 endpoint/key 下失败（常见为 `deployment.docker.smoke`），属于预期 fail-closed；上线前必须替换为客户可用 router/key 后重跑通过。
 
 ### 推荐模型选型
 
@@ -236,7 +249,7 @@ cd <project-root>
 ### 一键脚本做了什么
 
 1. 调用 profile 脚本从模板生成 `.env.docker`（macOS/Linux 使用 `apply_profile.sh`，Windows 使用 `apply_profile.ps1`）
-2. 默认禁用运行时环境注入，避免隐式覆盖模板策略键（仅显式开关注入 API 地址/密钥/模型字段）
+2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调。
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
 4. 检测是否存在历史数据卷（`memory_palace_data` 或 `nocturne_*` 系列），自动复用以保留历史数据
 5. 使用 `docker compose` 构建并启动前后端容器
@@ -411,7 +424,7 @@ bash new/run_post_change_checks.sh --with-docker --docker-profile c --skip-sse -
 rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|COMPACT_GIST_LLM_MODEL" Memory-Palace/.env.docker
 ```
 
-3. 这套 `file` 方式只用于本地联调；上线时仍以客户环境的 `router` 配置为准，缺失模型时按系统 fallback 链路降级。若要专门验证“保持 router 策略不变”的场景，再使用 `runtime-env-mode none + --allow-runtime-env-injection`。
+3. 这套 `file` 方式只用于本地联调；上线时仍以客户环境的 `router` 配置为准，缺失模型时按系统 fallback 链路降级。若要专门验证“保持 router 策略不变”的场景，请使用 `runtime-env-mode none` 且不附加注入参数。
 
 ### 调参提示
 
