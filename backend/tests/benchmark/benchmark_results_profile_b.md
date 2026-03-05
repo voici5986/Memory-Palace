@@ -1,6 +1,6 @@
 # Benchmark Results - profile_b
 
-> generated_at_utc: 2026-03-05T13:11:39+00:00
+> generated_at_utc: 2026-03-05T16:43:16+00:00
 > mode: hybrid
 
 ## Retrieval Quality

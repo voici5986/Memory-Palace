@@ -305,7 +305,9 @@ pytest tests -k "test_search" -q
 3. **确认有记忆内容**：
 
    ```bash
-   curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path="
+   curl -fsS \
+     -H "X-MCP-API-Key: ${MCP_API_KEY}" \
+     "http://127.0.0.1:8000/browse/node?domain=core&path="
    ```
 
 4. **尝试 Sleep Consolidation**（通过 MCP 工具）：

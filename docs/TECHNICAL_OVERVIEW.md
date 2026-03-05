@@ -60,7 +60,7 @@ backend/
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| `GET` | `/browse/node` | 无 | 浏览记忆树（含子节点、面包屑、gist、别名） |
+| `GET` | `/browse/node` | API Key | 浏览记忆树（含子节点、面包屑、gist、别名） |
 | `POST` | `/browse/node` | API Key | 创建记忆节点（含 write_guard） |
 | `PUT` | `/browse/node` | API Key | 更新记忆节点（含 write_guard） |
 | `DELETE` | `/browse/node` | API Key | 删除记忆路径 |
@@ -239,7 +239,7 @@ Docker 端口环境变量：
 ## 9. 安全默认值
 
 - `/maintenance/*`、`/review/*` 所有端点均需 API Key 鉴权。
-- `/browse` 写操作（POST/PUT/DELETE）通过端点级 `Depends(require_maintenance_api_key)` 门控；GET 读取不需要鉴权。
+- `/browse` 读写操作（GET/POST/PUT/DELETE）均通过端点级 `Depends(require_maintenance_api_key)` 门控。
 - `MCP_API_KEY` 为空时默认 **fail-closed**（拒绝请求）。
 - 仅在 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **且** loopback 请求（`127.0.0.1` / `::1` / `localhost`）时可本地放行，且仅限直连 loopback 且无 forwarding headers 的请求。
 - Docker 容器默认以非 root 用户运行：
