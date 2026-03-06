@@ -15,6 +15,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:PortProbeFallbackWarned = $false
+$script:FrontendPortLockDir = $null
+$script:BackendPortLockDir = $null
+$script:DeploymentLockDir = $null
+$script:GeneratedDockerEnvFile = $null
+$script:PreviousDockerEnvFile = $null
 
 function Get-DefaultComposeProjectName {
     $projectSlug = (Split-Path -Leaf $projectRoot).ToLower() -replace '[^a-z0-9]+', '-'
@@ -50,10 +55,58 @@ function Test-PortInUse {
     }
 }
 
+function Try-AcquirePathLock {
+    param([string]$TargetPath)
+
+    $lockDir = "${TargetPath}.lockdir"
+    $ownerFile = Join-Path $lockDir 'owner_pid'
+    $parentDir = Split-Path -Parent $TargetPath
+    if (-not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+
+    try {
+        New-Item -ItemType Directory -Path $lockDir -ErrorAction Stop | Out-Null
+        Set-Content -Path $ownerFile -Value "$PID" -NoNewline
+        return $lockDir
+    }
+    catch {
+    }
+
+    if (Test-Path $ownerFile) {
+        $ownerPid = (Get-Content -Path $ownerFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
+        $ownerProcess = $null
+        if ($ownerPid) {
+            $ownerProcess = Get-Process -Id ([int]$ownerPid) -ErrorAction SilentlyContinue
+        }
+        if (-not $ownerProcess) {
+            Remove-Item -Path $lockDir -Recurse -Force -ErrorAction SilentlyContinue
+            try {
+                New-Item -ItemType Directory -Path $lockDir -ErrorAction Stop | Out-Null
+                Set-Content -Path $ownerFile -Value "$PID" -NoNewline
+                return $lockDir
+            }
+            catch {
+            }
+        }
+    }
+
+    return $null
+}
+
+function Release-PathLock {
+    param([string]$LockDir)
+
+    if (-not [string]::IsNullOrWhiteSpace($LockDir)) {
+        Remove-Item -Path $LockDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Resolve-FreePort {
     param(
         [int]$StartPort,
-        [int]$MaxScan = 200
+        [int]$MaxScan = 200,
+        [Nullable[int]]$ExcludePort = $null
     )
 
     for ($i = 0; $i -le $MaxScan; $i++) {
@@ -61,8 +114,20 @@ function Resolve-FreePort {
         if ($candidate -gt 65535) {
             break
         }
+        if ($ExcludePort.HasValue -and $candidate -eq $ExcludePort.Value) {
+            continue
+        }
         if (-not (Test-PortInUse -Port $candidate)) {
-            return $candidate
+            $lockDir = Try-AcquirePathLock -TargetPath (Join-Path ([System.IO.Path]::GetTempPath()) "memory-palace-port-locks/port-$candidate")
+            if ($lockDir) {
+                if (-not (Test-PortInUse -Port $candidate)) {
+                    return @{
+                        Port = $candidate
+                        LockDir = $lockDir
+                    }
+                }
+                Release-PathLock -LockDir $lockDir
+            }
         }
     }
 
@@ -307,21 +372,27 @@ function Assert-ProfileExternalSettingsReady {
 function Invoke-Compose {
     param(
         [string[]]$ComposeArgs,
-        [string]$ComposeProjectName = ''
+        [string]$ComposeProjectName = '',
+        [string]$EnvFile = ''
     )
 
     $composeOutput = @()
     $previousComposeProjectName = $env:COMPOSE_PROJECT_NAME
+    $effectiveComposeArgs = @()
     try {
         if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
             $env:COMPOSE_PROJECT_NAME = $ComposeProjectName
         }
+        if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
+            $effectiveComposeArgs += @('--env-file', $EnvFile)
+        }
+        $effectiveComposeArgs += $ComposeArgs
 
         if ($script:UseComposePlugin) {
-            $composeOutput = & docker compose @ComposeArgs 2>&1
+            $composeOutput = & docker compose @effectiveComposeArgs 2>&1
         }
         else {
-            $composeOutput = & docker-compose @ComposeArgs 2>&1
+            $composeOutput = & docker-compose @effectiveComposeArgs 2>&1
         }
     }
     finally {
@@ -339,7 +410,7 @@ function Invoke-Compose {
 
     if ($LASTEXITCODE -ne 0) {
         $detail = ($composeOutput | Out-String).Trim()
-        throw "docker compose command failed: $($ComposeArgs -join ' ')`n$detail"
+        throw "docker compose command failed: $($effectiveComposeArgs -join ' ')`n$detail"
     }
 }
 
@@ -374,14 +445,15 @@ function Invoke-ComposeWithRetry {
     param(
         [string[]]$ComposeArgs,
         [string]$ComposeProjectName = '',
-        [int]$MaxAttempts = 3
+        [int]$MaxAttempts = 3,
+        [string]$EnvFile = ''
     )
 
     $attempt = 0
     while ($attempt -lt $MaxAttempts) {
         $attempt += 1
         try {
-            Invoke-Compose -ComposeArgs $ComposeArgs -ComposeProjectName $ComposeProjectName
+            Invoke-Compose -ComposeArgs $ComposeArgs -ComposeProjectName $ComposeProjectName -EnvFile $EnvFile
             return
         }
         catch {
@@ -395,7 +467,7 @@ function Invoke-ComposeWithRetry {
             Write-Warning "[compose-retry] transient compose up failure ($attempt/$MaxAttempts), retrying in ${sleepSeconds}s."
             Start-Sleep -Seconds $sleepSeconds
             try {
-                Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $ComposeProjectName
+                Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $ComposeProjectName -EnvFile $EnvFile
             }
             catch {
                 # Keep retry path best-effort; next attempt will surface a hard failure.
@@ -456,7 +528,19 @@ if (-not $script:UseComposePlugin -and -not (Get-Command docker-compose -ErrorAc
     exit 1
 }
 
-$envFile = Join-Path $projectRoot '.env.docker'
+$script:DeploymentLockDir = Try-AcquirePathLock -TargetPath (Join-Path ([System.IO.Path]::GetTempPath()) "memory-palace-deploy-locks/$(Get-DefaultComposeProjectName)")
+if (-not $script:DeploymentLockDir) {
+    throw "[deploy-lock] another docker_one_click deployment is already running for this checkout; wait for it to finish before retrying."
+}
+
+$script:PreviousDockerEnvFile = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_DOCKER_ENV_FILE')
+$envFile = $script:PreviousDockerEnvFile
+if ([string]::IsNullOrWhiteSpace($envFile)) {
+    $envFile = Join-Path ([System.IO.Path]::GetTempPath()) ("memory-palace-docker-env-$profileLower-$([System.Guid]::NewGuid().ToString('N')).env")
+    $script:GeneratedDockerEnvFile = $envFile
+}
+$env:MEMORY_PALACE_DOCKER_ENV_FILE = $envFile
+Write-Host "[env-file] using $envFile"
 & (Join-Path $scriptDir 'apply_profile.ps1') -Platform docker -Profile $profileLower -Target $envFile
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
@@ -477,24 +561,18 @@ try {
     }
 
     if (-not $NoAutoPort) {
-        $resolvedFrontendPort = Resolve-FreePort -StartPort $FrontendPort
-        $resolvedBackendPort = Resolve-FreePort -StartPort $BackendPort
+        $frontendReservation = Resolve-FreePort -StartPort $FrontendPort
+        $script:FrontendPortLockDir = $frontendReservation.LockDir
+        $resolvedFrontendPort = [int]$frontendReservation.Port
+        $backendReservation = Resolve-FreePort -StartPort $BackendPort -ExcludePort $resolvedFrontendPort
+        $script:BackendPortLockDir = $backendReservation.LockDir
+        $resolvedBackendPort = [int]$backendReservation.Port
 
         if ($resolvedFrontendPort -ne $FrontendPort) {
             Write-Host "[port-adjust] frontend $FrontendPort is occupied, switched to $resolvedFrontendPort"
         }
         if ($resolvedBackendPort -ne $BackendPort) {
             Write-Host "[port-adjust] backend $BackendPort is occupied, switched to $resolvedBackendPort"
-        }
-        if ($resolvedFrontendPort -eq $resolvedBackendPort) {
-            $nextBackendPort = $resolvedBackendPort + 1
-            try {
-                $resolvedBackendPort = Resolve-FreePort -StartPort $nextBackendPort
-            }
-            catch {
-                throw "Failed to auto-resolve free backend port near $nextBackendPort. Try -NoAutoPort with explicit values. detail=$($_.Exception.Message)"
-            }
-            Write-Host "[port-adjust] backend reassigned to avoid collision with frontend: $resolvedBackendPort"
         }
 
         $FrontendPort = $resolvedFrontendPort
@@ -510,7 +588,7 @@ try {
     $env:NOCTURNE_DATA_VOLUME = "$dataVolume"
 
     try {
-        Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $composeProjectName
+        Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $composeProjectName -EnvFile $envFile
     }
     catch {
         throw "[compose-down] pre-cleanup failed; aborting to match fail-closed deployment behavior. detail=$($_.Exception.Message)"
@@ -520,9 +598,21 @@ try {
     if (-not $NoBuild) {
         $composeUpArgs = @('-f', 'docker-compose.yml', 'up', '-d', '--build', '--force-recreate', '--remove-orphans')
     }
-    Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs -ComposeProjectName $composeProjectName -MaxAttempts 3
+    Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs -ComposeProjectName $composeProjectName -MaxAttempts 3 -EnvFile $envFile
 }
 finally {
+    Release-PathLock -LockDir $script:DeploymentLockDir
+    Release-PathLock -LockDir $script:FrontendPortLockDir
+    Release-PathLock -LockDir $script:BackendPortLockDir
+    if ([string]::IsNullOrWhiteSpace($script:PreviousDockerEnvFile)) {
+        Remove-Item Env:MEMORY_PALACE_DOCKER_ENV_FILE -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:MEMORY_PALACE_DOCKER_ENV_FILE = $script:PreviousDockerEnvFile
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:GeneratedDockerEnvFile) -and (Test-Path $script:GeneratedDockerEnvFile)) {
+        Remove-Item $script:GeneratedDockerEnvFile -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }
 

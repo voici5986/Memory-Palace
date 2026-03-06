@@ -23,6 +23,7 @@ import os
 import random
 import shutil
 import sys
+import tempfile
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -186,7 +187,13 @@ def resolve_real_profile_workdir(workdir: Optional[Path] = None) -> Path:
     env_value = str(os.getenv(REAL_PROFILE_WORKDIR_ENV, "")).strip()
     if env_value:
         return Path(env_value).expanduser()
-    return REAL_PROFILE_WORKDIR
+    REAL_PROFILE_WORKDIR.mkdir(parents=True, exist_ok=True)
+    return Path(
+        tempfile.mkdtemp(
+            prefix="run-",
+            dir=str(REAL_PROFILE_WORKDIR),
+        )
+    )
 
 
 def _slugify(value: str) -> str:

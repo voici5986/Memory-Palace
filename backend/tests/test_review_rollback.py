@@ -234,7 +234,7 @@ def test_rollback_endpoint_returns_5xx_when_internal_error_occurs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _boom(_data: dict, **_kwargs) -> dict:
-        raise RuntimeError("boom")
+        raise RuntimeError("boom-secret-detail")
 
     monkeypatch.setattr(review_api, "get_snapshot_manager", lambda: _StubSnapshotManager())
     monkeypatch.setattr(review_api, "_rollback_path", _boom)
@@ -252,7 +252,67 @@ def test_rollback_endpoint_returns_5xx_when_internal_error_occurs(
         )
 
     assert response.status_code == 500
-    assert "Rollback failed: boom" in str(response.json().get("detail"))
+    assert response.json().get("detail") == {
+        "error": "rollback_failed",
+        "reason": "internal_error",
+        "operation": "rollback_resource",
+    }
+
+
+def test_list_deprecated_endpoint_hides_internal_error_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingClient:
+        async def get_deprecated_memories(self):
+            raise RuntimeError("deprecated-secret-detail")
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: _FailingClient())
+    monkeypatch.setenv("MCP_API_KEY", "review-test-secret")
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+
+    app = FastAPI()
+    app.include_router(review_api.router)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/review/deprecated",
+            headers={"X-MCP-API-Key": "review-test-secret"},
+        )
+
+    assert response.status_code == 500
+    assert response.json().get("detail") == {
+        "error": "list_deprecated_failed",
+        "reason": "internal_error",
+        "operation": "list_deprecated_memories",
+    }
+
+
+def test_compare_text_hides_internal_error_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(_text_a: str, _text_b: str):
+        raise RuntimeError("diff-secret-detail")
+
+    monkeypatch.setattr(review_api, "get_text_diff", _boom)
+    monkeypatch.setenv("MCP_API_KEY", "review-test-secret")
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+
+    app = FastAPI()
+    app.include_router(review_api.router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/review/diff",
+            json={"text_a": "old", "text_b": "new"},
+            headers={"X-MCP-API-Key": "review-test-secret"},
+        )
+
+    assert response.status_code == 500
+    assert response.json().get("detail") == {
+        "error": "compare_text_failed",
+        "reason": "internal_error",
+        "operation": "compare_text",
+    }
 
 
 def test_diff_endpoint_rejects_invalid_session_id_with_400(

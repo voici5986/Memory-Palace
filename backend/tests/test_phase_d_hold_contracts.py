@@ -165,6 +165,28 @@ def test_phase_d_hold_default_flags_off_in_env_and_profiles() -> None:
             )
 
 
+def test_docker_env_file_is_parameterized_for_isolated_runs() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+
+    compose_text = (project_root / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}" in compose_text
+
+    bash_smoke_text = (project_root.parent / "new" / "run_post_change_checks.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "MEMORY_PALACE_DOCKER_ENV_FILE" in bash_smoke_text
+
+    bash_deploy_text = (project_root / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "MEMORY_PALACE_DOCKER_ENV_FILE" in bash_deploy_text
+
+    ps_deploy_text = (project_root / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "MEMORY_PALACE_DOCKER_ENV_FILE" in ps_deploy_text
+
+
 @pytest.mark.asyncio
 async def test_phase_d_hold_search_and_read_do_not_create_new_memory_records(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

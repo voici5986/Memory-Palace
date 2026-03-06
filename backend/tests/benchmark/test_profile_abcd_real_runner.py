@@ -10,6 +10,7 @@ if str(BENCHMARK_DIR) not in sys.path:
 from helpers.profile_abcd_real_runner import (  # noqa: E402
     DatasetBundle,
     QueryCase,
+    REAL_PROFILE_WORKDIR,
     _evaluate_dataset,
     build_phase6_gate,
     compute_percentile,
@@ -128,6 +129,21 @@ def test_resolve_real_profile_workdir_prefers_explicit_override(
     )
     explicit = tmp_path / "explicit-cache"
     assert resolve_real_profile_workdir(explicit) == explicit
+
+
+def test_resolve_real_profile_workdir_allocates_unique_run_dir_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BENCHMARK_REAL_PROFILE_WORKDIR", raising=False)
+
+    first = resolve_real_profile_workdir()
+    second = resolve_real_profile_workdir()
+
+    assert first != second
+    assert first.parent == REAL_PROFILE_WORKDIR
+    assert second.parent == REAL_PROFILE_WORKDIR
+    assert first.name.startswith("run-")
+    assert second.name.startswith("run-")
 
 
 class _ProbeSearchClient:

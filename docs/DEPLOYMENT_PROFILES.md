@@ -238,6 +238,10 @@ cd <project-root>
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
+> `apply_profile.ps1` 现已对 **所有重复 env key** 做“保留最后值”的统一去重，不再只处理 `DATABASE_URL`。
+>
+> 原生 Windows / `pwsh` 补验证清单见：`docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`
+
 ### 部署完成后的访问地址
 
 | 服务 | 宿主机默认端口 | 容器内部端口 | 访问方式 |
@@ -285,6 +289,8 @@ bash scripts/apply_profile.sh macos c
 ```
 
 > 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。
+>
+> `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
 
 ### 第二步：启动后端
 

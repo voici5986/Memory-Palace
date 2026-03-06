@@ -69,6 +69,17 @@ def _validate_session_id_or_400(session_id: str) -> str:
     return value
 
 
+def _raise_review_internal_error(*, operation: str, error: str, exc: Exception) -> None:
+    raise HTTPException(
+        status_code=500,
+        detail={
+            "error": error,
+            "reason": "internal_error",
+            "operation": operation,
+        },
+    ) from exc
+
+
 # ========== Session & Snapshot Endpoints ==========
 
 @router.get("/sessions", response_model=List[SessionInfo])
@@ -1034,7 +1045,11 @@ async def rollback_resource(session_id: str, resource_id: str, request: Rollback
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}") from e
+        _raise_review_internal_error(
+            operation="rollback_resource",
+            error="rollback_failed",
+            exc=e,
+        )
 
 
 def _build_rollback_message(resource_id: str, operation_type: str, result: dict) -> str:
@@ -1113,7 +1128,11 @@ async def list_deprecated_memories():
             "memories": memories
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_review_internal_error(
+            operation="list_deprecated_memories",
+            error="list_deprecated_failed",
+            exc=e,
+        )
 
 
 @router.delete("/memories/{memory_id}")
@@ -1144,7 +1163,11 @@ async def permanently_delete_memory(memory_id: int):
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_review_internal_error(
+            operation="permanently_delete_memory",
+            error="delete_deprecated_failed",
+            exc=e,
+        )
 
 
 # ========== Utility Endpoints ==========
@@ -1171,4 +1194,8 @@ async def compare_text(request: DiffRequest):
             summary=summary
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _raise_review_internal_error(
+            operation="compare_text",
+            error="compare_text_failed",
+            exc=e,
+        )

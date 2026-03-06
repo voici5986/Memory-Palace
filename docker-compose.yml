@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile.backend
     env_file:
-      - ./.env.docker
+      - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     volumes:
       - memory_palace_data:/app/data
     ports:

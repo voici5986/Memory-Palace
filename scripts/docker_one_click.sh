@@ -11,6 +11,11 @@ backend_port="${MEMORY_PALACE_BACKEND_PORT:-${NOCTURNE_BACKEND_PORT:-18000}}"
 auto_port=1
 allow_runtime_env_injection=0
 port_probe_fallback_warned=0
+FRONTEND_PORT_LOCK=""
+BACKEND_PORT_LOCK=""
+DEPLOYMENT_LOCK=""
+TEMP_DOCKER_ENV_FILE=""
+TEMP_DOCKER_ENV_FILE_AUTO=0
 
 default_compose_project_name() {
   local project_slug path_checksum
@@ -39,6 +44,42 @@ is_positive_int() {
   [[ "$1" =~ ^[0-9]+$ ]] && [[ "$1" -ge 1 ]] && [[ "$1" -le 65535 ]]
 }
 
+try_acquire_path_lock() {
+  local target_path="$1"
+  local lock_dir="${target_path}.lockdir"
+  local owner_file="${lock_dir}/owner_pid"
+  local owner_pid=""
+
+  mkdir -p "$(dirname "${target_path}")" >/dev/null 2>&1 || true
+
+  if mkdir "${lock_dir}" 2>/dev/null; then
+    printf '%s\n' "${BASHPID:-$$}" > "${owner_file}" 2>/dev/null || true
+    echo "${lock_dir}"
+    return 0
+  fi
+
+  if [[ -f "${owner_file}" ]]; then
+    owner_pid="$(cat "${owner_file}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${owner_pid}" ]] && ! kill -0 "${owner_pid}" 2>/dev/null; then
+    rm -rf "${lock_dir}" >/dev/null 2>&1 || true
+    if mkdir "${lock_dir}" 2>/dev/null; then
+      printf '%s\n' "${BASHPID:-$$}" > "${owner_file}" 2>/dev/null || true
+      echo "${lock_dir}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+release_path_lock() {
+  local lock_dir="$1"
+  if [[ -n "${lock_dir}" ]]; then
+    rm -rf "${lock_dir}" >/dev/null 2>&1 || true
+  fi
+}
+
 port_in_use() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -59,16 +100,28 @@ port_in_use() {
 find_free_port() {
   local start_port="$1"
   local max_scan="${2:-200}"
+  local exclude_port="${3:-}"
   local current="$start_port"
   local i
+  local lock_dir=""
 
   for ((i = 0; i <= max_scan; i++)); do
     if [[ "${current}" -gt 65535 ]]; then
       break
     fi
+    if [[ -n "${exclude_port}" && "${current}" -eq "${exclude_port}" ]]; then
+      current=$((current + 1))
+      continue
+    fi
     if ! port_in_use "${current}"; then
-      echo "${current}"
-      return 0
+      lock_dir="$(try_acquire_path_lock "${TMPDIR:-/tmp}/memory-palace-port-locks/port-${current}" || true)"
+      if [[ -n "${lock_dir}" ]]; then
+        if ! port_in_use "${current}"; then
+          printf '%s %s\n' "${current}" "${lock_dir}"
+          return 0
+        fi
+        release_path_lock "${lock_dir}"
+      fi
     fi
     current=$((current + 1))
   done
@@ -76,6 +129,17 @@ find_free_port() {
   echo "" >&2
   return 1
 }
+
+cleanup_runtime_state() {
+  release_path_lock "${FRONTEND_PORT_LOCK}"
+  release_path_lock "${BACKEND_PORT_LOCK}"
+  release_path_lock "${DEPLOYMENT_LOCK}"
+  if [[ "${TEMP_DOCKER_ENV_FILE_AUTO}" -eq 1 && -n "${TEMP_DOCKER_ENV_FILE}" ]]; then
+    rm -f "${TEMP_DOCKER_ENV_FILE}" >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup_runtime_state EXIT
 
 resolve_data_volume() {
   local explicit_volume="${MEMORY_PALACE_DATA_VOLUME:-${NOCTURNE_DATA_VOLUME:-}}"
@@ -356,7 +420,23 @@ else
   exit 1
 fi
 
-env_file="${PROJECT_ROOT}/.env.docker"
+DEPLOYMENT_LOCK="$(
+  try_acquire_path_lock "${TMPDIR:-/tmp}/memory-palace-deploy-locks/$(default_compose_project_name)" || true
+)"
+if [[ -z "${DEPLOYMENT_LOCK}" ]]; then
+  echo "[deploy-lock] another docker_one_click deployment is already running for this checkout; wait for it to finish before retrying." >&2
+  exit 1
+fi
+
+env_file="${MEMORY_PALACE_DOCKER_ENV_FILE:-}"
+if [[ -z "${env_file}" ]]; then
+  env_file="$(mktemp "${TMPDIR:-/tmp}/memory-palace-docker-env-${profile}-XXXXXX")"
+  TEMP_DOCKER_ENV_FILE="${env_file}"
+  TEMP_DOCKER_ENV_FILE_AUTO=1
+fi
+chmod 600 "${env_file}" >/dev/null 2>&1 || true
+export MEMORY_PALACE_DOCKER_ENV_FILE="${env_file}"
+echo "[env-file] using ${env_file}"
 bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
 if [[ "${allow_runtime_env_injection}" -eq 1 ]]; then
   apply_profile_runtime_overrides "${env_file}" "${profile}"
@@ -368,29 +448,22 @@ assert_profile_external_settings_ready "${env_file}" "${profile}"
 cd "${PROJECT_ROOT}"
 
 if [[ ${auto_port} -eq 1 ]]; then
-  if ! resolved_frontend_port="$(find_free_port "${frontend_port}")"; then
+  if ! frontend_reservation="$(find_free_port "${frontend_port}")"; then
     echo "Failed to auto-resolve free frontend port near ${frontend_port}. Try --no-auto-port with explicit values." >&2
     exit 1
   fi
-  if ! resolved_backend_port="$(find_free_port "${backend_port}")"; then
+  read -r resolved_frontend_port FRONTEND_PORT_LOCK <<< "${frontend_reservation}"
+  if ! backend_reservation="$(find_free_port "${backend_port}" 200 "${resolved_frontend_port}")"; then
     echo "Failed to auto-resolve free backend port near ${backend_port}. Try --no-auto-port with explicit values." >&2
     exit 1
   fi
+  read -r resolved_backend_port BACKEND_PORT_LOCK <<< "${backend_reservation}"
 
   if [[ "${resolved_frontend_port}" != "${frontend_port}" ]]; then
     echo "[port-adjust] frontend ${frontend_port} is occupied, switched to ${resolved_frontend_port}"
   fi
   if [[ "${resolved_backend_port}" != "${backend_port}" ]]; then
     echo "[port-adjust] backend ${backend_port} is occupied, switched to ${resolved_backend_port}"
-  fi
-  if [[ "${resolved_frontend_port}" == "${resolved_backend_port}" ]]; then
-    next_backend_port="$((resolved_backend_port + 1))"
-    resolved_backend_port="$(find_free_port "${next_backend_port}" || true)"
-    if [[ -z "${resolved_backend_port}" ]]; then
-      echo "Failed to auto-resolve free backend port near ${next_backend_port}. Try --no-auto-port with explicit values." >&2
-      exit 1
-    fi
-    echo "[port-adjust] backend reassigned to avoid collision with frontend: ${resolved_backend_port}"
   fi
 
   frontend_port="${resolved_frontend_port}"
@@ -399,9 +472,13 @@ fi
 
 data_volume="$(resolve_data_volume)"
 compose_project_name="${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}"
+compose_env_file_args=()
+if [[ -n "${env_file}" ]]; then
+  compose_env_file_args=(--env-file "${env_file}")
+fi
 
 # Force recreate to avoid stale network attachment causing frontend->backend 502.
-if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" -f docker-compose.yml down --remove-orphans >/dev/null 2>&1; then
+if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml down --remove-orphans >/dev/null 2>&1; then
   echo "[compose-down] pre-cleanup failed; aborting to match fail-closed deployment behavior." >&2
   exit 1
 fi
@@ -414,7 +491,7 @@ if [[ ${no_build} -eq 1 ]]; then
   NOCTURNE_FRONTEND_PORT="${frontend_port}" \
   NOCTURNE_BACKEND_PORT="${backend_port}" \
   NOCTURNE_DATA_VOLUME="${data_volume}" \
-  "${compose_cmd[@]}" -f docker-compose.yml up -d --force-recreate --remove-orphans
+  "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --force-recreate --remove-orphans
 else
   COMPOSE_PROJECT_NAME="${compose_project_name}" \
   MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
@@ -423,7 +500,7 @@ else
   NOCTURNE_FRONTEND_PORT="${frontend_port}" \
   NOCTURNE_BACKEND_PORT="${backend_port}" \
   NOCTURNE_DATA_VOLUME="${data_volume}" \
-  "${compose_cmd[@]}" -f docker-compose.yml up -d --build --force-recreate --remove-orphans
+  "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --force-recreate --remove-orphans
 fi
 
 echo ""

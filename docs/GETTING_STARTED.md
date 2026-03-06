@@ -81,6 +81,8 @@ bash scripts/apply_profile.sh macos b
 ```
 
 > apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS 平台还会自动检测并填充 `DATABASE_URL`。
+>
+> `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；如需补做原生 Windows / `pwsh` 验证，可参考 `docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`。
 
 #### 关键配置项说明
 
