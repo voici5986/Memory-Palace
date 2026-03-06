@@ -426,6 +426,12 @@ rg -n "RETRIEVAL_EMBEDDING_MODEL|RETRIEVAL_RERANKER_MODEL|WRITE_GUARD_LLM_MODEL|
 
 3. 这套 `file` 方式只用于本地联调；上线时仍以客户环境的 `router` 配置为准，缺失模型时按系统 fallback 链路降级。若要专门验证“保持 router 策略不变”的场景，请使用 `runtime-env-mode none` 且不附加注入参数。
 
+### PowerShell / Windows 专项验证清单（2026-03-06）
+
+- 本轮已修复 `apply_profile` 只去重 `DATABASE_URL` 的问题；`scripts/apply_profile.sh` 与 `scripts/apply_profile.ps1` 现在都会对重复 env key 做统一去重。
+- 本机无原生 `pwsh` 时，可先参考 `pwsh-in-docker` 等效 smoke；若要形成最终 Windows 交付证据，仍建议在原生 Windows / 原生 `pwsh` 环境补跑一次专项验证。
+- 详细清单见：`docs/improvement/pwsh_native_validation_checklist_2026-03-06.md`
+
 ### 调参提示
 
 1. **`RETRIEVAL_RERANKER_WEIGHT`**：过高会过度依赖重排序模型，建议以 `0.05` 步长调试

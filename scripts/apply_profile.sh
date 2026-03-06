@@ -74,12 +74,16 @@ resolve_windows_db_path() {
   printf '%s\n' 'C:/memory_palace/demo.db'
 }
 
-dedupe_database_url() {
-  local database_url_value
-  database_url_value="$(awk -F= '$1 == "DATABASE_URL" { value = substr($0, length($1) + 2) } END { print value }' "${target_file}")"
-  if [[ -n "${database_url_value}" ]]; then
-    set_env_value "${target_file}" "DATABASE_URL" "${database_url_value}"
-  fi
+dedupe_env_keys() {
+  local file_path="$1"
+  local key value
+  while IFS= read -r key; do
+    [[ -n "${key}" ]] || continue
+    value="$(awk -F= -v key="${key}" '$1 == key { value = substr($0, length($1) + 2) } END { print value }' "${file_path}")"
+    set_env_value "${file_path}" "${key}" "${value}"
+  done < <(
+    awk -F= '/^[A-Z0-9_]+=/{ count[$1]++ } END { for (key in count) if (count[key] > 1) print key }' "${file_path}" | sort
+  )
 }
 
 if [[ ! -f "${base_env}" ]]; then
@@ -116,6 +120,6 @@ elif [[ "${platform}" == "windows" ]]; then
   fi
 fi
 
-dedupe_database_url
+dedupe_env_keys "${target_file}"
 
 echo "Generated ${target_file} from ${override_env}"

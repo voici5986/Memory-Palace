@@ -28,44 +28,58 @@ function Set-EnvValueInFile {
 
     $lines = @()
     if (Test-Path $FilePath) {
-        $lines = Get-Content -Path $FilePath
+        $lines = @(Get-Content -Path $FilePath)
     }
 
     $escaped = [regex]::Escape($Key)
     $updated = $false
-    $newLines = foreach ($line in $lines) {
+    $newLines = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($line in $lines) {
         if ($line -match "^${escaped}=") {
             if (-not $updated) {
                 $updated = $true
-                "$Key=$Value"
+                [void]$newLines.Add("$Key=$Value")
             }
+            continue
         }
-        else {
-            $line
-        }
+
+        [void]$newLines.Add([string]$line)
     }
 
     if (-not $updated) {
-        $newLines += "$Key=$Value"
+        [void]$newLines.Add("$Key=$Value")
     }
 
     Set-Content -Path $FilePath -Value $newLines
 }
 
-function Dedupe-DatabaseUrl {
+function Dedupe-EnvKeys {
     param([string]$FilePath)
 
     if (-not (Test-Path $FilePath)) {
         return
     }
 
-    $lastLine = Get-Content -Path $FilePath | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -Last 1
-    if (-not $lastLine) {
-        return
-    }
+    $keys = Get-Content -Path $FilePath |
+        Where-Object { $_ -match '^[A-Z0-9_]+=' } |
+        ForEach-Object { ($_ -split '=', 2)[0] } |
+        Group-Object |
+        Where-Object { $_.Count -gt 1 } |
+        Sort-Object Name
 
-    $value = $lastLine -replace '^DATABASE_URL=', ''
-    Set-EnvValueInFile -FilePath $FilePath -Key 'DATABASE_URL' -Value $value
+    foreach ($group in $keys) {
+        $escaped = [regex]::Escape($group.Name)
+        $lastLine = Get-Content -Path $FilePath |
+            Where-Object { $_ -match "^${escaped}=" } |
+            Select-Object -Last 1
+        if (-not $lastLine) {
+            continue
+        }
+
+        $value = ($lastLine -split '=', 2)[1]
+        Set-EnvValueInFile -FilePath $FilePath -Key $group.Name -Value $value
+    }
 }
 
 if (-not (Test-Path $baseEnv)) {
@@ -116,6 +130,6 @@ if ($Platform -eq 'windows') {
     }
 }
 
-Dedupe-DatabaseUrl -FilePath $Target
+Dedupe-EnvKeys -FilePath $Target
 
 Write-Host "Generated $Target from $overrideEnv"

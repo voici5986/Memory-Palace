@@ -78,12 +78,13 @@ function Layout() {
       {/* Main Area */}
       <div className="relative z-10 flex-1 min-h-0 overflow-hidden px-6 pb-6 pt-2">
         <div className="h-full w-full max-w-7xl mx-auto">
-             <Routes>
+            <Routes>
               <Route path="/" element={<Navigate to="/memory" replace />} />
               <Route path="/review" element={<ReviewPage />} />
               <Route path="/memory" element={<MemoryBrowser />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/observability" element={<ObservabilityPage />} />
+              <Route path="*" element={<Navigate to="/memory" replace />} />
             </Routes>
         </div>
       </div>
