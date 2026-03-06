@@ -35,5 +35,6 @@
 
 | 文档 | 说明 |
 |---|---|
+| [changelog/release_summary_vs_old_project_2026-03-06.md](changelog/release_summary_vs_old_project_2026-03-06.md) | 面向发布的旧项目 vs 当前版本对比摘要（基于真实代码、真实测试与现有文档） |
 | [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) | 开源发布前的安全检查、敏感信息排查与发布前清单 |
 | [GETTING_STARTED.md](GETTING_STARTED.md) | 发布前本地开发与 Docker 最小自测流程 |
