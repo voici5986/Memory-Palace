@@ -33,7 +33,7 @@
 
 **Memory Palace（记忆宫殿）** 是一套专为 AI Agent 打造的长期记忆操作系统。它为大语言模型提供 **持久化、可检索、可审计** 的外部记忆能力——让你的 Agent 不再"每次对话都从零开始"。
 
-通过统一的 [MCP（模型上下文协议）](https://modelcontextprotocol.io/) 接口，Memory Palace 已提供 **Codex、Claude Code、Gemini CLI、Cursor、Antigravity** 的接入方案。当前已验证范围与已知边界见 `docs/skills/SKILLS_QUICKSTART.md`。
+通过统一的 [MCP（模型上下文协议）](https://modelcontextprotocol.io/) 接口，Memory Palace 已提供 **Codex、Claude Code、Gemini CLI、OpenCode** 的接入方案；`Cursor` 与 `Antigravity` 仍保留明确边界说明。当前已验证范围与已知边界见 `docs/skills/SKILLS_QUICKSTART.md`。
 
 ### 为什么选择 Memory Palace？
 
@@ -599,17 +599,17 @@ python scripts/sync_memory_palace_skill.py
 python scripts/sync_memory_palace_skill.py --check
 python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
-python scripts/install_skill.py --targets claude,codex,opencode,cursor,agent --scope workspace --force
-python scripts/install_skill.py --targets gemini --scope user --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
 ```
 
 其中 `Gemini CLI` 当前建议优先用 `user` 级安装：
 
 ```bash
-python scripts/install_skill.py --targets gemini --scope user --force
+python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
 ```
 
-当前 canonical 与镜像目录：
+canonical 真源，以及你执行同步/安装命令后在本地会看到的路径：
 
 - Canonical：`<repo-root>/docs/skills/memory-palace/`
 - Claude Code：`<repo-root>/.claude/skills/memory-palace/`
@@ -617,6 +617,8 @@ python scripts/install_skill.py --targets gemini --scope user --force
 - OpenCode：`<repo-root>/.opencode/skills/memory-palace/`
 - Cursor：`<repo-root>/.cursor/skills/memory-palace/`
 - 兼容 agent CLI：`<repo-root>/.agent/skills/memory-palace/`
+
+这些隐藏目录都属于**本地生成的 mirror**，不是公开仓库里的源文件。它们已被 git 忽略，所以你从 GitHub 新 clone 下来的仓库里，通常只会先看到 `docs/skills/memory-palace/` 这份 canonical bundle；需要先运行上面的同步/安装命令，才会在你自己的机器上生成对应镜像。
 
 这套 skill 已按当前真实代码口径收敛：
 

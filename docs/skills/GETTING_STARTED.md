@@ -35,7 +35,13 @@ docs/skills/memory-palace/
 - `variants/`
 - `agents/openai.yaml`
 
-仓库里的 `.claude/.codex/.gemini/.opencode/...` 都是 **mirror**。
+你运行同步 / 安装命令后，本地工作区里出现的 `.claude/.codex/.gemini/.opencode/...` 都是 **mirror**。
+
+要特别注意：
+
+- 这些 hidden mirror / 配置文件默认被 `.gitignore` 排除
+- 公开 GitHub 仓库里通常只带 `docs/skills/memory-palace/` 这份 canonical bundle
+- 所以 clone 下来后，如果你还没跑下面的命令，看不到 `.claude` / `.codex` / `.gemini` 这些本地镜像，属于正常现象
 
 这套设计已经对齐 `Anthropic skill-creator` 的核心要求：
 
@@ -89,7 +95,7 @@ python scripts/install_skill.py \
 这一步会明确做两件事：
 
 1. 继续保持 repo-local skill mirrors
-2. 给 **当前仓库** 落两个直连入口：
+2. 给 **你当前工作区本地** 落两个直连入口：
    - `Claude Code` → `.mcp.json`
    - `Gemini CLI` → `.gemini/settings.json`
 
@@ -132,6 +138,8 @@ python scripts/install_skill.py \
 ---
 
 ## 5. 四个客户端现在怎么理解
+
+下面这些结论默认你已经在当前工作区跑完了上面的 `sync/install` 命令。刚 clone 下来的公开仓库，不会自动带上这些隐藏目录和本地 MCP 配置。
 
 ### Claude Code
 
@@ -223,6 +231,8 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 这两份报告默认建议留在你自己的机器上，不把它们当成主入口文档。
+
+它们默认也被 `.gitignore` 排除，所以你从公开 GitHub 仓库 fresh clone 下来时，看不到这两份文件也属于正常情况。
 
 ---
 

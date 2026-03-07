@@ -46,7 +46,15 @@ scripts/install_skill.py
 
 - **验证层还不是 full eval / benchmark 套件**
 
-现在仓库里已经有：
+当前仓库里已经整理好：
+
+- `docs/skills/memory-palace/` 这份 canonical bundle
+- `scripts/sync_memory_palace_skill.py`
+- `scripts/install_skill.py`
+
+而 `.claude/.codex/.opencode/.cursor/.agent/.gemini/.mcp.json` 这类 hidden mirror / workspace 配置，都是你在本地执行同步或安装后才生成的，不属于公开 GitHub 仓库默认自带内容。
+
+当前工程里已经有这些验证入口：
 
 - trigger smoke
 - mirror drift check
@@ -76,7 +84,7 @@ scripts/install_skill.py
 现在的设计目标是：
 
 - **可直接分发**：canonical bundle 固定落在 `docs/skills/memory-palace/`
-- **可跨 CLI 使用**：通过同步脚本分发到 `.claude/.codex/.opencode/.cursor/.agent`；Gemini 在当前仓库可直接用项目级入口，跨仓时仍优先 `user-scope install`
+- **可跨 CLI 使用**：通过同步脚本在本地生成 `.claude/.codex/.opencode/.cursor/.agent` 等 mirrors；Gemini 在当前工作区执行 workspace 安装后可用项目级入口，跨仓时仍优先 `user-scope install`
 - **可验证**：通过 `sync_memory_palace_skill.py --check` 与仓内门禁持续校验
 - **可迭代**：先优化 `description` 的触发质量，再优化 `SKILL.md` 正文与 reference
 
@@ -88,7 +96,7 @@ Gemini 端当前有一个已知边界：
 
 因此当前推荐分两层：
 
-- **当前仓库里优先尝试**：先走项目级 `.gemini/skills/...` + `.gemini/settings.json`
+- **当前工作区里优先尝试**：先运行 workspace 安装，再走项目级 `.gemini/skills/...` + `.gemini/settings.json`
 - **跨仓复用 / 复制到别的工作区**：仍然优先 `user-scope install`
 
 公开口径建议：

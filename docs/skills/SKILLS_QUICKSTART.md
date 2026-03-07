@@ -8,14 +8,14 @@
 
 ## 🚀 先说结论
 
-当前这个仓库已经把 `memory-palace` 的 **skill** 和 **MCP** 主链路基本接好了：
+当前这个仓库已经把 `memory-palace` 的 **canonical skill**、同步脚本和安装脚本整理好了。按下面命令执行后，你可以在**自己的本地工作区**把 skill + MCP 主链路接起来：
 
 | 客户端 | skill 自动识别 | MCP 连接现状 | 你该怎么做 |
 |---|---|---|---|
-| `Claude Code` | 已就绪 | 已补项目级 allowlist，非交互模式也能直接调 `memory-palace` 工具 | 直接在本仓库打开即可 |
-| `Gemini CLI` | 已就绪 | 已有 `.gemini/settings.json`，但 `live MCP` 仍有个别场景待补验 | 先在本仓库打开；需要更稳时再补一次 user-scope 安装 |
-| `Codex CLI` | 已有 repo-local skill | 最近验证环境里已修正为真实 backend 启动命令 | 若是首次在你的机器上使用，先执行 1 条 `codex mcp add` |
-| `OpenCode` | 已有 repo-local skill | 最近验证环境里 live smoke 已通过；新机器通常要先确认本地 MCP 注册 | 先看 `opencode mcp list`，没有再补注册 |
+| `Claude Code` | 执行 workspace 安装后即可 | workspace 安装后会生成项目级入口；非交互模式路径已有验证 | 先执行本文命令，再在本仓库打开 |
+| `Gemini CLI` | 执行 workspace 安装后即可 | workspace 安装后可生成 `.gemini/settings.json`，但 `live MCP` 仍有个别场景待补验 | 先执行本文命令；需要更稳时再补一次 user-scope 安装 |
+| `Codex CLI` | sync 后有 repo-local skill | 最近验证环境里已修正为真实 backend 启动命令 | 若是首次在你的机器上使用，先执行 1 条 `codex mcp add` |
+| `OpenCode` | sync 后有 repo-local skill | 最近验证环境里 live smoke 已通过；新机器通常要先确认本地 MCP 注册 | 先看 `opencode mcp list`，没有再补注册 |
 
 一句话理解：
 
@@ -56,23 +56,23 @@
 
 ---
 
-## ✅ 当前仓库已经自带了什么
+## ✅ 运行同步 / 安装后，本地通常会看到什么
 
-仓库里已经有这些关键入口：
+公开仓库默认只带 canonical bundle。你执行上面的同步 / 安装命令后，本地工作区通常会看到这些关键入口：
 
 | 文件 | 作用 |
 |---|---|
-| `.claude/skills/memory-palace/SKILL.md` | Claude Code 的 repo-local skill 镜像 |
-| `.codex/skills/memory-palace/SKILL.md` | Codex 的 repo-local skill 镜像 |
-| `.opencode/skills/memory-palace/SKILL.md` | OpenCode 的 repo-local skill 镜像 |
-| `.gemini/skills/memory-palace/SKILL.md` | Gemini 的 repo-local skill 入口 |
-| `.gemini/settings.json` | Gemini 的项目级 MCP 配置 |
-| `.claude/settings.json` | Claude Code 的项目级 allowlist，允许 `memory-palace` 工具免确认调用 |
-| `docs/skills/memory-palace/` | canonical skill 真源 |
+| `docs/skills/memory-palace/` | canonical skill 真源（公开仓库默认存在） |
+| `.claude/skills/memory-palace/SKILL.md` | Claude Code 的 repo-local skill 镜像（本地生成） |
+| `.codex/skills/memory-palace/SKILL.md` | Codex 的 repo-local skill 镜像（本地生成） |
+| `.opencode/skills/memory-palace/SKILL.md` | OpenCode 的 repo-local skill 镜像（本地生成） |
+| `.gemini/skills/memory-palace/SKILL.md` | Gemini 的 repo-local skill 入口（本地生成） |
+| `.gemini/settings.json` | Gemini 的项目级 MCP 配置（workspace 安装后生成） |
+| `.mcp.json` | Claude Code 的项目级 MCP 配置（workspace 安装后生成） |
 
 所以：
 
-- `Claude Code`、`Gemini CLI` 在**当前仓库**里是最省心的路线
+- `Claude Code`、`Gemini CLI` 在**当前仓库执行完 workspace 安装后**是最省心的路线
 - `Codex CLI` 和 `OpenCode` 的 **skill** 已经就位
 - 最近验证环境里的 `Codex` MCP 已经修正完成
 - `OpenCode` 建议先手动确认一次 `mcp list`
@@ -85,10 +85,10 @@
 
 最省心。
 
-当前仓库根目录已经补了项目级：
+先执行上面的 workspace 安装后，本地工作区里会有：
 
 - `.claude/skills/memory-palace/`
-- `.claude/settings.json`
+- `.mcp.json`
 
 你只要在这个仓库里启动 `Claude Code`，它就同时看得到：
 
@@ -109,12 +109,12 @@ claude mcp list
 
 ## 2) `Gemini CLI`
 
-当前仓库也已经补齐了项目级配置：
+先执行上面的 workspace 安装后，本地工作区里会补齐：
 
 - `.gemini/skills/memory-palace/SKILL.md`
 - `.gemini/settings.json`
 
-所以在**当前仓库**里，Gemini 可以直接走项目级入口。
+所以在**当前工作区本地**里，Gemini 可以直接走项目级入口。
 
 推荐检查：
 
@@ -126,7 +126,7 @@ gemini mcp list
 如果你想把这套能力带到**别的仓库**复用，再执行：
 
 ```bash
-python scripts/install_skill.py --targets gemini --scope user --force
+python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
 ```
 
 这一步属于“跨仓复用”，不是“当前仓库最小可用”的必需步骤。
@@ -136,7 +136,7 @@ python scripts/install_skill.py --targets gemini --scope user --force
 - `Skill conflict detected`
 - `... overriding the same skill from ~/.gemini/skills/...`
 
-这通常不是坏事，表示**当前仓库里的 skill 正在覆盖用户目录里的旧版本**。
+这通常不是坏事，表示**当前工作区里的 skill 正在覆盖用户目录里的旧版本**。
 
 如果你看到这种提示：
 
@@ -158,7 +158,7 @@ gemini mcp add -s project -e DATABASE_URL=sqlite+aiosqlite:////<repo-root>/backe
 
 `Codex` 这边要分开看：
 
-- **skill**：仓库里已经有 `.codex/skills/memory-palace/`
+- **skill**：执行 `sync/install` 后，本地会有 `.codex/skills/memory-palace/`
 - **MCP**：`Codex` 目前主要走用户目录 `~/.codex/config.toml`
 
 说人话就是：
@@ -190,7 +190,7 @@ codex mcp list
 
 ## 4) `OpenCode`
 
-`OpenCode` 当前仓库里已经有：
+`OpenCode` 这边在你执行 `sync/install` 后，本地通常会有：
 
 - `.opencode/skills/memory-palace/`
 
@@ -285,13 +285,13 @@ skill 只解决“该不该触发”。
 
 也不是。
 
-Gemini 对隐藏目录有时更保守，所以这个仓库才同时补了：
+Gemini 对隐藏目录有时更保守，所以这套安装链才会在你本地同时补：
 
 - `.gemini/skills/...`
 - `.gemini/settings.json`
 - `variants/gemini/SKILL.md`
 
-### 误区 3：Codex 仓库里有 `.codex/skills/...`，就不用配 MCP
+### 误区 3：本地已经有 `.codex/skills/...`，就不用配 MCP
 
 还是不够。
 

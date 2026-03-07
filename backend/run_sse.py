@@ -72,6 +72,19 @@ def _is_loopback_scope(scope: Scope) -> bool:
     return True
 
 
+def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeError) -> bool:
+    if scope.get("type") != "http":
+        return False
+    path = str(scope.get("path") or "")
+    if path not in {"/sse", "/messages", "/sse/messages"}:
+        return False
+    message = str(exc)
+    return (
+        "Expected ASGI message 'http.response.body'" in message
+        and "'http.response.start'" in message
+    )
+
+
 def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
     async def _auth_middleware(scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
@@ -115,7 +128,12 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
             )
             await response(scope, receive, send)
             return
-        await app(scope, receive, send)
+        try:
+            await app(scope, receive, send)
+        except RuntimeError as exc:
+            if _should_suppress_stream_shutdown_runtime_error(scope, exc):
+                return
+            raise
 
     return _auth_middleware
 

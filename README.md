@@ -33,7 +33,7 @@
 
 **Memory Palace** provides AI agents with persistent context and seamless cross-session continuity. It gives LLMs **persistent, searchable, and auditable** historical context — so your Agent never "starts from scratch" in each conversation.
 
-Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, Cursor, and Antigravity**. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART.md`.
+Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, and OpenCode**, with documented caveats for `Cursor` and `Antigravity`. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART.md`.
 
 ### Why Memory Palace?
 
@@ -591,17 +591,17 @@ python scripts/sync_memory_palace_skill.py
 python scripts/sync_memory_palace_skill.py --check
 python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
-python scripts/install_skill.py --targets claude,codex,opencode,cursor,agent --scope workspace --force
-python scripts/install_skill.py --targets gemini --scope user --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
 ```
 
 For `Gemini CLI`, prefer a **user-scope** install for now:
 
 ```bash
-python scripts/install_skill.py --targets gemini --scope user --force
+python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
 ```
 
-Current canonical and bundled mirrors:
+Canonical source and the local paths that appear after you run the sync/install steps:
 
 - Canonical: `<repo-root>/docs/skills/memory-palace/`
 - Claude Code: `<repo-root>/.claude/skills/memory-palace/`
@@ -609,6 +609,8 @@ Current canonical and bundled mirrors:
 - OpenCode: `<repo-root>/.opencode/skills/memory-palace/`
 - Cursor: `<repo-root>/.cursor/skills/memory-palace/`
 - Compatible agent CLI: `<repo-root>/.agent/skills/memory-palace/`
+
+These hidden client directories are **local generated mirrors**, not public source files. They are ignored by git, so a fresh GitHub checkout normally starts with only the canonical bundle under `docs/skills/memory-palace/`; run the commands above to create the local mirrors on your machine.
 
 The canonical skill is aligned with the current code contract:
 

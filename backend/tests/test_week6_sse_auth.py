@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 import os
 import pytest
+import signal
 import socket
 import subprocess
 import sys
@@ -190,6 +191,85 @@ def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:
             output, _ = server.communicate(timeout=5)
 
     assert "AssertionError: Unexpected message" not in output
+
+
+def test_sse_auth_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    env = dict(**os.environ)
+    env["MCP_API_KEY"] = "week6-sse-secret"
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'streaming_shutdown.db'}"
+    env["HOST"] = "127.0.0.1"
+    env["PORT"] = str(port)
+    server = subprocess.Popen(
+        [
+            sys.executable,
+            "run_sse.py",
+        ],
+        cwd=str(backend_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    client = None
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if server.poll() is not None:
+                pytest.fail("uvicorn exited before the shutdown test could connect")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail("timed out waiting for shutdown test server to start")
+
+        request = (
+            "GET /sse HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "X-MCP-API-Key: week6-sse-secret\r\n"
+            "\r\n"
+        ).encode("utf-8")
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5)
+        client.sendall(request)
+        received = ""
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            chunk = client.recv(4096).decode("utf-8", errors="ignore")
+            if not chunk:
+                break
+            received += chunk
+            if "event: endpoint" in received:
+                break
+        assert "200 OK" in received
+        assert "event: endpoint" in received
+
+        server.send_signal(signal.SIGINT)
+        if client is not None:
+            client.close()
+            client = None
+        output, _ = server.communicate(timeout=10)
+    finally:
+        if client is not None:
+            client.close()
+        if server.poll() is None:
+            server.terminate()
+            try:
+                output, _ = server.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                output, _ = server.communicate(timeout=5)
+
+    assert "Expected ASGI message 'http.response.body'" not in output
+    assert "RuntimeError:" not in output
 
 
 def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:

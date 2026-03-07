@@ -155,7 +155,7 @@ Authorization: Bearer <MCP_API_KEY>
 
    该脚本会检查：本地敏感产物是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。
 
-   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录。
+   脚本会把检查结果直接输出在当前终端；如果你另外运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`，对应的 Markdown 摘要会在 `<repo-root>/docs/skills/` 下本地生成或更新，通常更适合当成你自己机器上的验证记录；这些摘要默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上。
 
 1. **检查工作区状态** — 确认无意外暴露：
 
@@ -164,7 +164,7 @@ Authorization: Bearer <MCP_API_KEY>
    ```
 
    应确保以下文件不在提交中（均已在 `.gitignore` 中配置）：
-   - `.env`、`.env.docker`
+   - `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件）
    - `.venv`、`.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
    - `*.db`（数据库文件）
    - `backend/backend.log`、`frontend/frontend.log`
@@ -208,7 +208,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 | 文件 / 目录 | 说明 |
 |---|---|
-| `.env`、`.env.docker` | 包含真实 API Key |
+| `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件） | 可能包含真实 API Key |
 | `.venv`、`backend/.venv`、`frontend/.venv` | 本地虚拟环境，不应进入仓库 |
 | `.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/` | 本地工具 / MCP 配置目录 |
 | `*.db` | SQLite 数据库文件（如 `demo.db`） |

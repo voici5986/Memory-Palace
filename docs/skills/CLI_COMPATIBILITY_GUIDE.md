@@ -26,20 +26,20 @@
 - skill 能被当前 CLI 发现
 - MCP 确实指向当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`
 
-## Current Repo Baseline
+## Current Local Baseline After Sync / Install
 
-当前仓库自带这些入口：
+公开仓库默认只带 canonical bundle；你执行 `sync_memory_palace_skill.py` / `install_skill.py` 之后，本地工作区通常会出现这些入口：
 
 - `Claude Code`
-  - `.claude/skills/memory-palace/`
-  - `.mcp.json`
+  - `.claude/skills/memory-palace/`（本地生成）
+  - `.mcp.json`（workspace 安装后生成）
 - `Codex CLI`
-  - `.codex/skills/memory-palace/`
+  - `.codex/skills/memory-palace/`（本地生成）
 - `OpenCode`
   - `.opencode/skills/memory-palace/`
 - `Gemini CLI`
-  - `.gemini/skills/memory-palace/`
-  - `.gemini/settings.json`
+  - `.gemini/skills/memory-palace/`（本地生成）
+  - `.gemini/settings.json`（workspace 安装后生成）
 
 对应的 canonical skill 真源是：
 

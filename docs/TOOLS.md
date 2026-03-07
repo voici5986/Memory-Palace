@@ -536,7 +536,7 @@ index_status()
 
 ## 推荐工作流
 
-以下工作流适用于所有支持 MCP 的客户端（Codex / Claude Code / Gemini CLI / Cursor / Antigravity / Trae 等）：
+以下工作流是通用的 MCP 使用顺序。具体哪些客户端已经验证、哪些仍有边界，请以 `docs/skills/SKILLS_QUICKSTART.md` 的公开口径为准：
 
 ### 标准会话流程
 
