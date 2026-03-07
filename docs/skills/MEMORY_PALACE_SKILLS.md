@@ -29,6 +29,42 @@ Memory-Palace/scripts/sync_memory_palace_skill.py
 Memory-Palace/scripts/install_skill.py
 ```
 
+## 0. 与 Claude Skills 规范的对齐结论（2026-03-07）
+
+这轮按 `Claude Code` 官方 skills 文档、Anthropic 在 2026-03-03 发布的
+`Improving skill-creator: Test, measure, and refine Agent Skills`，以及
+`anthropics/skills` 仓库里的 `skill-creator` 做了一次对照。
+
+当前结论可以直接说：
+
+- **结构上已对齐**：采用 `skill-name/SKILL.md` 的标准 bundle 结构，目录名与 `name` 都是 `memory-palace`
+- **触发契约已对齐**：`description` 同时写清“做什么”和“什么时候用”，而且保留了明确 trigger hints
+- **渐进加载已对齐**：主 `SKILL.md` 保持短小，工具细节下沉到 `references/`
+- **跨客户端分发已对齐**：Claude / Codex / OpenCode 走 mirror，Gemini 保留 variant；当前仓库可直接走项目级入口，跨仓复用时仍优先 user install
+
+但和 `skill-creator` 的完整版工作流相比，当前还有一个明确边界：
+
+- **验证层还不是 full eval / benchmark 套件**
+
+现在仓库里已经有：
+
+- trigger smoke
+- mirror drift check
+- live MCP e2e
+- 跨客户端 MCP 绑定检查
+
+但还没有完全做成 `skill-creator` 那种：
+
+- `evals.json`
+- blind comparator
+- benchmark viewer
+- 自动 description optimization loop
+
+所以更准确的说法是：
+
+- **当前 skill 设计已经符合 Claude Skills 的结构规范与触发规范**
+- **当前验证方式更偏工程化 smoke / e2e，还没有走满 skill-creator 的全量评测工作流**
+
 ## 1. 为什么要这样收敛
 
 旧设计的核心问题不是“信息太少”，而是结构分散：
@@ -40,7 +76,7 @@ Memory-Palace/scripts/install_skill.py
 现在的设计目标是：
 
 - **可直接分发**：canonical bundle 固定落在 `docs/skills/memory-palace/`
-- **可跨 CLI 使用**：通过同步脚本分发到 `.claude/.codex/.opencode/.cursor/.agent`，Gemini 通过 `user-scope install` 使用
+- **可跨 CLI 使用**：通过同步脚本分发到 `.claude/.codex/.opencode/.cursor/.agent`；Gemini 在当前仓库可直接用项目级入口，跨仓时仍优先 `user-scope install`
 - **可验证**：通过 `sync_memory_palace_skill.py --check` 与仓内门禁持续校验
 - **可迭代**：先优化 `description` 的触发质量，再优化 `SKILL.md` 正文与 reference
 
@@ -50,10 +86,10 @@ Gemini 端当前有一个已知边界：
 - 但真实触发时，Gemini 可能尝试直接读取隐藏 skill 目录
 - 在部分本地策略下，这会被 ignore patterns 拦截
 
-因此当前推荐：
+因此当前推荐分两层：
 
-- 仓库内不再把 `.gemini` workspace mirror 作为默认运行路径
-- 实际使用时，**Gemini 优先走 user-scope install**
+- **当前仓库里直接用**：优先走项目级 `.gemini/skills/...` + `.gemini/settings.json`
+- **跨仓复用 / 复制到别的工作区**：仍然优先 `user-scope install`
 
 ## 2. 目录职责
 
@@ -114,6 +150,7 @@ Gemini 端当前有一个已知边界：
 3. 工具细节下沉到 `references/`
 4. 分发与校验由仓库脚本负责，不再让用户手抄 skill
 5. 运行时引用优先指向 **repo-visible canonical docs/skills 路径**，不要依赖隐藏 mirror 目录可读
+6. 不只检查“skill 能不能被发现”，还要检查“对应 MCP 是否真的绑到当前项目”
 
 ## 4. 默认工作流
 

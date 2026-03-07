@@ -23,7 +23,9 @@
 | [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) | 后端、前端、MCP、Docker 的实现结构与技术栈一览 |
 | [TOOLS.md](TOOLS.md) | 9 个 MCP 工具的输入输出、返回约定与降级语义 |
 | [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md) | A/B/C/D 四档位配置模板、参数调优与部署方式 |
+| [skills/SKILLS_QUICKSTART.md](skills/SKILLS_QUICKSTART.md) | 一页看懂 skills 怎么触发、怎么配 MCP、怎么验收 |
 | [skills/MEMORY_PALACE_SKILLS.md](skills/MEMORY_PALACE_SKILLS.md) | canonical `memory-palace` skill 设计、安装与多 CLI 编排策略 |
+| [skills/CLAUDE_SKILLS_AUDIT.md](skills/CLAUDE_SKILLS_AUDIT.md) | 对照 Claude 官方 skills / skill-creator 规范的现状审计 |
 | [skills/CLI_COMPATIBILITY_GUIDE.md](skills/CLI_COMPATIBILITY_GUIDE.md) | 各 CLI 的推荐安装路径、smoke 结果与已知边界 |
 | [skills/TRIGGER_SMOKE_REPORT.md](skills/TRIGGER_SMOKE_REPORT.md) | `memory-palace` skill 的多 CLI smoke 结果与当前边界 |
 | [skills/MCP_LIVE_E2E_REPORT.md](skills/MCP_LIVE_E2E_REPORT.md) | 真实 MCP stdio 端到端回归结果（create/update/alias/compact/rebuild） |

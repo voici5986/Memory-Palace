@@ -10,14 +10,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_DIR = REPO_ROOT / "Memory-Palace" / "docs" / "skills" / "memory-palace"
-MIRROR_DIRS = [
+BUNDLE_MIRROR_DIRS = [
     REPO_ROOT / ".claude" / "skills" / "memory-palace",
     REPO_ROOT / ".codex" / "skills" / "memory-palace",
     REPO_ROOT / ".opencode" / "skills" / "memory-palace",
     REPO_ROOT / ".agent" / "skills" / "memory-palace",
     REPO_ROOT / ".cursor" / "skills" / "memory-palace",
 ]
-RELATIVE_FILES = [
+GEMINI_VARIANT_FILE = CANONICAL_DIR / "variants" / "gemini" / "SKILL.md"
+GEMINI_WORKSPACE_DIR = REPO_ROOT / ".gemini" / "skills" / "memory-palace"
+BUNDLE_RELATIVE_FILES = [
     Path("SKILL.md"),
     Path("references/mcp-workflow.md"),
     Path("references/trigger-samples.md"),
@@ -26,7 +28,9 @@ RELATIVE_FILES = [
 
 
 def ensure_canonical_exists() -> None:
-    missing = [path for path in RELATIVE_FILES if not (CANONICAL_DIR / path).is_file()]
+    missing = [path for path in BUNDLE_RELATIVE_FILES if not (CANONICAL_DIR / path).is_file()]
+    if not GEMINI_VARIANT_FILE.is_file():
+        missing.append(Path("variants/gemini/SKILL.md"))
     if missing:
         joined = ", ".join(str(path) for path in missing)
         raise FileNotFoundError(f"Canonical skill is incomplete: {joined}")
@@ -72,19 +76,31 @@ def run_check() -> int:
         return 1
 
     drift: list[str] = []
-    for mirror_dir in MIRROR_DIRS:
+    for mirror_dir in BUNDLE_MIRROR_DIRS:
         if not mirror_dir.is_dir():
             drift.append(f"missing mirror directory: {mirror_dir.relative_to(REPO_ROOT)}")
             continue
-        for relative_path in RELATIVE_FILES:
+        for relative_path in BUNDLE_RELATIVE_FILES:
             source = CANONICAL_DIR / relative_path
             target = mirror_dir / relative_path
             if not files_match(source, target):
                 drift.append(f"{mirror_dir.relative_to(REPO_ROOT)}/{relative_path}")
-        expected = {mirror_dir / relative_path for relative_path in RELATIVE_FILES}
+        expected = {mirror_dir / relative_path for relative_path in BUNDLE_RELATIVE_FILES}
         actual = {path for path in mirror_dir.rglob("*") if path.is_file()}
         for extra_path in sorted(actual - expected):
             drift.append(f"unexpected extra file: {extra_path.relative_to(REPO_ROOT)}")
+
+    gemini_skill_file = GEMINI_WORKSPACE_DIR / "SKILL.md"
+    if not gemini_skill_file.is_file():
+        drift.append(f"missing mirror file: {gemini_skill_file.relative_to(REPO_ROOT)}")
+    elif not files_match(GEMINI_VARIANT_FILE, gemini_skill_file):
+        drift.append(f"mismatch: {gemini_skill_file.relative_to(REPO_ROOT)}")
+    if GEMINI_WORKSPACE_DIR.is_dir():
+        actual = {path for path in GEMINI_WORKSPACE_DIR.rglob("*") if path.is_file()}
+        expected = {gemini_skill_file}
+        for extra_path in sorted(actual - expected):
+            drift.append(f"unexpected extra file: {extra_path.relative_to(REPO_ROOT)}")
+
     if drift:
         print("Drift detected:")
         for item in drift:
@@ -100,11 +116,15 @@ def run_sync() -> int:
     if not ok:
         print(f"canonical SKILL.md invalid: {message}", file=sys.stderr)
         return 1
-    for mirror_dir in MIRROR_DIRS:
+    for mirror_dir in BUNDLE_MIRROR_DIRS:
         if mirror_dir.exists():
             shutil.rmtree(mirror_dir)
-        for relative_path in RELATIVE_FILES:
+        for relative_path in BUNDLE_RELATIVE_FILES:
             sync_file(relative_path, mirror_dir)
+    if GEMINI_WORKSPACE_DIR.exists():
+        shutil.rmtree(GEMINI_WORKSPACE_DIR)
+    GEMINI_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(GEMINI_VARIANT_FILE, GEMINI_WORKSPACE_DIR / "SKILL.md")
     print("Synced memory-palace skill mirrors.")
     return 0
 

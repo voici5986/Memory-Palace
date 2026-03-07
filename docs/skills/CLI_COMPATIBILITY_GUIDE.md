@@ -2,136 +2,259 @@
 
 ## Summary
 
-- `Claude Code`：通过
-- `Codex CLI`：通过
-- `OpenCode`：通过
-- `Gemini CLI`：推荐路径通过
-- `Cursor`：仅完成 mirror 分发与结构校验
-- `agent` 兼容目录：仅完成 mirror 分发与结构校验
-- `Antigravity IDE`：官方产品存在，app-bundled CLI 已发现，workflow 已安装，但仍需 GUI 内手工 smoke
+- `Claude Code`：当前仓库已具备 **repo-local skill 自动发现** + **workspace MCP 直连**
+- `Gemini CLI`：当前仓库已具备 **repo-local skill 自动发现** + **workspace MCP 直连**
+- `Codex CLI`：当前仓库已具备 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
+- `OpenCode`：当前仓库已具备 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
+- `Cursor` / `.agent`：当前仍以 mirror 结构兼容为主，未提升为统一直连入口
+- 当前设计已对齐 `Anthropic skill-creator` 的核心要求：`frontmatter`、`trigger description`、`references`、`eval/smoke`
 
-## Recommended Client Strategy
+## 先分清两层
 
-### Claude Code
+`memory-palace` 这套链路分成两层：
 
-- 推荐：直接使用 repo-local mirror，或安装到用户目录
-- 现状：smoke 通过
+1. **skill 自动发现**
+   - 负责让客户端知道“什么时候该进入 Memory Palace 工作流”
+   - 主要由 `SKILL.md` 的 `frontmatter + description` 决定
 
-### Codex CLI
+2. **MCP 真正绑到当前仓库**
+   - 负责让客户端真的调用当前仓库里的 `Memory-Palace` backend
+   - 只看 skill 被发现还不够，必须确认 MCP 指向当前项目
 
-- 推荐：直接使用 repo-local mirror，或安装到用户目录
-- 现状：smoke 通过
+所以判断“能不能直接用”，必须同时满足：
 
-### OpenCode
+- skill 能被当前 CLI 发现
+- MCP 确实指向当前仓库的 `Memory-Palace/scripts/run_memory_palace_mcp_stdio.sh`
 
-- 推荐：直接使用 repo-local mirror，或安装到用户目录
-- 现状：smoke 通过
+## Current Repo Baseline
 
-### Gemini CLI
+当前仓库自带这些入口：
 
-- 推荐：优先安装到用户目录
+- `Claude Code`
+  - `.claude/skills/memory-palace/`
+  - `.mcp.json`
+- `Codex CLI`
+  - `.codex/skills/memory-palace/`
+- `OpenCode`
+  - `.opencode/skills/memory-palace/`
+- `Gemini CLI`
+  - `.gemini/skills/memory-palace/`
+  - `.gemini/settings.json`
 
-```bash
-python Memory-Palace/scripts/install_skill.py --targets gemini --scope user --force
+对应的 canonical skill 真源是：
+
+```text
+Memory-Palace/docs/skills/memory-palace/
 ```
 
-- 已知边界：
-  - `gemini skills list --all` 能发现 `memory-palace`
-  - `gemini-3-flash-preview` 在本机上通过 smoke
-  - 默认零参数路径仍不建议直接作为唯一依据
+## install_skill.py 现在负责什么
 
-### Cursor
+当前 `install_skill.py` 已支持两类动作：
 
-- 推荐：使用 repo-local mirror
-- 现状：当前机器存在 `cursor-agent` runtime，但当前缺少登录/鉴权
+- **装 skill**
+  - 把 canonical bundle 分发到 workspace 或 user 的 skill 目录
+- **装 MCP**
+  - 通过 `--with-mcp` 把对应 CLI 的 MCP 配置绑到当前仓库
 
-最终手工验证清单：
+同时支持：
 
-1. 先完成 `cursor-agent` 登录或配置 `CURSOR_API_KEY`
-2. 在 Cursor 中打开当前仓库
-3. 确认存在 `.cursor/skills/memory-palace/`
-4. 发送正向 prompt：询问 first move、`guard_action=NOOP`、`trigger-samples.md` 路径
-5. 期望答案：
-   - `read_memory("system://boot")`
-   - `NOOP = stop + inspect guard_target_uri / guard_target_id`
-   - `Memory-Palace/docs/skills/memory-palace/references/trigger-samples.md`
-6. 再发送反向 prompt：重写 README opening，不应进入 Memory Palace 工作流
-7. 若正向命中且反向不过触发，可判定 Cursor 通过
+- `--check`
+  - 检查 skill 是否与 canonical 一致
+  - 如果同时传了 `--with-mcp`，还会检查 MCP 绑定是否到位
 
-### agent 兼容目录
+## 推荐命令
 
-- 推荐：使用 repo-local mirror
-- 现状：当前机器未做独立 runtime smoke
-
-`.agent` 对应什么：
-
-- 当前仓库里，`.agent/skills/` 是**兼容目录名**
-- 它不是这台机器上已确认存在的某个独立 IDE/CLI 产品
-- 本机 `which agent` 为空，因此目前只能把它视为“agent-compatible runtime target”
-
-最终手工验证清单：
-
-1. 确认目标 runtime 真的读取 `.agent/skills/`
-2. 发送与 Cursor 相同的正向/反向 prompt
-3. 检查它是否使用 repo-local `memory-palace` 规则，而非泛化 memory 建议
-4. 只有 runtime 存在且正反向都符合预期，才能把 `.agent` 从 `PARTIAL` 提升到 `PASS`
-
-### Antigravity IDE
-
-- 产品属性：Google 的 agent-first IDE / development platform（官方产品站已可访问）
-- 当前机器状态：有 app-bundled CLI：`/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity`
-- 当前限制：该 CLI 更像 GUI/IDE 启动入口，不是完整 headless skill runtime；但 workflow 已可安装到 `~/.gemini/antigravity/global_workflows/`
-- 当前仓库口径：Antigravity 更接近 `Workspace Rules / Project Instructions` 路径，而不是 repo-local `.agent` mirror 路径
-
-推荐安装路径：
-
-```bash
-python Memory-Palace/scripts/install_skill.py --targets antigravity --scope user --force
-```
-
-安装目标：
-
-- user scope → `~/.gemini/antigravity/global_workflows/memory-palace.md`
-- workspace scope → `.agent/workflows/memory-palace.md`
-
-最终手工验证清单：
-
-1. 在 Antigravity 中打开当前仓库
-2. 通过其 workspace rules / project instructions 机制接入 Memory Palace 规则
-3. 发送正向 prompt：询问 first move、`NOOP` 处理、trigger sample 路径
-4. 发送反向 prompt：重写 README opening，不应触发 Memory Palace
-5. 如果 Antigravity 支持项目级规则且正反向结果正确，可判定“Antigravity 可成功使用”
-6. 如果缺少项目级规则入口，或只能得到泛化回答，则只能判定“理论兼容，未验证通过”
-
-## Commands
-
-### Repo-local sync
+### 1) 先同步 repo-local mirrors
 
 ```bash
 python Memory-Palace/scripts/sync_memory_palace_skill.py
 python Memory-Palace/scripts/sync_memory_palace_skill.py --check
 ```
 
-### User-scope install
+### 2) 打通当前仓库的 workspace 直连入口
+
+这一步会把：
+
+- `Claude Code` 绑定到 `.mcp.json`
+- `Gemini CLI` 绑定到 `.gemini/settings.json`
 
 ```bash
-python Memory-Palace/scripts/install_skill.py --targets claude,codex,gemini,opencode,cursor,agent --scope user --force
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope workspace \
+  --with-mcp \
+  --force
 ```
 
-Antigravity workflow install:
+检查：
 
 ```bash
-python Memory-Palace/scripts/install_skill.py --targets antigravity --scope user --force
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope workspace \
+  --with-mcp \
+  --check
 ```
 
-### Smoke evaluation
+说明：
+
+- 这里的 `Codex/OpenCode` 会完成 repo-local skill mirror
+- 但 `Codex/OpenCode` 的 MCP 不会在 workspace scope 下自动落项目配置
+- 这是当前文档口径里的**明确边界**，不是遗漏
+
+### 3) 打通 user-scope MCP 注册
+
+这一步主要给：
+
+- `Codex CLI`
+- `OpenCode`
+- 以及需要跨仓复用的 `Claude/Gemini`
+
+```bash
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope user \
+  --with-mcp \
+  --force
+```
+
+检查：
+
+```bash
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope user \
+  --with-mcp \
+  --check
+```
+
+## Per-CLI Strategy
+
+### Claude Code
+
+- 自动发现层：
+  - repo-local `.claude/skills/memory-palace/`
+- MCP 层：
+  - workspace 走 `.mcp.json`
+  - user-scope 可写入 `~/.claude.json` 当前仓库 project block
+
+结论：
+
+- **打开当前仓库即可直接用**
+- 如果要带去别的仓库，再补 `--scope user --with-mcp`
+
+### Gemini CLI
+
+- 自动发现层：
+  - repo-local `.gemini/skills/memory-palace/`
+- MCP 层：
+  - workspace 走 `.gemini/settings.json`
+  - user-scope 走 `~/.gemini/settings.json`
+
+结论：
+
+- **当前仓库可直接用**
+- 若本机对隐藏目录更严格，仍推荐再补一次 `--scope user --with-mcp`
+
+### Codex CLI
+
+- 自动发现层：
+  - repo-local `.codex/skills/memory-palace/`
+- MCP 层：
+  - 当前以 `~/.codex/config.toml` 为主
+
+结论：
+
+- **不要把 Codex 说成“天然开箱即用”**
+- 准确说法是：
+  - skill 可 repo-local 自动发现
+  - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
+
+### OpenCode
+
+- 自动发现层：
+  - repo-local `.opencode/skills/memory-palace/`
+- MCP 层：
+  - 当前以 `~/.config/opencode/opencode.json` 为主
+
+结论：
+
+- **不要把 OpenCode 说成“天然开箱即用”**
+- 准确说法是：
+  - skill 可 repo-local 自动发现
+  - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
+
+### Cursor / `.agent`
+
+- 目前仍以 mirror 分发与结构兼容为主
+- 未纳入当前这轮统一的 workspace/user MCP 自动注册链
+
+## 最小验证链
+
+### 安装检查
+
+```bash
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope workspace \
+  --with-mcp \
+  --check
+
+python Memory-Palace/scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope user \
+  --with-mcp \
+  --check
+```
+
+### 触发 smoke
 
 ```bash
 python Memory-Palace/scripts/evaluate_memory_palace_skill.py
 ```
 
-Report output:
+报告输出：
 
 ```text
 Memory-Palace/docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
+
+### 真实 MCP e2e
+
+```bash
+Memory-Palace/backend/.venv/bin/python \
+  Memory-Palace/scripts/evaluate_memory_palace_mcp_e2e.py
+```
+
+报告输出：
+
+```text
+Memory-Palace/docs/skills/MCP_LIVE_E2E_REPORT.md
+```
+
+## 正向 / 反向 prompt
+
+正向 prompt：
+
+```text
+For this repository's memory-palace skill, answer with exactly three bullets:
+(1) the first memory tool call,
+(2) what to do when guard_action=NOOP,
+(3) the path to the trigger sample file.
+```
+
+反向 prompt：
+
+```text
+请帮我改一下 README 开头的文案，不需要碰 Memory Palace。
+```
+
+期望：
+
+- 正向 prompt 命中 `memory-palace`
+- 反向 prompt 不应误触发 `memory-palace`
+
+## 一句话口径
+
+- `Claude/Gemini`：当前仓库已经具备 **repo-local 直连**
+- `Codex/OpenCode`：当前仓库已经具备 **repo-local 自动发现**，但要做到“真能用当前仓库 MCP”，仍应补 **user-scope MCP 注册**

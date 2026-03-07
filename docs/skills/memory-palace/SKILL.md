@@ -1,15 +1,18 @@
 ---
 name: memory-palace
 description: >-
-  Use this skill for any Memory Palace task in this repository: remembering
-  durable facts, recalling cross-session memory, deciding create vs update,
-  handling guard_action or guard_target_uri, or using search_memory,
-  compact_context, rebuild_index, index_status, or read_memory("system://boot").
-  Also use it when the user asks about the memory-palace skill itself, such as
-  its first move, NOOP behavior, trigger sample path, or workflow rules. Always
-  activate this skill instead of answering from generic memory intuition.
+  Use this skill for Memory Palace durable-memory work in this repository:
+  saving facts for later, recalling cross-session memory, deciding create vs
+  update, handling guard_action or guard_target_uri, or using
+  read_memory("system://boot"), search_memory, compact_context, rebuild_index,
+  or index_status. Also use it when the user asks about the memory-palace skill
+  itself, such as its first move, NOOP behavior, trigger sample path, workflow
+  rules, or CLI usage. Do not use it for generic code edits, README rewrites,
+  or non-Memory-Palace "memory" discussions. Always activate this skill instead
+  of answering from generic memory intuition.
   Chinese trigger hints: 记忆, 长期记忆, 记住, 回忆, 召回, 写入守卫, 压缩上下文,
   重建索引, system://boot, 技能本身, 触发样例.
+allowed-tools: mcp__memory-palace__read_memory, mcp__memory-palace__create_memory, mcp__memory-palace__update_memory, mcp__memory-palace__delete_memory, mcp__memory-palace__add_alias, mcp__memory-palace__search_memory, mcp__memory-palace__compact_context, mcp__memory-palace__rebuild_index, mcp__memory-palace__index_status
 ---
 
 # Memory Palace
@@ -84,3 +87,17 @@ Prefer these repo-visible canonical paths over hidden mirror-relative paths such
 The canonical repo-visible path of the trigger sample set is:
 
 - `Memory-Palace/docs/skills/memory-palace/references/trigger-samples.md`
+
+## Examples
+
+- Should trigger: "帮我把这条长期偏好记到 Memory Palace。"
+- Should trigger: "查一下之前记过没有，再决定 create 还是 update。"
+- Should trigger: "为什么 `guard_action=NOOP`，下一步该怎么做？"
+- Should not trigger: "把 README 第一段改得更顺一点。"
+- Should not trigger: "解释一下 Python 的内存管理。"
+
+## Troubleshooting
+
+- If a write is blocked by `guard_action=NOOP`, stop, inspect `guard_target_uri` / `guard_target_id`, and read the suggested target before doing anything else.
+- If a clean session, subagent, or retry loses context, reload with `read_memory("system://boot")`, then `search_memory(..., include_session=true)` if the URI is still unknown.
+- If a CLI can load the skill but cannot reliably read hidden skill directories, answer from the repo-visible canonical paths under `Memory-Palace/docs/skills/...`.

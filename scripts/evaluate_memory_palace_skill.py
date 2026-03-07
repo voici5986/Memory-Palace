@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    import tomllib
+except Exception:  # pragma: no cover
+    tomllib = None
+
+try:
     import yaml
 except Exception:  # pragma: no cover
     yaml = None
@@ -24,6 +29,11 @@ except Exception:  # pragma: no cover
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = REPO_ROOT / "Memory-Palace"
 CANONICAL_DIR = PROJECT_ROOT / "docs" / "skills" / "memory-palace"
+BACKEND_DIR = PROJECT_ROOT / "backend"
+EXPECTED_DB_PATH = BACKEND_DIR / "memory.db"
+EXPECTED_DB_URI = f"sqlite+aiosqlite:///{EXPECTED_DB_PATH}"
+WRAPPER_RELATIVE = Path("Memory-Palace/scripts/run_memory_palace_mcp_stdio.sh")
+WRAPPER_ABSOLUTE = PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh"
 MIRRORS = {
     "claude": REPO_ROOT / ".claude" / "skills" / "memory-palace",
     "codex": REPO_ROOT / ".codex" / "skills" / "memory-palace",
@@ -31,6 +41,8 @@ MIRRORS = {
     "cursor": REPO_ROOT / ".cursor" / "skills" / "memory-palace",
     "agent": REPO_ROOT / ".agent" / "skills" / "memory-palace",
 }
+GEMINI_WORKSPACE_DIR = REPO_ROOT / ".gemini" / "skills" / "memory-palace"
+GEMINI_VARIANT_FILE = CANONICAL_DIR / "variants" / "gemini" / "SKILL.md"
 REQUIRED_FILES = [
     Path("SKILL.md"),
     Path("agents/openai.yaml"),
@@ -39,6 +51,7 @@ REQUIRED_FILES = [
 ]
 GEMINI_TEST_MODEL = "gemini-3.1-pro-preview"
 GEMINI_FALLBACK_MODEL = "gemini-3-flash-preview"
+SKIP_GEMINI_LIVE = os.getenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
 PROMPT = (
     "In this repository, answer in exactly 3 bullets only: "
     "(1) the first memory tool call required by the memory-palace skill, "
@@ -300,14 +313,58 @@ def yaml_frontmatter_ok(path: Path) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _frontmatter_data(path: Path) -> dict[str, Any] | None:
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return None
+    block = text[4:end]
+    if yaml is not None:
+        try:
+            payload = yaml.safe_load(block)
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
 def check_structure() -> CheckResult:
     missing = [str(CANONICAL_DIR / rel) for rel in REQUIRED_FILES if not (CANONICAL_DIR / rel).is_file()]
+    if not GEMINI_VARIANT_FILE.is_file():
+        missing.append(str(GEMINI_VARIANT_FILE))
     if missing:
         return CheckResult("FAIL", "canonical bundle 缺文件", "\n".join(missing))
     ok, message = yaml_frontmatter_ok(CANONICAL_DIR / "SKILL.md")
     if not ok:
         return CheckResult("FAIL", "canonical SKILL.md 非法", message)
     return CheckResult("PASS", "canonical bundle 结构与 YAML 通过")
+
+
+def check_description_contract() -> CheckResult:
+    payload = _frontmatter_data(CANONICAL_DIR / "SKILL.md")
+    if not payload:
+        return CheckResult("FAIL", "无法解析 canonical SKILL.md frontmatter")
+    description = str(payload.get("description") or "").lower()
+    groups = {
+        "must_use": any(token in description for token in ["use this skill", "always activate", "whenever"]),
+        "memory_scope": any(token in description for token in ["memory palace", "durable-memory", "durable memory"]),
+        "tool_or_guard_anchor": any(
+            token in description
+            for token in ["guard_action", "guard_target_uri", "system://boot", "compact_context", "rebuild_index", "index_status"]
+        ),
+        "skill_self_reference": any(
+            token in description for token in ["skill itself", "noop", "trigger sample", "workflow", "cli usage"]
+        ),
+        "negative_boundary": any(
+            token in description for token in ["do not use", "generic code edits", "readme rewrites", "non-memory-palace"]
+        ),
+    }
+    missing = [name for name, ok in groups.items() if not ok]
+    if missing:
+        return CheckResult("FAIL", "description 触发契约不完整", ", ".join(missing))
+    return CheckResult("PASS", "description 已覆盖触发条件、边界与 skill 自省锚点")
 
 
 def check_mirrors() -> CheckResult:
@@ -320,9 +377,19 @@ def check_mirrors() -> CheckResult:
                 missing_or_mismatch.append(f"missing: {actual}")
             elif actual.read_bytes() != expected.read_bytes():
                 missing_or_mismatch.append(f"mismatch: {actual}")
+    gemini_skill = GEMINI_WORKSPACE_DIR / "SKILL.md"
+    if not gemini_skill.is_file():
+        missing_or_mismatch.append(f"missing: {gemini_skill}")
+    elif gemini_skill.read_bytes() != GEMINI_VARIANT_FILE.read_bytes():
+        missing_or_mismatch.append(f"mismatch: {gemini_skill}")
+    if GEMINI_WORKSPACE_DIR.is_dir():
+        expected = {gemini_skill}
+        actual = {path for path in GEMINI_WORKSPACE_DIR.rglob("*") if path.is_file()}
+        for extra_path in sorted(actual - expected):
+            missing_or_mismatch.append(f"unexpected extra file: {extra_path}")
     if missing_or_mismatch:
         return CheckResult("FAIL", "mirror 与 canonical 不一致", "\n".join(missing_or_mismatch))
-    return CheckResult("PASS", "all mirrors are byte-identical to canonical")
+    return CheckResult("PASS", "workspace mirrors match canonical bundle and Gemini variant")
 
 
 def check_sync_script() -> CheckResult:
@@ -340,6 +407,194 @@ def check_gate_syntax() -> CheckResult:
     return CheckResult("PASS", "run_post_change_checks.sh 语法通过")
 
 
+def _normalized_text(value: Any) -> str:
+    return str(value).replace("\\", "/")
+
+
+def _command_mentions_wrapper(command_parts: list[str], *, allow_relative_wrapper: bool) -> bool:
+    normalized_parts = [_normalized_text(part) for part in command_parts if str(part).strip()]
+    joined = " ".join(normalized_parts)
+    candidates = {_normalized_text(WRAPPER_ABSOLUTE)}
+    if allow_relative_wrapper:
+        candidates.add(_normalized_text(WRAPPER_RELATIVE))
+    return any(candidate in joined for candidate in candidates)
+
+
+def _check_command_binding(
+    *,
+    client_name: str,
+    config_path: Path,
+    command_parts: list[str],
+    env_payload: dict[str, Any] | None = None,
+    allow_relative_wrapper: bool = False,
+) -> tuple[bool, str]:
+    normalized_parts = [_normalized_text(part) for part in command_parts]
+    joined = " ".join(normalized_parts)
+    env_payload = env_payload or {}
+    normalized_env = {key: _normalized_text(value) for key, value in env_payload.items()}
+    has_wrapper = _command_mentions_wrapper(command_parts, allow_relative_wrapper=allow_relative_wrapper)
+
+    has_server_entry = "mcp_server.py" in joined
+    has_backend_dir = _normalized_text(BACKEND_DIR) in joined
+    has_expected_db = EXPECTED_DB_URI in joined or normalized_env.get("DATABASE_URL") == EXPECTED_DB_URI
+
+    if has_wrapper:
+        return True, f"{client_name}: MCP 已通过 wrapper 绑定到当前项目（{config_path}）"
+
+    if has_server_entry and has_backend_dir and has_expected_db:
+        return True, f"{client_name}: MCP 已绑定到当前项目 backend/memory.db（{config_path}）"
+
+    reasons: list[str] = []
+    if not has_server_entry:
+        reasons.append("未指向 mcp_server.py")
+    if not has_backend_dir:
+        reasons.append("未指向当前项目 backend 目录")
+    if not has_expected_db:
+        reasons.append("DATABASE_URL 不是当前项目 memory.db")
+    return False, f"{client_name}: {'；'.join(reasons)}（{config_path}）\ncommand={joined}\nenv={json.dumps(env_payload, ensure_ascii=False)}"
+
+
+def check_client_mcp_bindings() -> CheckResult:
+    details: list[str] = ["[workspace-local entrypoints]"]
+    failures = 0
+
+    workspace_claude = REPO_ROOT / ".mcp.json"
+    if workspace_claude.is_file():
+        try:
+            payload = json.loads(workspace_claude.read_text(encoding="utf-8"))
+            server_block = payload.get("mcpServers", {}).get("memory-palace", {})
+            command = [server_block.get("command", ""), *(server_block.get("args") or [])]
+            ok, message = _check_command_binding(
+                client_name="claude(workspace)",
+                config_path=workspace_claude,
+                command_parts=command,
+                env_payload=server_block.get("env") or {},
+                allow_relative_wrapper=True,
+            )
+        except Exception as exc:
+            ok, message = False, f"claude(workspace): 解析失败（{workspace_claude}）\n{exc}"
+    else:
+        ok, message = False, f"claude(workspace): 未找到配置文件（{workspace_claude}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+
+    workspace_gemini = REPO_ROOT / ".gemini" / "settings.json"
+    if workspace_gemini.is_file():
+        try:
+            payload = json.loads(workspace_gemini.read_text(encoding="utf-8"))
+            server_block = payload.get("mcpServers", {}).get("memory-palace", {})
+            command = [server_block.get("command", ""), *(server_block.get("args") or [])]
+            ok, message = _check_command_binding(
+                client_name="gemini(project)",
+                config_path=workspace_gemini,
+                command_parts=command,
+                env_payload=server_block.get("env") or {},
+                allow_relative_wrapper=True,
+            )
+        except Exception as exc:
+            ok, message = False, f"gemini(project): 解析失败（{workspace_gemini}）\n{exc}"
+    else:
+        ok, message = False, f"gemini(project): 未找到配置文件（{workspace_gemini}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+    details.append("INFO codex(workspace): 当前仓库依赖 user-scope MCP 配置，无稳定的 repo-local config.toml 入口")
+    details.append("INFO opencode(workspace): 当前仓库依赖 user-scope MCP 配置，无稳定的 repo-local opencode.json 入口")
+
+    details.append("")
+    details.append("[user-scope entrypoints]")
+
+    claude_config = Path.home() / ".claude.json"
+    if claude_config.is_file():
+        try:
+            payload = json.loads(claude_config.read_text(encoding="utf-8"))
+            project_block = payload.get("projects", {}).get(str(REPO_ROOT))
+            server_block = (project_block or {}).get("mcpServers", {}).get("memory-palace", {})
+            command = [server_block.get("command", ""), *(server_block.get("args") or [])]
+            ok, message = _check_command_binding(
+                client_name="claude(user)",
+                config_path=claude_config,
+                command_parts=command,
+                env_payload=server_block.get("env") or {},
+            )
+        except Exception as exc:
+            ok, message = False, f"claude(user): 解析失败（{claude_config}）\n{exc}"
+    else:
+        ok, message = False, f"claude(user): 未找到配置文件（{claude_config}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+
+    codex_config = Path.home() / ".codex" / "config.toml"
+    if codex_config.is_file() and tomllib is not None:
+        try:
+            with codex_config.open("rb") as handle:
+                payload = tomllib.load(handle)
+            server_block = payload.get("mcp_servers", {}).get("memory-palace", {})
+            command = [server_block.get("command", ""), *(server_block.get("args") or [])]
+            ok, message = _check_command_binding(
+                client_name="codex(user)",
+                config_path=codex_config,
+                command_parts=command,
+                env_payload=server_block.get("env") or {},
+            )
+        except Exception as exc:
+            ok, message = False, f"codex(user): 解析失败（{codex_config}）\n{exc}"
+    elif tomllib is None:
+        ok, message = False, "codex(user): 当前 Python 不支持 tomllib，无法审计 config.toml"
+    else:
+        ok, message = False, f"codex(user): 未找到配置文件（{codex_config}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+
+    gemini_config = Path.home() / ".gemini" / "settings.json"
+    if gemini_config.is_file():
+        try:
+            payload = json.loads(gemini_config.read_text(encoding="utf-8"))
+            server_block = payload.get("mcpServers", {}).get("memory-palace", {})
+            command = [server_block.get("command", ""), *(server_block.get("args") or [])]
+            ok, message = _check_command_binding(
+                client_name="gemini(user)",
+                config_path=gemini_config,
+                command_parts=command,
+                env_payload=server_block.get("env") or {},
+            )
+        except Exception as exc:
+            ok, message = False, f"gemini(user): 解析失败（{gemini_config}）\n{exc}"
+    else:
+        ok, message = False, f"gemini(user): 未找到配置文件（{gemini_config}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+
+    opencode_config = Path.home() / ".config" / "opencode" / "opencode.json"
+    if opencode_config.is_file():
+        try:
+            payload = json.loads(opencode_config.read_text(encoding="utf-8"))
+            server_block = payload.get("mcp", {}).get("memory-palace", {})
+            command = list(server_block.get("command") or [])
+            ok, message = _check_command_binding(
+                client_name="opencode(user)",
+                config_path=opencode_config,
+                command_parts=command,
+            )
+        except Exception as exc:
+            ok, message = False, f"opencode(user): 解析失败（{opencode_config}）\n{exc}"
+    else:
+        ok, message = False, f"opencode(user): 未找到配置文件（{opencode_config}）"
+    failures += 0 if ok else 1
+    details.append(("PASS " if ok else "FAIL ") + message)
+
+    if failures:
+        return CheckResult(
+            "FAIL",
+            "至少一个 repo-local 或 user-scope 的 memory-palace MCP 入口未指向当前项目",
+            "\n\n".join(details),
+        )
+    return CheckResult(
+        "PASS",
+        "repo-local（Claude/Gemini）与 user-scope（Claude/Codex/Gemini/OpenCode）入口都已指向当前项目",
+        "\n\n".join(details),
+    )
+
+
 def classify_skill_answer(text: str) -> tuple[bool, str]:
     lowered = text.lower()
     checks = [
@@ -355,10 +610,9 @@ def classify_skill_answer(text: str) -> tuple[bool, str]:
 def smoke_claude() -> CheckResult:
     if shutil.which("claude") is None:
         return CheckResult("SKIP", "claude CLI 未安装")
-    try:
-        proc = run_command(["claude", "-p"], cwd=REPO_ROOT, input_text=PROMPT, timeout=120)
-    except subprocess.TimeoutExpired:
-        return CheckResult("FAIL", "Claude smoke 超时")
+    proc = run_command_capture(["claude", "-p"], cwd=REPO_ROOT, input_text=PROMPT, timeout=90)
+    if proc.timed_out:
+        return CheckResult("FAIL", "Claude smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
     success, details = classify_skill_answer(proc.stdout)
     if proc.returncode == 0 and success:
         return CheckResult("PASS", "Claude smoke 通过", proc.stdout.strip())
@@ -383,29 +637,28 @@ def smoke_codex() -> CheckResult:
             "additionalProperties": False,
         }
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
-        try:
-            proc = run_command(
-                [
-                    "codex",
-                    "exec",
-                    "--ephemeral",
-                    "--color",
-                    "never",
-                    "-s",
-                    "read-only",
-                    "-C",
-                    str(REPO_ROOT),
-                    "--output-schema",
-                    str(schema_path),
-                    "--output-last-message",
-                    str(output_path),
-                    PROMPT,
-                ],
-                cwd=REPO_ROOT,
-                timeout=180,
-            )
-        except subprocess.TimeoutExpired:
-            return CheckResult("FAIL", "Codex smoke 超时")
+        proc = run_command_capture(
+            [
+                "codex",
+                "exec",
+                "--ephemeral",
+                "--color",
+                "never",
+                "-s",
+                "read-only",
+                "-C",
+                str(REPO_ROOT),
+                "--output-schema",
+                str(schema_path),
+                "--output-last-message",
+                str(output_path),
+                PROMPT,
+            ],
+            cwd=REPO_ROOT,
+            timeout=60,
+        )
+        if proc.timed_out:
+            return CheckResult("FAIL", "Codex smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
         if proc.returncode != 0 or not output_path.is_file():
             return CheckResult("FAIL", "Codex smoke 未通过", (proc.stdout + "\n" + proc.stderr).strip())
         data = json.loads(output_path.read_text(encoding="utf-8"))
@@ -419,29 +672,28 @@ def smoke_codex() -> CheckResult:
 def smoke_opencode() -> CheckResult:
     if shutil.which("opencode") is None:
         return CheckResult("SKIP", "opencode CLI 未安装")
-    try:
-        proc = run_command(
-            [
-                "opencode",
-                "run",
-                "--dir",
-                str(REPO_ROOT),
-                "--format",
-                "default",
-                "For this repository's memory-palace skill, answer with exactly three bullets: "
-                "(1) the correct first move, (2) what to do when guard_action=NOOP, "
-                "(3) the path to the trigger sample file. Keep it concise.",
-            ],
-            cwd=REPO_ROOT,
-            timeout=90,
-        )
-    except subprocess.TimeoutExpired:
-        return CheckResult("FAIL", "OpenCode smoke 超时")
+    proc = run_command_capture(
+        [
+            "opencode",
+            "run",
+            "--dir",
+            str(REPO_ROOT),
+            "--format",
+            "default",
+            "For this repository's memory-palace skill, answer with exactly three bullets: "
+            "(1) the correct first move, (2) what to do when guard_action=NOOP, "
+            "(3) the path to the trigger sample file. Keep it concise.",
+        ],
+        cwd=REPO_ROOT,
+        timeout=45,
+    )
+    if proc.timed_out:
+        return CheckResult("FAIL", "OpenCode smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
     merged = (proc.stdout + "\n" + proc.stderr).strip()
     success, details = classify_skill_answer(merged)
     if proc.returncode == 0 and success:
         return CheckResult("PASS", "OpenCode smoke 通过", merged)
-    return CheckResult("FAIL", "OpenCode smoke 未通过", details)
+    return CheckResult("FAIL", "OpenCode smoke 未通过", merged or details)
 
 
 def smoke_gemini() -> CheckResult:
@@ -470,6 +722,8 @@ def smoke_gemini() -> CheckResult:
 
 
 def smoke_gemini_live_suite() -> CheckResult:
+    if SKIP_GEMINI_LIVE:
+        return CheckResult("SKIP", "Gemini live suite 被环境变量跳过")
     if shutil.which("gemini") is None:
         return CheckResult("SKIP", "gemini CLI 未安装")
     db_path = _extract_gemini_memory_palace_db_path()
@@ -660,9 +914,11 @@ def main() -> int:
     report_path = PROJECT_ROOT / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md"
     results: dict[str, CheckResult] = {
         "structure": check_structure(),
+        "description_contract": check_description_contract(),
         "mirrors": check_mirrors(),
         "sync_check": check_sync_script(),
         "gate_syntax": check_gate_syntax(),
+        "mcp_bindings": check_client_mcp_bindings(),
         "claude": smoke_claude(),
         "codex": smoke_codex(),
         "opencode": smoke_opencode(),
