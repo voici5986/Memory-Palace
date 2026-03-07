@@ -149,7 +149,7 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 | Database | [SQLite](https://www.sqlite.org/) + aiosqlite | ≥ 0.19 | Zero-config embedded database; single file, portable |
 | MCP Protocol | `mcp (FastMCP)` | ≥ 0.1 | Exposes 9 standardized tools via stdio / SSE transport |
 | HTTP Client | [httpx](https://www.python-httpx.org/) | ≥ 0.26 | Async HTTP for embedding / reranker API calls |
-| Validation | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | Request/response validation and settings management |
+| Validation | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | Request/response validation |
 | Diff Engine | `diff_match_patch` | — | Google's diff algorithm for snapshot comparison |
 
 ### Frontend
@@ -619,7 +619,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check the live MCP path on your own machine, run `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. It generates `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default.
+If you want to re-check the live MCP path on your own machine, run `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. It generates `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` locally by default. That report is meant to stay local, is ignored by `.gitignore`, and may be absent in the public GitHub repo.
 
 Full guide: [MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -833,9 +833,9 @@ For backward compatibility with legacy `nocturne_memory` deployments:
 
 ---
 
-## ⭐ Star History
+## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/#AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)
+[![Star History Chart](https://api.star-history.com/image?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/?repos=AGI-is-going-to-arrive%2FMemory-Palace&type=timeline&legend=top-left)
 
 ---
 

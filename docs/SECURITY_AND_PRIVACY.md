@@ -222,12 +222,12 @@ Authorization: Bearer <MCP_API_KEY>
 | `.DS_Store` | macOS 系统文件 |
 | `backups/` | 本地备份目录，通常只在你自己的机器上使用 |
 | `docs/improvement/` | 阶段性实施计划、重测草稿、内部排障记录 |
-| `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 运行 `python scripts/evaluate_memory_palace_skill.py` 后本地生成或更新的 skill smoke 摘要 |
-| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要 |
+| `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` | 运行 `python scripts/evaluate_memory_palace_skill.py` 后本地生成或更新的 skill smoke 摘要（默认 `.gitignore` 排除） |
+| `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` | 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后本地生成或更新的 MCP e2e 摘要（默认 `.gitignore` 排除） |
 | `backend/docs/benchmark_*.md` | 本地 benchmark 分析笔记 |
 | `backend/tests/benchmark_results.md` | 一次性 benchmark 汇总草稿 |
-| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，更适合作为维护阶段材料 |
-| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 面向维护者的补充差异清单 |
+| `docs/evaluation_old_vs_new_executive_summary_2026-03-05.md` | 一次性对照摘要，更适合作为维护阶段材料；公开 GitHub 仓库里可能不存在这一类本地文件 |
+| `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 面向维护者的补充差异清单；公开 GitHub 仓库里可能不存在这一类本地文件 |
 
 > 💡 保留 `.env.example` 作为配置模板提交到仓库。
 >

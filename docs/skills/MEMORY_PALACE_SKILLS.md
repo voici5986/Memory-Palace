@@ -98,7 +98,7 @@ Gemini 端当前有一个已知边界：
 
 ## 2. 目录职责
 
-### `memory-palace/SKILL.md`
+### `docs/skills/memory-palace/SKILL.md`
 
 负责：
 
@@ -106,7 +106,7 @@ Gemini 端当前有一个已知边界：
 - 给出最短但安全的默认流程
 - 明确哪些情况必须先检查、不能盲写
 
-### `memory-palace/variants/gemini/SKILL.md`
+### `docs/skills/memory-palace/variants/gemini/SKILL.md`
 
 负责：
 
@@ -114,7 +114,7 @@ Gemini 端当前有一个已知边界：
 - 把 first move、`NOOP` 处理、trigger sample path 直接写成锚点
 - 降低 Gemini 在 skill 自省问题上的 under-trigger 与答非所问
 
-### `memory-palace/references/mcp-workflow.md`
+### `docs/skills/memory-palace/references/mcp-workflow.md`
 
 负责：
 
@@ -122,7 +122,7 @@ Gemini 端当前有一个已知边界：
 - 记录 recall / write / compact / rebuild 的安全顺序
 - 给出 should trigger / should not trigger 示例
 
-### `memory-palace/references/trigger-samples.md`
+### `docs/skills/memory-palace/references/trigger-samples.md`
 
 负责：
 

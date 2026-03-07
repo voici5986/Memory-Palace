@@ -235,6 +235,8 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 
 这两份报告默认建议留在你自己的机器上，用来复核当前机器的结果，不作为主入口文档。
 
+它们默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上这两份文件。
+
 ## 正向 / 反向 prompt
 
 正向 prompt：

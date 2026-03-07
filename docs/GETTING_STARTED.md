@@ -306,7 +306,7 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-脚本会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 本地生成或更新摘要。这两份结果更适合当成你自己机器上的验证记录，而不是主说明文档。
+脚本会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 本地生成或更新摘要。这两份结果更适合当成你自己机器上的验证记录，而不是主说明文档；它们默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上这两份文件。
 
 ---
 

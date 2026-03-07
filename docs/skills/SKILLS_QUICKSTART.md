@@ -268,7 +268,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 - `docs/skills/TRIGGER_SMOKE_REPORT.md`（脱敏后的 smoke 摘要）
 - `docs/skills/MCP_LIVE_E2E_REPORT.md`
 
-默认建议把它们当成你自己机器上的复核产物，不把它们当成主入口文档。
+默认建议把它们当成你自己机器上的复核产物，不把它们当成主入口文档；这两份文件默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上。
 
 ---
 
@@ -305,7 +305,7 @@ Gemini 对隐藏目录有时更保守，所以这个仓库才同时补了：
 
 1. `MEMORY_PALACE_SKILLS.md` —— 设计原则、Claude 规范对齐、维护边界
 2. `CLI_COMPATIBILITY_GUIDE.md` —— 四端兼容口径和手工检查清单
-3. `memory-palace/SKILL.md` —— 真正给模型看的 skill 本体
+3. `docs/skills/memory-palace/SKILL.md` —— 真正给模型看的 skill 本体
 
 如果你只想先验证现在是不是通的，就盯住这 3 条命令：
 

@@ -145,7 +145,7 @@
 | 数据库 | [SQLite](https://www.sqlite.org/) + aiosqlite | ≥ 0.19 | 零配置嵌入式数据库，单文件、便携 |
 | MCP 协议 | `mcp (FastMCP)` | ≥ 0.1 | 通过 stdio / SSE 传输暴露 9 个标准化工具 |
 | HTTP 客户端 | [httpx](https://www.python-httpx.org/) | ≥ 0.26 | 异步 HTTP，用于 Embedding / Reranker API 调用 |
-| 数据校验 | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | 请求/响应校验和配置管理 |
+| 数据校验 | [Pydantic](https://docs.pydantic.dev/) | ≥ 2.5 | 请求/响应校验 |
 | 差异引擎 | `diff_match_patch` | — | Google 差异算法，用于快照对比 |
 
 ### 前端
@@ -627,7 +627,7 @@ python scripts/install_skill.py --targets gemini --scope user --force
 - `guard_action=NOOP` 时不要继续写入；先检查建议目标，再决定是否切换为 `update_memory`
 - 触发样例集固定在 `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-如果你想在自己的机器上复核真实 MCP 端到端链路，运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。脚本默认会在本地生成 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md`。
+如果你想在自己的机器上复核真实 MCP 端到端链路，运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。脚本默认会在本地生成 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md`。这份报告默认只建议留在本机，已被 `.gitignore` 排除，所以公开 GitHub 仓库里看不到也属于正常情况。
 
 完整指南见：[MEMORY_PALACE_SKILLS.md](docs/skills/MEMORY_PALACE_SKILLS.md)
 
@@ -838,9 +838,9 @@ curl -fsS http://127.0.0.1:8000/health
 
 ---
 
-## ⭐ Star History
+## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/#AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)
+[![Star History Chart](https://api.star-history.com/image?repos=AGI-is-going-to-arrive/Memory-Palace&type=timeline&legend=top-left)](https://www.star-history.com/?repos=AGI-is-going-to-arrive%2FMemory-Palace&type=timeline&legend=top-left)
 
 ---
 

@@ -33,15 +33,16 @@
 ## 本地验证产物怎么理解
 
 - `TRIGGER_SMOKE_REPORT.md`
-  - 运行 `python scripts/evaluate_memory_palace_skill.py` 后在本地生成
+  - 运行 `python scripts/evaluate_memory_palace_skill.py` 后在本地生成（默认不提交到仓库）
 - `MCP_LIVE_E2E_REPORT.md`
-  - 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后在本地生成
+  - 运行 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py` 后在本地生成（默认不提交到仓库）
 
 它们的定位是：
 
 - **报告当前机器上的验证结果**
 - **帮助你本地复核**
 - **默认不当成主说明入口文档**
+- **默认被 `.gitignore` 排除，公开仓库里看不到也正常**
 
 ---
 
@@ -49,7 +50,7 @@
 
 真正的 canonical bundle 在这里：
 
-- `memory-palace/`
+- `docs/skills/memory-palace/`
 
 这里面放的是：
 
