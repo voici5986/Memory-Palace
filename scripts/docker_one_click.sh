@@ -130,6 +130,29 @@ find_free_port() {
   return 1
 }
 
+wait_for_deployment_ready() {
+  local attempts="${1:-30}"
+  local sleep_seconds="${2:-2}"
+  local backend_url="http://127.0.0.1:${backend_port}/health"
+  local frontend_url="http://127.0.0.1:${frontend_port}/"
+  local sse_url="http://127.0.0.1:${frontend_port}/sse"
+  local sse_status=""
+  local attempt=0
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if curl -fsS "${backend_url}" >/dev/null 2>&1 && \
+       curl -fsS "${frontend_url}" >/dev/null 2>&1; then
+      sse_status="$(curl -sS -o /dev/null -w '%{http_code}' "${sse_url}" || true)"
+      if [[ "${sse_status}" == "200" || "${sse_status}" == "401" ]]; then
+        return 0
+      fi
+    fi
+    sleep "${sleep_seconds}"
+  done
+
+  return 1
+}
+
 cleanup_runtime_state() {
   release_path_lock "${FRONTEND_PORT_LOCK}"
   release_path_lock "${BACKEND_PORT_LOCK}"
@@ -506,6 +529,14 @@ fi
 
 data_volume="$(resolve_data_volume)"
 snapshots_volume="$(resolve_snapshots_volume)"
+upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_FRONTEND_PORT" "${frontend_port}"
+upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_BACKEND_PORT" "${backend_port}"
+upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_DATA_VOLUME" "${data_volume}"
+upsert_env_value_in_file "${env_file}" "MEMORY_PALACE_SNAPSHOTS_VOLUME" "${snapshots_volume}"
+upsert_env_value_in_file "${env_file}" "NOCTURNE_FRONTEND_PORT" "${frontend_port}"
+upsert_env_value_in_file "${env_file}" "NOCTURNE_BACKEND_PORT" "${backend_port}"
+upsert_env_value_in_file "${env_file}" "NOCTURNE_DATA_VOLUME" "${data_volume}"
+upsert_env_value_in_file "${env_file}" "NOCTURNE_SNAPSHOTS_VOLUME" "${snapshots_volume}"
 compose_project_name="${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}"
 compose_env_file_args=()
 if [[ -n "${env_file}" ]]; then
@@ -519,27 +550,39 @@ if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compo
 fi
 
 if [[ ${no_build} -eq 1 ]]; then
-  COMPOSE_PROJECT_NAME="${compose_project_name}" \
-  MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
-  MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
-  MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
-  MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-  NOCTURNE_FRONTEND_PORT="${frontend_port}" \
-  NOCTURNE_BACKEND_PORT="${backend_port}" \
-  NOCTURNE_DATA_VOLUME="${data_volume}" \
-  NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-  "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --force-recreate --remove-orphans
+  if ! COMPOSE_PROJECT_NAME="${compose_project_name}" \
+    MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
+    MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
+    MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
+    MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
+    NOCTURNE_FRONTEND_PORT="${frontend_port}" \
+    NOCTURNE_BACKEND_PORT="${backend_port}" \
+    NOCTURNE_DATA_VOLUME="${data_volume}" \
+    NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
+    "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --wait --wait-timeout 120 --force-recreate --remove-orphans; then
+    echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
+    if ! wait_for_deployment_ready 30 2; then
+      exit 1
+    fi
+    echo "[compose-up] services became ready after compose reported failure; continuing." >&2
+  fi
 else
-  COMPOSE_PROJECT_NAME="${compose_project_name}" \
-  MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
-  MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
-  MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
-  MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-  NOCTURNE_FRONTEND_PORT="${frontend_port}" \
-  NOCTURNE_BACKEND_PORT="${backend_port}" \
-  NOCTURNE_DATA_VOLUME="${data_volume}" \
-  NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-  "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --force-recreate --remove-orphans
+  if ! COMPOSE_PROJECT_NAME="${compose_project_name}" \
+    MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
+    MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
+    MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
+    MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
+    NOCTURNE_FRONTEND_PORT="${frontend_port}" \
+    NOCTURNE_BACKEND_PORT="${backend_port}" \
+    NOCTURNE_DATA_VOLUME="${data_volume}" \
+    NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
+    "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
+    echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
+    if ! wait_for_deployment_ready 30 2; then
+      exit 1
+    fi
+    echo "[compose-up] services became ready after compose reported failure; continuing." >&2
+  fi
 fi
 
 echo ""

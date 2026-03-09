@@ -229,7 +229,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
 >
-> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以 Dashboard 默认不需要再手动点 `Set API key`。
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，大多数情况下不需要再手动点 `Set API key` 才能访问受保护页面；如果你不是用一键脚本启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮。
+>
+> 当前 Docker Compose 还会额外等 **backend 和 SSE 各自的 `/health`** 都通过，才把 frontend 视为 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
 > Docker 默认还会分别持久化两类运行期数据：`memory_palace_data` 用于数据库（容器内 `/app/data`），`memory_palace_snapshots` 用于 Review snapshots（容器内 `/app/snapshots`）。如果你执行 `docker compose down -v` 或手动删除这两个卷，这两部分都会一起清空。
 >
@@ -298,13 +300,15 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 当前仓库已经把以下典型本地产物放入 `<repo-root>/.gitignore`：
 
 - 运行期数据库：`*.db`、`*.sqlite`、`*.sqlite3`
-- 本地工具配置：`.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
+- 数据库锁文件：`*.init.lock`、`*.migrate.lock`
+- 本地工具配置：`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
 - 本地缓存与临时目录：`.tmp/`、`backend/.pytest_cache/`
 - 前端本地产物：`frontend/node_modules/`、`frontend/dist/`
 - 日志与快照：`*.log`、`snapshots/`、`backups/`
 - 临时测试草稿：`frontend/src/*.tmp.test.jsx`
 - 维护期内部文档：`docs/improvement/`、`backend/docs/benchmark_*.md`
 - 一次性对照摘要：`docs/evaluation_old_vs_new_*.md`
+- 本地验证报告：`docs/skills/TRIGGER_SMOKE_REPORT.md`、`docs/skills/MCP_LIVE_E2E_REPORT.md`、`docs/skills/CLAUDE_SKILLS_AUDIT.md`
 
 如果你准备分享项目、打包交付，或者只是想做一次环境自检，建议执行：
 
@@ -312,7 +316,7 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 bash scripts/pre_publish_check.sh
 ```
 
-它会检查本地敏感产物、数据库、日志、个人路径和 `.env.example` 占位项，帮你快速确认仓库是否适合直接交付。
+它会检查常见本地敏感产物、工具配置、本地验证报告、个人路径和 `.env.example` 占位项，帮你快速确认仓库是否适合直接交付。若只是发现这些本地文件存在，通常会给出 `WARN`，提醒你在分享前自己确认。
 
 如果你额外运行下面这些验证脚本：
 
@@ -418,11 +422,15 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 > `run_sse.py` 默认监听 `0.0.0.0:8000`（通过 `HOST` 和 `PORT` 环境变量可自定义），SSE 端点路径为 `/sse`。SSE 模式受 `MCP_API_KEY` 鉴权保护。
 >
+> 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给 Docker / 脚本做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
+>
 > 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连上监听地址，但 API Key、反向代理、防火墙和传输层安全仍然要你自己补齐。
 >
 > 如果你使用 Docker 一键部署，SSE 会由独立容器启动，并通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
 >
 > 上面的 `HOST=127.0.0.1 PORT=8010` 示例是**本机回环**写法。只有在你确实要开放给远程客户端时，才改为 `HOST=0.0.0.0`（或目标绑定地址），并自行补齐网络侧安全控制。
+>
+> 如果你自己用 `curl` 或脚本先连了一次 `/sse`，然后把这条连接断掉，再单独往 `/messages` 发同一个 `session_id`，看到 `404` / `410` 是正常的：这表示前一条 SSE session 已经关闭。真正的正常链路应该是“先保持 `/sse` 连接活着，再由客户端继续往 `/messages` 发请求”。
 
 ### 6.3 客户端配置示例
 
@@ -441,7 +449,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 
 > 如果你还没创建 `backend/.venv`，先回到 **Step 2** 完成虚拟环境和依赖安装。
 >
-> Windows 客户端把上面的 `command` 改成 `C:\\ABS\\PATH\\TO\\REPO\\backend\\.venv\\Scripts\\python.exe`。不要直接写系统 `python`，不然客户端很可能会用错解释器。
+> Windows 原生环境不要把 `command` 直接改成 `python.exe` 去执行这条 `.sh`。更稳妥的做法是先准备 Git Bash / WSL，再保持 `bash + run_memory_palace_mcp_stdio.sh` 这条组合；如果当前客户端不方便跑 shell wrapper，优先参考 `docs/skills/GETTING_STARTED.md` 里的脚本化安装路径。
 
 **SSE 模式**：
 

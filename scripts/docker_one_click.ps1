@@ -520,6 +520,42 @@ function Invoke-ComposeWithRetry {
     }
 }
 
+function Get-HttpStatusCode {
+    param([string]$Url)
+
+    try {
+        $code = & curl.exe -sS -o NUL -w '%{http_code}' $Url 2>$null
+        if ([string]::IsNullOrWhiteSpace($code)) {
+            return 0
+        }
+        return [int]$code
+    }
+    catch {
+        return 0
+    }
+}
+
+function Wait-DeploymentReady {
+    param(
+        [int]$FrontendPort,
+        [int]$BackendPort,
+        [int]$Attempts = 30,
+        [int]$SleepSeconds = 2
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $backendCode = Get-HttpStatusCode -Url "http://127.0.0.1:$BackendPort/health"
+        $frontendCode = Get-HttpStatusCode -Url "http://127.0.0.1:$FrontendPort/"
+        $sseCode = Get-HttpStatusCode -Url "http://127.0.0.1:$FrontendPort/sse"
+        if ($backendCode -eq 200 -and $frontendCode -eq 200 -and @('200', '401') -contains "$sseCode") {
+            return $true
+        }
+        Start-Sleep -Seconds $SleepSeconds
+    }
+
+    return $false
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 $profileLower = $Profile.ToLower()
@@ -625,6 +661,14 @@ try {
 
     $dataVolume = Resolve-DataVolume
     $snapshotsVolume = Resolve-SnapshotsVolume
+    Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_FRONTEND_PORT' -Value "$FrontendPort"
+    Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_BACKEND_PORT' -Value "$BackendPort"
+    Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_DATA_VOLUME' -Value "$dataVolume"
+    Set-EnvValueInFile -FilePath $envFile -Key 'MEMORY_PALACE_SNAPSHOTS_VOLUME' -Value "$snapshotsVolume"
+    Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_FRONTEND_PORT' -Value "$FrontendPort"
+    Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_BACKEND_PORT' -Value "$BackendPort"
+    Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_DATA_VOLUME' -Value "$dataVolume"
+    Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_SNAPSHOTS_VOLUME' -Value "$snapshotsVolume"
     $env:MEMORY_PALACE_FRONTEND_PORT = "$FrontendPort"
     $env:MEMORY_PALACE_BACKEND_PORT = "$BackendPort"
     $env:MEMORY_PALACE_DATA_VOLUME = "$dataVolume"
@@ -641,11 +685,20 @@ try {
         throw "[compose-down] pre-cleanup failed; aborting to match fail-closed deployment behavior. detail=$($_.Exception.Message)"
     }
 
-    $composeUpArgs = @('-f', 'docker-compose.yml', 'up', '-d', '--force-recreate', '--remove-orphans')
+    $composeUpArgs = @('-f', 'docker-compose.yml', 'up', '-d', '--wait', '--wait-timeout', '120', '--force-recreate', '--remove-orphans')
     if (-not $NoBuild) {
-        $composeUpArgs = @('-f', 'docker-compose.yml', 'up', '-d', '--build', '--force-recreate', '--remove-orphans')
+        $composeUpArgs = @('-f', 'docker-compose.yml', 'up', '-d', '--build', '--wait', '--wait-timeout', '120', '--force-recreate', '--remove-orphans')
     }
-    Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs -ComposeProjectName $composeProjectName -MaxAttempts 3 -EnvFile $envFile
+    try {
+        Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs -ComposeProjectName $composeProjectName -MaxAttempts 3 -EnvFile $envFile
+    }
+    catch {
+        Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..."
+        if (-not (Wait-DeploymentReady -FrontendPort $FrontendPort -BackendPort $BackendPort)) {
+            throw
+        }
+        Write-Warning "[compose-up] services became ready after compose reported failure; continuing."
+    }
 }
 finally {
     Release-PathLock -LockDir $script:DeploymentLockDir

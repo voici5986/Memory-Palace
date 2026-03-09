@@ -46,6 +46,7 @@ _FORWARDED_HEADER_NAMES = {
     "cf-connecting-ip",
 }
 _SSE_HTTP_PATHS = {"/sse", "/sse/", "/messages", "/messages/", "/sse/messages", "/sse/messages/"}
+_PUBLIC_HTTP_PATHS = {"/health", "/health/"}
 
 
 def _get_configured_mcp_api_key() -> str:
@@ -233,6 +234,11 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
             await app(scope, receive, send)
             return
 
+        path = str(scope.get("path") or "")
+        if path in _PUBLIC_HTTP_PATHS:
+            await app(scope, receive, send)
+            return
+
         configured = _get_configured_mcp_api_key()
         headers = Headers(scope=scope)
         if not configured:
@@ -306,7 +312,11 @@ def create_sse_app() -> ASGIApp:
     async def sse_endpoint(request: Request) -> Response:
         return await handle_sse(request.scope, request.receive, request._send)  # type: ignore[reportPrivateUsage]
 
+    async def health_endpoint(_request: Request) -> Response:
+        return JSONResponse({"status": "ok", "service": "memory-palace-sse"})
+
     routes = [
+        Route("/health", endpoint=health_endpoint, methods=["GET"]),
         Route(mcp.settings.sse_path, endpoint=sse_endpoint, methods=["GET"]),
         Mount(mcp.settings.message_path, app=transport.handle_post_message),
         *mcp._custom_starlette_routes,

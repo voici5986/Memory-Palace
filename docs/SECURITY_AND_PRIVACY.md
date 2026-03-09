@@ -155,7 +155,7 @@ Authorization: Bearer <MCP_API_KEY>
    bash scripts/pre_publish_check.sh
    ```
 
-   该脚本会检查：本地敏感产物是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。
+   该脚本会检查：常见本地敏感产物 / 工具配置 / 本地报告是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。它更像“分享前仓库卫生检查”；如果只是发现本地文件存在，通常会给 `WARN`，不是直接 `FAIL`。
 
 1. **检查工作区状态** — 确认无意外暴露：
 
@@ -165,11 +165,13 @@ Authorization: Bearer <MCP_API_KEY>
 
    应确保以下文件不在提交中（均已在 `.gitignore` 中配置）：
    - `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件）
-   - `.venv`、`.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`（通常由你本地的 sync / install 脚本生成）
+   - `.venv`、`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`（通常由你本地的 sync / install 脚本生成）
    - `*.db`（数据库文件）
+   - `*.init.lock`、`*.migrate.lock`（数据库初始化 / 迁移锁文件）
    - `backend/backend.log`、`frontend/frontend.log`
    - `snapshots/`、`frontend/dist/`
    - `backend/tests/benchmark/.real_profile_cache/`
+   - `docs/skills/TRIGGER_SMOKE_REPORT.md`、`docs/skills/MCP_LIVE_E2E_REPORT.md`、`docs/skills/CLAUDE_SKILLS_AUDIT.md`
    - 任意 `.DS_Store`
 
 2. **关键字扫描** — 检查代码和文档中是否残留真实密钥：
@@ -208,8 +210,9 @@ Authorization: Bearer <MCP_API_KEY>
 |---|---|
 | `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件） | 可能包含真实 API Key |
 | `.venv`、`backend/.venv`、`frontend/.venv` | 本地虚拟环境，不应进入仓库 |
-| `.mcp.json`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/` | 本地工具 / MCP 配置目录（通常由你本地的 sync / install 脚本生成） |
+| `.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/` | 本地工具 / MCP 配置目录（通常由你本地的 sync / install 脚本生成） |
 | `*.db` | SQLite 数据库文件（如 `demo.db`） |
+| `*.init.lock`、`*.migrate.lock` | 数据库初始化 / 迁移时生成的锁文件 |
 | `backend/backend.log` | 后端运行日志 |
 | `frontend/frontend.log` | 前端运行日志 |
 | `snapshots/` | 本地快照目录 |

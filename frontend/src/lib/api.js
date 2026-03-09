@@ -6,6 +6,8 @@ const api = axios.create({
   timeout: 15000,
 });
 
+const LONG_RUNNING_REQUEST_TIMEOUT_MS = 60000;
+
 const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
 
 // Handle URI encoding for resource IDs which might contain special chars
@@ -340,13 +342,22 @@ export const retryIndexJob = (jobId, payload = {}) =>
   api.post(`/maintenance/index/job/${encodeId(jobId)}/retry`, payload).then(res => res.data);
 
 export const triggerIndexRebuild = (params = {}) =>
-  api.post('/maintenance/index/rebuild', null, { params }).then(res => res.data);
+  api.post('/maintenance/index/rebuild', null, {
+    params,
+    timeout: LONG_RUNNING_REQUEST_TIMEOUT_MS,
+  }).then(res => res.data);
 
 export const triggerMemoryReindex = (memoryId, params = {}) =>
-  api.post(`/maintenance/index/reindex/${memoryId}`, null, { params }).then(res => res.data);
+  api.post(`/maintenance/index/reindex/${memoryId}`, null, {
+    params,
+    timeout: LONG_RUNNING_REQUEST_TIMEOUT_MS,
+  }).then(res => res.data);
 
 export const triggerSleepConsolidation = (params = {}) =>
-  api.post('/maintenance/index/sleep-consolidation', null, { params }).then(res => res.data);
+  api.post('/maintenance/index/sleep-consolidation', null, {
+    params,
+    timeout: LONG_RUNNING_REQUEST_TIMEOUT_MS,
+  }).then(res => res.data);
 
 // ============ Vitality Cleanup API ============
 

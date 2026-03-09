@@ -50,6 +50,8 @@ REQUIRED_FILES = [
 GEMINI_TEST_MODEL = "gemini-3.1-pro-preview"
 GEMINI_FALLBACK_MODEL = "gemini-3-flash-preview"
 SKIP_GEMINI_LIVE = os.getenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
+CODEX_SMOKE_TIMEOUT_SEC = int(os.getenv("MEMORY_PALACE_CODEX_SMOKE_TIMEOUT_SEC", "120"))
+OPENCODE_SMOKE_TIMEOUT_SEC = int(os.getenv("MEMORY_PALACE_OPENCODE_SMOKE_TIMEOUT_SEC", "90"))
 PROMPT = (
     "In this repository, answer in exactly 3 bullets only: "
     "(1) the first memory tool call required by the memory-palace skill, "
@@ -123,11 +125,15 @@ def run_command_capture(cmd: list[str], *, cwd: Path, input_text: str | None = N
         stdout, stderr = process.communicate(input=input_text, timeout=timeout)
         return CommandCapture(returncode=process.returncode, stdout=stdout, stderr=stderr, timed_out=False)
     except subprocess.TimeoutExpired:
-        if os.name != "nt":
-            os.killpg(process.pid, signal.SIGKILL)
-        else:  # pragma: no cover
-            process.kill()
-        stdout, stderr = process.communicate()
+        _terminate_process_tree(process)
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:  # pragma: no cover
+                process.kill()
+            stdout, stderr = process.communicate()
         return CommandCapture(returncode=-9, stdout=stdout, stderr=stderr, timed_out=True)
 
 
@@ -790,7 +796,7 @@ def smoke_codex() -> CheckResult:
             ],
             cwd=REPO_ROOT,
             output_path=output_path,
-            timeout=60,
+            timeout=CODEX_SMOKE_TIMEOUT_SEC,
         )
         if proc.returncode != 0 or not output_path.is_file():
             if proc.timed_out and output_path.is_file():
@@ -827,7 +833,7 @@ def smoke_opencode() -> CheckResult:
             "(3) the path to the trigger sample file. Keep it concise.",
         ],
         cwd=REPO_ROOT,
-        timeout=45,
+        timeout=OPENCODE_SMOKE_TIMEOUT_SEC,
     )
     if proc.timed_out:
         return CheckResult("FAIL", "OpenCode smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
@@ -1054,22 +1060,32 @@ def generate_markdown(results: dict[str, CheckResult]) -> str:
 
 def main() -> int:
     report_path = PROJECT_ROOT / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md"
-    results: dict[str, CheckResult] = {
-        "structure": check_structure(),
-        "description_contract": check_description_contract(),
-        "mirrors": check_mirrors(),
-        "sync_check": check_sync_script(),
-        "gate_syntax": check_gate_syntax(),
-        "mcp_bindings": check_client_mcp_bindings(),
-        "claude": smoke_claude(),
-        "codex": smoke_codex(),
-        "opencode": smoke_opencode(),
-        "gemini": smoke_gemini(),
-        "gemini_live": smoke_gemini_live_suite(),
-        "cursor": smoke_cursor(),
-        "agent": mirror_only_status("agent"),
-        "antigravity": smoke_antigravity(),
-    }
+    checks = [
+        ("structure", check_structure),
+        ("description_contract", check_description_contract),
+        ("mirrors", check_mirrors),
+        ("sync_check", check_sync_script),
+        ("gate_syntax", check_gate_syntax),
+        ("mcp_bindings", check_client_mcp_bindings),
+        ("claude", smoke_claude),
+        ("codex", smoke_codex),
+        ("opencode", smoke_opencode),
+        ("gemini", smoke_gemini),
+        ("gemini_live", smoke_gemini_live_suite),
+        ("cursor", smoke_cursor),
+        ("agent", lambda: mirror_only_status("agent")),
+        ("antigravity", smoke_antigravity),
+    ]
+    results: dict[str, CheckResult] = {}
+    for name, runner in checks:
+        print(f"[skill-smoke] START {name}", file=sys.stderr, flush=True)
+        result = runner()
+        results[name] = result
+        print(
+            f"[skill-smoke] END {name}: {result.status} - {result.summary}",
+            file=sys.stderr,
+            flush=True,
+        )
     markdown = generate_markdown(results)
     report_path.write_text(markdown + "\n", encoding="utf-8")
     print(report_path)

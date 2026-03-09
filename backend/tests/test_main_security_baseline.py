@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -101,6 +102,41 @@ def test_try_restore_legacy_sqlite_file_skips_sqlite_without_expected_schema(
     main._try_restore_legacy_sqlite_file(_sqlite_url(target_path))
 
     assert not target_path.exists()
+
+
+def test_extract_sqlite_file_path_skips_memory_targets_and_query_string() -> None:
+    relative = main._extract_sqlite_file_path(
+        "sqlite+aiosqlite:///relative.db?cache=shared"
+    )
+    absolute = main._extract_sqlite_file_path(
+        "sqlite+aiosqlite:////tmp/demo.db?mode=rwc"
+    )
+    memory_target = main._extract_sqlite_file_path("sqlite+aiosqlite:///:memory:")
+    shared_memory_target = main._extract_sqlite_file_path(
+        "sqlite+aiosqlite:///file::memory:?cache=shared"
+    )
+
+    assert relative == Path("relative.db")
+    assert absolute == Path("/tmp/demo.db")
+    assert memory_target is None
+    assert shared_memory_target is None
+
+
+def test_try_restore_legacy_sqlite_file_skips_memory_database_urls(tmp_path) -> None:
+    legacy_path = tmp_path / "agent_memory.db"
+    with sqlite3.connect(legacy_path) as conn:
+        conn.execute(
+            "CREATE TABLE memories (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO memories(title) VALUES ('ok')")
+
+    main._try_restore_legacy_sqlite_file("sqlite+aiosqlite:///:memory:")
+    main._try_restore_legacy_sqlite_file(
+        "sqlite+aiosqlite:///file::memory:?cache=shared"
+    )
+
+    assert not Path(":memory:").exists()
+    assert not Path("file::memory:").exists()
 
 
 @pytest.mark.asyncio

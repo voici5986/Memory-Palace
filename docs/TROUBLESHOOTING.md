@@ -15,7 +15,7 @@
 >
 > 这通常不是前端挂了，而是**你还没给受保护接口授权**。
 >
-> 如果你用的是 **Docker 一键部署**，默认不需要手动点这个按钮。优先先确认是不是用了 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件。
+> 如果你用的是 **Docker 一键部署**，按推荐路径启动时通常不需要手动点这个按钮。优先先确认是不是用了 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件；如果你是手动改 env、自己起容器，或者改过代理配置，页面里仍可能保留这个按钮。
 
 **排查步骤**：
 
@@ -141,13 +141,21 @@
 
 **处理**：
 
-1. 更换端口（SSE 默认端口为 `8000`，参见 `backend/run_sse.py` 第 105 行）：
+1. 先确认 SSE 进程是不是已经起来：
+
+   ```bash
+   curl -fsS http://127.0.0.1:8010/health
+   ```
+
+   如果这里都不通，优先排查进程和端口；如果这里已经返回 `{"status":"ok","service":"memory-palace-sse"}`，再继续看 `/sse` 和 `/messages` 的鉴权或 session。
+
+2. 更换端口（SSE 默认端口为 `8000`）：
 
    ```bash
    HOST=127.0.0.1 PORT=8010 python run_sse.py
    ```
 
-2. 或查找并释放被占用端口：
+3. 或查找并释放被占用端口：
 
    ```bash
    # macOS / Linux
@@ -352,6 +360,9 @@ cd backend
    ```bash
    bash scripts/docker_one_click.sh --profile b --frontend-port 3100 --backend-port 18100
    ```
+
+   如果脚本发现你指定的端口也被占用，会继续自动换到附近空闲端口。
+   这时请以脚本最后打印出来的 `Frontend` / `Backend API` 地址为准，不要继续死盯你最初输入的端口。
 
 4. 镜像构建失败时，检查 Dockerfile 是否完整：
    - `deploy/docker/Dockerfile.backend` — 基于 `python:3.11-slim`

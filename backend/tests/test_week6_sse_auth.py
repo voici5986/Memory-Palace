@@ -12,7 +12,7 @@ import sys
 import time
 
 import run_sse
-from run_sse import apply_mcp_api_key_middleware
+from run_sse import apply_mcp_api_key_middleware, create_sse_app
 
 
 def _build_client(*, client=("testclient", 50000)) -> TestClient:
@@ -120,6 +120,17 @@ def test_sse_auth_preserves_streaming_response(monkeypatch) -> None:
             lines = list(response.iter_lines())
     assert "event: endpoint" in lines
     assert "data: ok" in lines
+
+
+def test_sse_health_endpoint_is_public(monkeypatch) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+
+    with TestClient(create_sse_app()) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "memory-palace-sse"}
 
 
 def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:

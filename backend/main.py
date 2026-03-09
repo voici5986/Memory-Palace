@@ -5,6 +5,7 @@ import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import unquote
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -54,7 +55,11 @@ def _extract_sqlite_file_path(database_url: Optional[str]) -> Optional[Path]:
     if not database_url.startswith(prefix):
         return None
     raw_path = database_url[len(prefix):]
+    raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
+    raw_path = unquote(raw_path)
     if not raw_path:
+        return None
+    if raw_path == ":memory:" or raw_path.startswith("file::memory:"):
         return None
     if raw_path.startswith("/") or (
         len(raw_path) >= 3 and raw_path[1] == ":" and raw_path[2] == "/"

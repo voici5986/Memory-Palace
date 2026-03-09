@@ -36,6 +36,7 @@ const isAbortError = (error) =>
         error.name === 'AbortError' ||
         error.name === 'CanceledError')
   );
+const CHILD_PAGE_SIZE = 50;
 
 function CrumbBar({ items, onNavigate }) {
   const { t } = useTranslation();
@@ -126,6 +127,7 @@ export default function MemoryBrowser() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [visibleChildCount, setVisibleChildCount] = useState(CHILD_PAGE_SIZE);
   const nodeRequestRef = useRef(0);
   const nodeAbortControllerRef = useRef(null);
 
@@ -175,11 +177,42 @@ export default function MemoryBrowser() {
     }
   }, [conversationDirty, defaultConversation]);
 
-  const navigateTo = (nextPath, nextDomain = domain) => {
+  const hasUnsavedNodeEdit = useMemo(() => {
+    if (!editing || isRoot || !data.node) return false;
+    return (
+      editContent !== (data.node.content || '')
+      || editDisclosure !== (data.node.disclosure || '')
+      || editPriority !== (data.node.priority ?? 0)
+    );
+  }, [data.node, editContent, editDisclosure, editPriority, editing, isRoot]);
+
+  useEffect(() => {
+    if (!hasUnsavedNodeEdit) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedNodeEdit]);
+
+  const navigateTo = (nextPath, nextDomain = domain, { force = false } = {}) => {
+    const sameTarget = nextDomain === domain && nextPath === path;
+    if (
+      !force
+      && !sameTarget
+      && hasUnsavedNodeEdit
+      && !window.confirm(t('memory.prompts.discardNodeChanges'))
+    ) {
+      return false;
+    }
     const params = new URLSearchParams();
     params.set('domain', nextDomain);
     if (nextPath) params.set('path', nextPath);
     setSearchParams(params);
+    return true;
   };
 
   const visibleChildren = useMemo(() => {
@@ -192,6 +225,16 @@ export default function MemoryBrowser() {
       return queryOk && priorityOk;
     });
   }, [data.children, priorityFilter, searchValue]);
+  const displayedChildren = useMemo(
+    () => visibleChildren.slice(0, visibleChildCount),
+    [visibleChildCount, visibleChildren]
+  );
+  const remainingChildrenCount = Math.max(visibleChildren.length - displayedChildren.length, 0);
+  const hasMoreChildren = remainingChildrenCount > 0;
+
+  useEffect(() => {
+    setVisibleChildCount(CHILD_PAGE_SIZE);
+  }, [domain, path, searchValue, priorityFilter, data.children]);
 
   const hasNodeGist = Boolean(data.node?.gist_text);
   const gistQualityText =
@@ -285,7 +328,7 @@ export default function MemoryBrowser() {
       setConversationDirty(false);
       setConversation(defaultConversation);
       setFeedback({ type: 'ok', text: t('memory.feedback.memoryCreated', { uri: created.uri }) });
-      navigateTo(created.path, created.domain);
+      navigateTo(created.path, created.domain, { force: true });
     } catch (err) {
       setFeedback({ type: 'error', text: extractApiError(err, t('memory.errors.createNode')) });
     } finally {
@@ -301,7 +344,7 @@ export default function MemoryBrowser() {
     try {
       await deleteMemoryNode(path, domain);
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-      navigateTo(parent, domain);
+      navigateTo(parent, domain, { force: true });
       setFeedback({ type: 'ok', text: t('memory.feedback.pathDeleted') });
     } catch (err) {
       setFeedback({ type: 'error', text: extractApiError(err, t('memory.errors.deleteNode')) });
@@ -626,14 +669,35 @@ export default function MemoryBrowser() {
                       <p>{t('memory.noChildMatches')}</p>
                     </div>
                   ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                      {visibleChildren.map((child) => (
-                        <ChildCard
-                          key={`${child.domain}:${child.path}`}
-                          child={child}
-                          onOpen={() => navigateTo(child.path, child.domain)}
-                        />
-                      ))}
+                    <div className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {displayedChildren.map((child) => (
+                          <ChildCard
+                            key={`${child.domain}:${child.path}`}
+                            child={child}
+                            onOpen={() => navigateTo(child.path, child.domain)}
+                          />
+                        ))}
+                      </div>
+                      {hasMoreChildren ? (
+                        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[color:var(--palace-line)] bg-white/20 px-4 py-4 text-center">
+                          <p className="text-xs text-[color:var(--palace-muted)]">
+                            {t('memory.showingChildren', {
+                              shown: displayedChildren.length,
+                              total: visibleChildren.length,
+                            })}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setVisibleChildCount((current) => current + CHILD_PAGE_SIZE)}
+                            className="palace-btn-ghost bg-white/50"
+                          >
+                            {t('memory.loadMoreChildren', {
+                              count: Math.min(CHILD_PAGE_SIZE, remainingChildrenCount),
+                            })}
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </GlassCard>

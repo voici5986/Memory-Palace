@@ -113,11 +113,15 @@ function LanguageToggle() {
   );
 }
 
-function Layout({ authState, onSetApiKey, onClearApiKey }) {
+export function buildRoutesKey(authState, authRevision) {
+  return authState
+    ? `${authState.source}:${authState.mode}:${authRevision}`
+    : `no-auth:${authRevision}`;
+}
+
+function Layout({ authState, authRevision, onSetApiKey, onClearApiKey }) {
   const { t } = useTranslation();
-  const routesKey = authState
-    ? `${authState.source}:${authState.mode}:${authState.key}`
-    : 'no-auth';
+  const routesKey = buildRoutesKey(authState, authRevision);
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden text-[color:var(--palace-ink)]">
@@ -181,6 +185,7 @@ function Layout({ authState, onSetApiKey, onClearApiKey }) {
 function App() {
   const { t, i18n } = useTranslation();
   const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
+  const [authRevision, setAuthRevision] = React.useState(0);
 
   React.useEffect(() => {
     document.title = t('app.documentTitle');
@@ -199,17 +204,20 @@ function App() {
       return;
     }
     setAuthState(saved);
+    setAuthRevision((value) => value + 1);
   }, [authState, t]);
 
   const handleClearApiKey = React.useCallback(() => {
     clearStoredMaintenanceAuth();
     setAuthState(getMaintenanceAuthState());
+    setAuthRevision((value) => value + 1);
   }, []);
 
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Layout
         authState={authState}
+        authRevision={authRevision}
         onSetApiKey={handleSetApiKey}
         onClearApiKey={handleClearApiKey}
       />

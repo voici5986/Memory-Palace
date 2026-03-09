@@ -143,6 +143,8 @@ const zhCN = {
     emptyContent: '（内容为空）',
     childMemories: '子记忆',
     noChildMatches: '当前筛选条件下没有匹配的子记忆。',
+    showingChildren: '当前显示 {{shown}} / {{total}} 条子记忆。',
+    loadMoreChildren: '再加载 {{count}} 条',
     gistView: '摘要',
     originalView: '原文',
     feedback: {
@@ -156,6 +158,7 @@ const zhCN = {
     },
     prompts: {
       deletePath: '确认删除路径 {{target}}？',
+      discardNodeChanges: '当前节点还有未保存编辑，确认丢弃并继续？',
     },
     errors: {
       loadNode: '加载记忆节点失败',

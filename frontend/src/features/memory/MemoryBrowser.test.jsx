@@ -34,7 +34,16 @@ const ROOT_PAYLOAD = {
   breadcrumbs: [{ path: '', label: 'root' }],
 };
 
-const makeNodePayload = (path, content) => ({
+const makeChild = (path, contentSnippet = '') => ({
+  domain: 'core',
+  path,
+  name: path,
+  priority: 0,
+  gist_text: null,
+  content_snippet: contentSnippet,
+});
+
+const makeNodePayload = (path, content, children = []) => ({
   node: {
     path,
     domain: 'core',
@@ -48,7 +57,7 @@ const makeNodePayload = (path, content) => ({
     gist_quality: null,
     source_hash: null,
   },
-  children: [],
+  children,
   breadcrumbs: [
     { path: '', label: 'root' },
     { path, label: path },
@@ -81,6 +90,7 @@ describe('MemoryBrowser', () => {
     vi.clearAllMocks();
     window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
     await i18n.changeLanguage('zh-CN');
+    vi.spyOn(window, 'confirm').mockImplementation(() => true);
     api.getMemoryNode.mockResolvedValue(ROOT_PAYLOAD);
     api.createMemoryNode.mockResolvedValue({ success: true, created: true, path: 'created/path', domain: 'core', uri: 'core://created/path' });
     api.updateMemoryNode.mockResolvedValue({ success: true, updated: true });
@@ -225,5 +235,48 @@ describe('MemoryBrowser', () => {
 
     await screen.findByText(/点击右上角“设置 API 密钥”/);
     expect(screen.queryByText(/Click "Set API key"/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the current node when navigation is cancelled with unsaved edits', async () => {
+    const user = userEvent.setup();
+    window.confirm.mockReturnValueOnce(false);
+    api.getMemoryNode.mockResolvedValue(
+      makeNodePayload('path-a', 'draft content', [makeChild('path-b', 'child node')])
+    );
+
+    renderMemoryBrowser('/memory?domain=core&path=path-a');
+
+    await user.click(await screen.findByRole('button', { name: i18n.t('common.actions.edit') }));
+    const textarea = await screen.findByDisplayValue('draft content');
+    await user.type(textarea, ' updated');
+    await user.click(screen.getByRole('button', { name: /path-b/i }));
+
+    expect(window.confirm).toHaveBeenCalledWith(i18n.t('memory.prompts.discardNodeChanges'));
+    expect(api.getMemoryNode).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText('path-a').length).toBeGreaterThan(0);
+  });
+
+  it('shows child memories in batches and loads more on demand', async () => {
+    const user = userEvent.setup();
+    api.getMemoryNode.mockResolvedValue({
+      ...ROOT_PAYLOAD,
+      children: Array.from({ length: 55 }, (_, index) => makeChild(`memory-${index + 1}`)),
+    });
+
+    renderMemoryBrowser('/memory?domain=core');
+
+    await screen.findByText('memory-1');
+    expect(screen.queryByText('memory-55')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t('memory.showingChildren', { shown: 50, total: 55 }))
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: i18n.t('memory.loadMoreChildren', { count: 5 }),
+      })
+    );
+
+    expect(await screen.findByText('memory-55')).toBeInTheDocument();
   });
 });

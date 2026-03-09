@@ -161,7 +161,7 @@
 | 动画 | [Framer Motion](https://www.framer.com/motion/) | 12.x | 流畅页面转场和微交互 |
 | 路由 | React Router DOM | 6.x | 客户端路由，支撑四大视图 |
 | API 客户端 | [Axios](https://axios-http.com/) | 1.x | 仪表盘 API 请求与鉴权头注入 |
-| Markdown | react-markdown + remark-gfm | — | 渲染记忆内容，支持 GitHub 风格 Markdown |
+| Markdown | react-markdown + remark-gfm | — | 预留给可选的 Markdown 渲染链路；当前仪表盘里的记忆正文仍以纯文本方式展示 |
 | 图标 | [Lucide React](https://lucide.dev/) | — | 统一图标体系 |
 
 ### 各层实现详解
@@ -433,7 +433,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - Backend API：`http://127.0.0.1:18000`
 > - SSE：`http://127.0.0.1:3000/sse`
 >
-> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以默认不需要手动点 `Set API key`。
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，通常不需要再手动点 `Set API key` 才能访问受保护页面；如果你不是按这条路径启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮。
+>
+> 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
 > Docker 默认还会分别持久化两类运行期数据：`memory_palace_data` 用于数据库（容器内 `/app/data`），`memory_palace_snapshots` 用于 Review snapshots（容器内 `/app/snapshots`）。如果你执行 `docker compose down -v` 或手动删除这两个卷，这两部分都会一起清空。
 

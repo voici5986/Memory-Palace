@@ -11,6 +11,7 @@
 .gemini/
 .agent/
 .mcp.json
+.mcp.json.bak
 .tmp/
 
 # OS artifacts
@@ -22,6 +23,8 @@ demo.db
 *.db
 *.sqlite
 *.sqlite3
+*.init.lock
+*.migrate.lock
 *.log
 snapshots/
 backups/

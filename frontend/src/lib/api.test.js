@@ -32,7 +32,7 @@ describe('extractApiError', () => {
     };
 
     expect(extractApiError(error)).toBe(
-      'index_job_enqueue_failed | queue_full | operation=retry_rebuild_index',
+      'Failed to enqueue index job | Queue is full | operation=retry_rebuild_index',
     );
   });
 
@@ -48,7 +48,7 @@ describe('extractApiError', () => {
         },
       },
     };
-    expect(extractApiError(error)).toBe('queue_full');
+    expect(extractApiError(error)).toBe('Queue is full');
   });
 
   it('adds an actionable hint for auth failures', () => {
@@ -64,7 +64,7 @@ describe('extractApiError', () => {
       },
     };
     expect(extractApiError(error)).toBe(
-      'maintenance_auth_failed | invalid_or_missing_api_key | Click "Set API key" in the top-right corner, or configure MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL first.',
+      'Maintenance API authentication failed | API key is missing or invalid | Click "Set API key" in the top-right corner, or configure MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL first.',
     );
   });
 

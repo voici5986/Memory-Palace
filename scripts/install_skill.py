@@ -174,7 +174,29 @@ def ensure_wrapper_script() -> None:
 def read_json_file(path: Path) -> dict:
     if not path.is_file():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"Invalid JSON in {path}: {exc.msg} (line {exc.lineno}, column {exc.colno}). "
+            "Fix or remove the file and retry."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"Invalid JSON root in {path}: expected an object, got {type(payload).__name__}."
+        )
+    return payload
+
+
+def backup_file(path: Path, *, dry_run: bool) -> None:
+    if not path.is_file():
+        return
+    backup_path = path.with_name(f"{path.name}.bak")
+    print(f"[backup] {path} -> {backup_path}")
+    if dry_run:
+        return
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, backup_path)
 
 
 def write_json_file(path: Path, payload: dict, *, dry_run: bool) -> None:
@@ -182,7 +204,17 @@ def write_json_file(path: Path, payload: dict, *, dry_run: bool) -> None:
     if dry_run:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    backup_file(path, dry_run=dry_run)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_text_file(path: Path, content: str, *, dry_run: bool) -> None:
+    print(f"[text] write -> {path}")
+    if dry_run:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_file(path, dry_run=dry_run)
+    path.write_text(content, encoding="utf-8")
 
 
 def _normalized(value: object) -> str:
@@ -398,11 +430,7 @@ def install_mcp_binding(target_name: str, *, scope: str, dry_run: bool) -> None:
         trimmed = _strip_codex_memory_palace_block(existing)
         rendered = _codex_server_block_text().rstrip()
         next_text = f"{trimmed}\n\n{rendered}\n" if trimmed else f"{rendered}\n"
-        print(f"[toml] write -> {config_path}")
-        if dry_run:
-            return
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(next_text, encoding="utf-8")
+        write_text_file(config_path, next_text, dry_run=dry_run)
         return
 
     if target_name == "gemini":

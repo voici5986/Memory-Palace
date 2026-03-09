@@ -61,6 +61,12 @@ python scripts/sync_memory_palace_skill.py --check
 - `--check`
   - 检查当前安装结果是否与 canonical 和当前仓库绑定一致
 
+补一条很实用的细节：
+
+- 如果脚本准备改写现有配置文件（例如 `.mcp.json`、`.gemini/settings.json`、`~/.codex/config.toml`），现在会先在同目录生成一个 `*.bak` 备份
+  - 例如：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`
+- 如果目标 JSON 本身已经坏掉，脚本会直接报出具体文件路径和行列号，不再吐一整屏 Python traceback
+
 ### 推荐命令
 
 ```bash
@@ -80,6 +86,13 @@ python scripts/install_skill.py \
   --with-mcp \
   --check
 ```
+
+如果你看到的是：
+
+- `workspace --check` 通过
+- 但 `user --check` 失败
+
+先别急着怀疑仓库本身坏了。更常见的情况是你自己 home 目录里还留着旧版 skill / MCP 配置。直接对同一组 target 重跑一次 `--scope user --with-mcp --force` 即可；脚本现在会先在原目录留 `*.bak`，再覆盖当前文件。
 
 这一步会做两件事：
 
@@ -220,13 +233,16 @@ python scripts/install_skill.py \
 python scripts/evaluate_memory_palace_skill.py
 ```
 
-这条命令会在本地生成脱敏 smoke 摘要：
+这条命令会在本地生成 smoke 摘要：
 
 ```text
 docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
-如果你是刚 clone 下来的 GitHub 仓库，这个文件默认可能还不存在；先跑完命令再看，属于正常现象。
+如果你是刚 clone 下来的 GitHub 仓库，这个文件默认可能还不存在；先跑完命令再看，属于正常现象。它属于本地验证产物，分享前建议自己检查是否包含本机路径、客户端配置路径或其他环境痕迹。
+
+这条检查会串行调用多种 CLI；如果你的机器上已经装了 `claude`、`codex`、`opencode`、`gemini`，完整跑完通常要几分钟，不建议看到几十秒无输出就直接当成“挂死”。
+另外它默认还会尝试 `gemini_live`：如果当前 Gemini 配置能反推出真实数据库路径，会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
 
 ### 真实 MCP 调用链
 
@@ -242,6 +258,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
+它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。
 

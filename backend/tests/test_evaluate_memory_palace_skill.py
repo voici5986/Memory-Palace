@@ -222,3 +222,61 @@ def test_run_command_capture_until_output_file_returns_after_json_is_ready(
     assert result.timed_out is False
     assert result.returncode == 0
     assert terminated == [123]
+
+
+def test_run_command_capture_force_kills_when_graceful_shutdown_hangs(
+    monkeypatch, tmp_path: Path
+) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+
+    class _FakeProcess:
+        def __init__(self):
+            self.pid = 456
+            self.returncode = None
+            self.calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def communicate(self, input=None, timeout=None):
+            _ = input
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired("cmd", timeout, output="partial-out", stderr="partial-err")
+            if self.calls == 2:
+                raise subprocess.TimeoutExpired("cmd", timeout, output="still-out", stderr="still-err")
+            self.returncode = -9
+            return ("final-out", "final-err")
+
+    fake_process = _FakeProcess()
+    killed: list[tuple[int, int]] = []
+    terminated: list[int] = []
+
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill.subprocess,
+        "Popen",
+        lambda *args, **kwargs: fake_process,
+    )
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill,
+        "_terminate_process_tree",
+        lambda process: terminated.append(process.pid),
+    )
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill.os,
+        "killpg",
+        lambda pid, sig: killed.append((pid, sig)),
+    )
+
+    result = evaluate_memory_palace_skill.run_command_capture(
+        ["dummy"],
+        cwd=tmp_path,
+        timeout=1,
+    )
+
+    assert result.timed_out is True
+    assert result.returncode == -9
+    assert terminated == [456]
+    assert killed == [(456, evaluate_memory_palace_skill.signal.SIGKILL)]
+    assert result.stdout == "final-out"
+    assert result.stderr == "final-err"

@@ -29,12 +29,15 @@ vi.mock('axios', () => ({
 }));
 
 import {
-  getMemoryNode,
-  runObservabilitySearch,
-  listOrphanMemories,
-  getOrphanMemoryDetail,
-  deleteOrphanMemory,
-  extractApiErrorCode,
+    getMemoryNode,
+    runObservabilitySearch,
+    listOrphanMemories,
+    getOrphanMemoryDetail,
+    deleteOrphanMemory,
+    extractApiErrorCode,
+    triggerIndexRebuild,
+    triggerMemoryReindex,
+    triggerSleepConsolidation,
 } from './api';
 
 describe('api contract regression', () => {
@@ -131,6 +134,27 @@ describe('api contract regression', () => {
     expect(result.mode_applied).toBe('hybrid');
     expect(result.degraded).toBe(false);
     expect(result.results).toEqual([]);
+  });
+
+  it('uses extended timeout for long-running index maintenance operations', async () => {
+    mockApi.post.mockResolvedValue({ data: { ok: true } });
+
+    await triggerIndexRebuild({ reason: 'test' });
+    await triggerMemoryReindex(42, { reason: 'test' });
+    await triggerSleepConsolidation({ reason: 'test' });
+
+    expect(mockApi.post).toHaveBeenNthCalledWith(1, '/maintenance/index/rebuild', null, {
+      params: { reason: 'test' },
+      timeout: 60000,
+    });
+    expect(mockApi.post).toHaveBeenNthCalledWith(2, '/maintenance/index/reindex/42', null, {
+      params: { reason: 'test' },
+      timeout: 60000,
+    });
+    expect(mockApi.post).toHaveBeenNthCalledWith(3, '/maintenance/index/sleep-consolidation', null, {
+      params: { reason: 'test' },
+      timeout: 60000,
+    });
   });
 
   it('routes orphan maintenance APIs through unified client', async () => {

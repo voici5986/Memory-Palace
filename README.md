@@ -165,7 +165,7 @@ The current frontend now defaults to English. Use the top-right language button 
 | Animation | [Framer Motion](https://www.framer.com/motion/) | 12.x | Smooth page transitions and micro-interactions |
 | Routing | React Router DOM | 6.x | Client-side routing for four dashboard views |
 | API Client | [Axios](https://axios-http.com/) | 1.x | Dashboard API requests and auth header injection |
-| Markdown | react-markdown + remark-gfm | — | Renders memory content with GitHub Flavored Markdown |
+| Markdown | react-markdown + remark-gfm | — | Reserved for optional Markdown rendering workflows; the current dashboard still renders memory bodies as plain text |
 | Icons | [Lucide React](https://lucide.dev/) | — | Consistent icon set across all views |
 
 ### How Each Layer Works
@@ -433,7 +433,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - Backend API: `http://127.0.0.1:18000`
 > - SSE: `http://127.0.0.1:3000/sse`
 >
-> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so users do not need to click `Set API key` just to open the dashboard.
+> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path you usually do not need to click `Set API key` just to use protected dashboard requests. If you started containers some other way, or changed env / proxy wiring manually, you may still see the button.
+>
+> The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
 > Docker also persists two runtime data paths by default: `memory_palace_data` stores the database (`/app/data` in the container), and `memory_palace_snapshots` stores Review snapshots (`/app/snapshots` in the container). If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
 

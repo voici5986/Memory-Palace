@@ -77,6 +77,12 @@ docs/skills/memory-palace/
   - 检查 skill 是否与 canonical 一致
   - 如果同时传了 `--with-mcp`，还会检查 MCP 绑定是否到位
 
+当前还有两个和“少踩坑”直接相关的行为：
+
+- 如果脚本要覆盖已有配置，会先在原目录留一份 `*.bak`
+  - 常见文件名会长这样：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`
+- 如果某个 JSON 配置已经被手工改坏，脚本会直接报出坏文件路径和行列号，方便你先修文件再重跑
+
 ## 推荐命令
 
 ### 1) 先同步 repo-local mirrors
@@ -111,11 +117,14 @@ python scripts/install_skill.py \
   --check
 ```
 
+如果 `workspace --check` 已经通过，但 `user --check` 还在报 `SKILL FAIL / mismatch`，先优先怀疑你 home 目录里残留了旧版镜像或旧的 MCP 配置。通常直接重跑同一条 `--scope user --with-mcp --force` 就够了；脚本现在会先生成 `*.bak`，不会上来就把原文件静默覆盖掉。
+
 说明：
 
 - 这里的 `Codex/OpenCode` 会完成 repo-local skill mirror
 - 但 `Codex/OpenCode` 的 MCP 不会在 workspace scope 下自动落项目配置
 - 这是当前文档口径里的**明确边界**，不是遗漏
+- 如果你是在新机器上第一次配置 `Codex/OpenCode`，优先直接跑 `python scripts/install_skill.py --targets codex,opencode --scope user --with-mcp --force`；手工 `codex mcp add` / GUI 注册更适合作为兜底排障手段
 
 ### 3) 打通 user-scope MCP 注册
 
@@ -236,6 +245,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
+如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。
+另外，这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
 
 ### 真实 MCP e2e
 
@@ -251,6 +262,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
+`MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
 
 ## 正向 / 反向 prompt
 
