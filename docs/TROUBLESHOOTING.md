@@ -209,6 +209,63 @@
 
 ---
 
+## 3.2 运行 `python mcp_server.py` 时提示 `No module named 'sqlalchemy'`
+
+**现象**：
+
+- 本地直接运行 `python mcp_server.py`，启动前就报：
+
+  ```text
+  ModuleNotFoundError: No module named 'sqlalchemy'
+  ```
+
+**这通常不是 Memory Palace 功能逻辑坏了**，而是当前启动这个 MCP 进程的 Python 环境里没有装后端依赖。
+
+`sqlalchemy` 是 `backend/requirements.txt` 里的硬依赖；`mcp_server.py` 启动时会先导入数据库层，所以如果解释器不对，进程会在真正启动前直接退出。
+
+**最常见的两种情况**：
+
+1. 你开了一个新终端，但没有重新激活 `backend/.venv`
+2. 你在 Claude Code / Codex / OpenCode 这类客户端里配置本地 MCP 时，写的是系统 `python`，不是项目自己的 `.venv` Python
+
+**处理方式**：
+
+1. 先确认你在项目自己的虚拟环境里安装过依赖：
+
+   ```bash
+   cd backend
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+2. 如果你只是想在当前终端里直接启动 MCP：
+
+   ```bash
+   cd backend
+   ./.venv/bin/python mcp_server.py
+   ```
+
+   Windows PowerShell：
+
+   ```powershell
+   cd backend
+   .\.venv\Scripts\python.exe mcp_server.py
+   ```
+
+3. 如果你是在客户端里配置本地 stdio MCP，优先把 `command` 直接写成项目自己的 `.venv` Python，不要只写 `python`。
+
+**快速自检**：
+
+```bash
+cd backend
+./.venv/bin/python -c "import sqlalchemy; print(sqlalchemy.__version__)"
+```
+
+如果这条命令能正常输出版本号，再启动 `mcp_server.py` 就不会卡在这个问题上。
+
+---
+
 ## 4. Docker 一键脚本失败
 
 **排查步骤**：

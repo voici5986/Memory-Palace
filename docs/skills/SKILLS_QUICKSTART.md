@@ -185,6 +185,7 @@ codex mcp list
 - 把上面的 `/ABS/PATH/TO/REPO` 换成你的真实仓库路径
 - 这条配置会写到 `~/.codex/config.toml`
 - 这是 `Codex CLI` 当前的产品行为，不是本仓库少了文件
+- 如果你把这条命令改写成别的 shell / 客户端配置，别把 `source .venv/bin/activate` 随手删掉；要么先激活项目自己的 `.venv`，要么直接改成 `.venv` 里的 Python。否则 MCP 进程可能会在启动前就因为解释器不对而报 `No module named 'sqlalchemy'`
 
 ---
 

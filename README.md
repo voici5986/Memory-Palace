@@ -390,11 +390,16 @@ cd backend
 # stdio mode (for common stdio clients such as Claude Code / Codex / OpenCode)
 python mcp_server.py
 
+# safer in a new terminal or client config
+./.venv/bin/python mcp_server.py   # Windows: .\.venv\Scripts\python.exe mcp_server.py
+
 # SSE mode (loopback example; change HOST for remote access)
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > Note: `stdio` connects directly to the MCP tool process and does not pass through the HTTP/SSE auth middleware, so MCP tools can still be used locally without `MCP_API_KEY`. This applies to `stdio` only — protected HTTP/SSE routes still follow the normal API key rules.
+>
+> The plain `python mcp_server.py` form assumes you are still using the same `backend/.venv` where you ran `pip install -r requirements.txt`. If you launch MCP from a new terminal or a client config, it is safer to point to the project venv directly. Otherwise the process can fail before startup with errors like `ModuleNotFoundError: No module named 'sqlalchemy'`.
 >
 > This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
@@ -550,10 +555,15 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 # stdio mode (for common stdio clients — Claude Code, Codex, OpenCode, etc.)
 cd backend && python mcp_server.py
 
+# safer in a new terminal or client config
+cd backend && ./.venv/bin/python mcp_server.py   # Windows: cd backend && .\.venv\Scripts\python.exe mcp_server.py
+
 # SSE mode (loopback example; change HOST for remote access)
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
+> The plain `python mcp_server.py` form assumes `backend/.venv` is already active. If you are wiring up a client on a fresh terminal, use the venv's Python directly to avoid starting with the wrong interpreter.
+>
 > Use `HOST=0.0.0.0` only when you really need remote clients and have already added the usual network protections.
 
 Full tool semantics: [TOOLS.md](docs/TOOLS.md)

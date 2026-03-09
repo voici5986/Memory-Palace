@@ -390,11 +390,16 @@ cd backend
 # stdio 模式（用于常见 stdio 客户端，如 Claude Code / Codex / OpenCode）
 python mcp_server.py
 
+# 如果你是在新终端或客户端配置里启动，下面这条更稳
+./.venv/bin/python mcp_server.py   # Windows PowerShell：.\.venv\Scripts\python.exe mcp_server.py
+
 # SSE 模式（下面这个命令是本机回环示例；远程访问请改 HOST）
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
 > 说明：`stdio` 直接连接 MCP 工具进程，不经过 HTTP/SSE 鉴权中间层；未设置 `MCP_API_KEY` 时也可本地使用 MCP 工具。这里说的是 `stdio` 本身，不包括受保护的 HTTP / SSE 路由。
+>
+> 上面这条 `python mcp_server.py` 默认你还在使用刚才安装依赖的那个 `backend/.venv`。如果你换了一个新终端，或者是在 Claude Code / Codex / OpenCode 这类客户端里配置本地 MCP，优先直接指向项目自己的 `.venv`。否则很容易因为解释器不对，在启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'`。
 >
 > 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
 
@@ -558,10 +563,15 @@ Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
 # stdio 模式（用于常见 stdio 客户端——Claude Code、Codex、OpenCode 等）
 cd backend && python mcp_server.py
 
+# 如果你是在新终端或客户端配置里启动，下面这条更稳
+cd backend && ./.venv/bin/python mcp_server.py   # Windows PowerShell：cd backend && .\.venv\Scripts\python.exe mcp_server.py
+
 # SSE 模式（下面这个命令是本机回环示例；远程访问请改 HOST）
 cd backend && HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
+> 上面这条 `python mcp_server.py` 默认 `backend/.venv` 已经激活；如果不是，优先改用项目自己的 `.venv` 解释器，避免启动时用错 Python。
+>
 > 只有在你确实需要远程客户端时，才改成 `HOST=0.0.0.0`；同时记得补齐网络侧安全措施。
 
 完整工具语义：[TOOLS.md](docs/TOOLS.md)
