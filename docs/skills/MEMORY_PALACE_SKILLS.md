@@ -87,7 +87,8 @@ scripts/install_skill.py
 现在的设计目标是：
 
 - **可直接分发**：canonical bundle 固定落在 `docs/skills/memory-palace/`
-- **可跨 CLI 使用**：通过同步脚本在本地生成 `.claude/.codex/.opencode/.cursor/.agent` 等 mirrors；Gemini 在当前工作区执行 workspace 安装后可用项目级入口，跨仓时仍优先 `user-scope install`
+- **可跨 CLI 使用**：通过同步脚本在本地生成 `.claude/.codex/.opencode` 等 mirrors；Gemini 在当前工作区执行 workspace 安装后可用项目级入口，跨仓时仍优先 `user-scope install`
+- **可投影到 IDE 宿主**：`Cursor / Windsurf / VSCode-host / Antigravity` 这类宿主现在统一走 `AGENTS.md + scripts/render_ide_host_config.py`，而不是把 hidden mirrors 当成默认用户入口
 - **可验证**：通过 `sync_memory_palace_skill.py --check` 与仓内门禁持续校验
 - **可迭代**：先优化 `description` 的触发质量，再优化 `SKILL.md` 正文与 reference
 
@@ -152,6 +153,12 @@ Gemini 端当前有一个已知边界：
 - 如果 `--check` 报 drift，先跑一次同步，再重新跑 `evaluate_memory_palace_skill.py`
 - 如果只剩 `claude(user)` 绑定失败，优先补当前项目在 `~/.claude.json` 下的 project-scoped `mcpServers.memory-palace`，不要直接去改兄弟仓的项目块
 
+这里要特别区分一件事：
+
+- `.cursor/.agent` 这类目录作为**兼容投影**仍然可能存在
+- 但对公开用户口径，它们不再是 IDE 宿主的默认主入口
+- IDE 宿主默认应看 `AGENTS.md + scripts/render_ide_host_config.py`
+
 ### `scripts/install_skill.py`
 
 负责：
@@ -161,6 +168,15 @@ Gemini 端当前有一个已知边界：
 - 在需要时补齐 `--with-mcp` 的 CLI 配置，但 MCP 仍绑定到**当前 checkout** 的 `scripts/run_memory_palace_mcp_stdio.sh`
 - 对 Gemini，这也是当前更稳妥的推荐安装路径
 - 当目标是 Gemini 时，自动替换为 `variants/gemini/SKILL.md`
+- 对 `cursor / agent / antigravity`，当前更适合作为兼容投影或 workflow 分发入口，而不是公开用户默认路径
+
+### `scripts/render_ide_host_config.py`
+
+负责：
+
+- 为 `Cursor / Windsurf / VSCode-host / Antigravity` 生成 repo-local MCP 配置片段
+- 明确这些 IDE 宿主的主路径是 `AGENTS.md + MCP snippet`
+- 仅在必要时切到 `python-wrapper` 版本（如 `Antigravity` 的 `stdin/stdout` / CRLF 兼容场景）
 
 ## 3. 设计原则
 
@@ -283,12 +299,19 @@ search_memory(query="...", include_session=True)
 - 这次为了扩大触发，把普通 docs / coding 任务也吸进来了
 - 触发是触发了，但第一步不是 `boot` / `search before write`，行为仍然错
 
-`evaluate_memory_palace_skill.py` 则把这套样例和实际 CLI smoke 固化成可重复执行的回归入口，用来回答：
+`evaluate_memory_palace_skill.py` 则把这套样例和实际 smoke / 兼容检查固化成可重复执行的回归入口，用来回答：
 
 - mirrors 还一致吗
 - YAML/frontmatter 还合法吗
 - Claude / Codex / OpenCode / Gemini 现在是通过、部分通过，还是失败
 - 当前回归结果是否比上一次更好
+
+注意这里的覆盖重点是：
+
+- CLI 客户端的真实 smoke
+- IDE 宿主（如 `Cursor / Antigravity`）的兼容检查
+
+它不是对所有 IDE 宿主都做 GUI 级 live automation。
 
 `evaluate_memory_palace_mcp_e2e.py` 则进一步回答另一层关键问题：
 
@@ -312,7 +335,7 @@ search_memory(query="...", include_session=True)
 这样做的收益是：
 
 - Claude / Codex / OpenCode 仍然可用
-- Gemini / Cursor 这类对隐藏目录更保守的客户端也更容易得到一致结果
+- Gemini 与部分 IDE 宿主在引用 repo-visible 路径时也更容易得到一致结果
 
 如果需要做 Gemini CLI 的更稳 smoke，当前更可靠的调用方式是：
 

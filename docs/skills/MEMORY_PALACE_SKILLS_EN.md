@@ -82,7 +82,8 @@ The core issue with the old design was not "too little information," but fragmen
 The current design goals are:
 
 - **Distributable**: The canonical bundle is fixed at `docs/skills/memory-palace/`.
-- **Cross-CLI Compatible**: Mirrors for `.claude`, `.codex`, `.opencode`, `.cursor`, and `.agent` are generated locally via the sync script. Gemini can use the project-level entry after running workspace installation in the current workspace, but `user-scope install` is still preferred for cross-repo use.
+- **Cross-CLI Compatible**: Mirrors for `.claude`, `.codex`, and `.opencode` are generated locally via the sync script. Gemini can use the project-level entry after running workspace installation in the current workspace, but `user-scope install` is still preferred for cross-repo use.
+- **Projectable to IDE hosts**: IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` should now use `AGENTS.md + scripts/render_ide_host_config.py`, rather than treating hidden mirrors as the default user path.
 - **Verifiable**: Continuous validation via `sync_memory_palace_skill.py --check` and repository gates.
 - **Iterative**: Optimize the trigger quality of the `description` first, then optimize the `SKILL.md` body and references.
 
@@ -147,6 +148,12 @@ Responsible for:
 - If `--check` reports drift, run a sync first, then re-run `evaluate_memory_palace_skill.py`.
 - If only `claude(user)` binding fails, prioritize supplementing the project-scoped `mcpServers.memory-palace` in `~/.claude.json` for the current project, rather than modifying project blocks of sibling repos.
 
+One distinction matters here:
+
+- `.cursor/.agent` style directories may still exist as **compatibility projections**
+- but they are no longer the default public entry path for IDE hosts
+- the default IDE-host path is now `AGENTS.md + scripts/render_ide_host_config.py`
+
 ### `scripts/install_skill.py`
 
 Responsible for:
@@ -156,6 +163,15 @@ Responsible for:
 - Populating `--with-mcp` CLI configs when needed, while still binding MCP to the **current checkout** via `scripts/run_memory_palace_mcp_stdio.sh`.
 - For Gemini, this is currently the more reliable recommended installation path.
 - When the target is Gemini, it automatically replaces the content with `variants/gemini/SKILL.md`.
+- For `cursor / agent / antigravity`, the script is now better understood as a compatibility projection or workflow distribution path, not the default public user path.
+
+### `scripts/render_ide_host_config.py`
+
+Responsible for:
+
+- Rendering repo-local MCP config snippets for `Cursor / Windsurf / VSCode-host / Antigravity`
+- Making the IDE-host path explicit as `AGENTS.md + MCP snippet`
+- Switching to the `python-wrapper` form only when a host really needs wrapper-based compatibility
 
 ## 3. Design Principles
 
@@ -278,12 +294,19 @@ Without this set of samples, every subsequent `description` adjustment can only 
 - Pulling in general docs / coding tasks to expand triggering.
 - Triggering correctly but failing the first step (e.g., not performing `boot` / `search before write`).
 
-`evaluate_memory_palace_skill.py` solidifies these samples and actual CLI smoke tests into a repeatable regression entry to answer:
+`evaluate_memory_palace_skill.py` solidifies these samples and actual smoke / compatibility checks into a repeatable regression entry to answer:
 
 - Are mirrors still consistent?
 - Is YAML/frontmatter still valid?
 - Are Claude / Codex / OpenCode / Gemini passing, partially passing, or failing?
 - Is the current regression result better than the last one?
+
+Its practical coverage is centered on:
+
+- real smoke for CLI clients
+- compatibility checks for IDE hosts such as `Cursor / Antigravity`
+
+It is not trying to provide GUI-level live automation for every IDE host.
 
 `evaluate_memory_palace_mcp_e2e.py` further answers another critical layer:
 
@@ -307,7 +330,7 @@ Therefore, the canonical `SKILL.md` now uniformly requires:
 The benefits of doing this are:
 
 - Claude / Codex / OpenCode remain usable.
-- Clients like Gemini / Cursor, which are more conservative about hidden directories, are more likely to get consistent results.
+- Gemini and some IDE hosts are more likely to get consistent results when they rely on repo-visible paths.
 
 If a more reliable smoke test for Gemini CLI is needed, the current more dependable call method is:
 

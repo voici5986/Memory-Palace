@@ -6,7 +6,7 @@
 - `Gemini CLI`：完成 `sync/install` 后，可获得 **repo-local skill 自动发现** + **workspace MCP 直连**
 - `Codex CLI`：完成 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
 - `OpenCode`：完成 `sync` 后，可获得 **repo-local skill 自动发现**；`MCP` 仍以 **user-scope 注册** 为主
-- `Cursor` / `.agent`：当前仍以 mirror 结构兼容为主，未提升为统一直连入口
+- `IDE Hosts`（`Cursor / Windsurf / VSCode-host / Antigravity`）：主路径改为 **repo-local `AGENTS.md` + MCP snippet**，不再把 hidden skill mirrors 当默认入口
 - 当前设计已对齐 `Anthropic skill-creator` 的核心要求：`frontmatter`、`trigger description`、`references`、`eval/smoke`
 
 ## 先分清两层
@@ -209,10 +209,45 @@ python scripts/install_skill.py \
   - skill 可 repo-local 自动发现
   - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
 
-### Cursor / `.agent`
+## IDE Hosts
 
-- 目前仍以 mirror 分发与结构兼容为主
-- 未纳入当前这轮统一的 workspace/user MCP 自动注册链
+`Cursor / Windsurf / VSCode-host / Antigravity` 现在统一按 **IDE Host** 处理，而不是继续假设它们都是 hidden skill mirror 的直接消费者。
+
+统一口径：
+
+- **技能投影入口**：repo-root `AGENTS.md`
+- **执行入口**：本地 MCP 配置，指向当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`
+- **宿主差异**：只在必要时补一层兼容包装，而不是为每个 IDE 维护一整套 live smoke
+
+其中：
+
+- `Cursor / Windsurf / VSCode-host`
+  - 主路径都是 `AGENTS.md + MCP snippet`
+  - 前提是宿主或扩展本身支持 local stdio MCP 和 workspace/project rules
+- `Antigravity`
+  - 也归入 IDE Host
+  - 但规则发现要写成：**优先读取 `AGENTS.md`，兼容旧 `GEMINI.md`**
+  - 可额外投影一个 workflow：
+    `docs/skills/memory-palace/variants/antigravity/global_workflows/memory-palace.md`
+
+对应的配置片段建议不要手抄，直接运行：
+
+```bash
+python scripts/render_ide_host_config.py --host cursor
+python scripts/render_ide_host_config.py --host windsurf
+python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host antigravity
+```
+
+如果某个宿主存在 `stdin/stdout` 或 CRLF 兼容问题，再切换到 wrapper 版本：
+
+```bash
+python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper
+```
+
+更多说明见：
+
+- `IDE_HOSTS.md`
 
 ## 最小验证链
 

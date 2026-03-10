@@ -3,6 +3,8 @@
 > 如果你只想把当前仓库这条 skill + MCP 链路接通，按这份做就够了。
 >
 > **先补一个边界说明**：当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`，安装脚本生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`。如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**；不要把下面这些 shell 示例理解成“PowerShell 直接可用”。
+>
+> **再补一条范围说明**：这份主要写给 `Claude Code / Gemini CLI / Codex / OpenCode` 这类 CLI 客户端。`Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，请直接看 `IDE_HOSTS.md`。
 
 ## 🎯 先记住一句话
 
@@ -38,6 +40,11 @@ docs/skills/memory-palace/
 - `agents/openai.yaml`
 
 你运行同步 / 安装命令后，`.claude/.codex/.gemini/.opencode/...` 这些镜像目录才会出现在本地。刚 clone 下来、还没执行命令前看不到它们，属于正常现象。
+
+如果你接的是 IDE 宿主，不要把 hidden mirrors 当成默认主路径。那条路径现在单独收到了：
+
+- `IDE_HOSTS.md`
+- `python scripts/render_ide_host_config.py --host ...`
 
 ---
 
@@ -159,7 +166,7 @@ python scripts/install_skill.py \
 
 ---
 
-## 5. 四个客户端现在怎么理解
+## 5. 四个 CLI 客户端现在怎么理解
 
 下面这些结论默认你已经跑完了上面的 `sync/install` 命令。
 
@@ -206,6 +213,11 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍以 user-scope 注册为主
+
+如果你接的是 `Cursor / Windsurf / VSCode-host / Antigravity`，这里先停下，不要继续套用 CLI 的 hidden mirror 逻辑。直接改看：
+
+- `IDE_HOSTS.md`
+- `python scripts/render_ide_host_config.py --host ...`
 
 ---
 

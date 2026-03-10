@@ -10,6 +10,8 @@
    - `SKILLS_QUICKSTART.md`
 3. **再看完整设计**
    - `MEMORY_PALACE_SKILLS.md`
+4. **如果你接的是 IDE 宿主**
+   - `IDE_HOSTS.md`
 
 ---
 
@@ -27,6 +29,9 @@
 - `CLI_COMPATIBILITY_GUIDE.md`
   - 面向多 CLI 接入场景
   - 重点看 Claude / Gemini / Codex / OpenCode 的差异
+- `IDE_HOSTS.md`
+  - 面向 Cursor / Windsurf / VSCode-host / Antigravity 这类 IDE 宿主
+  - 重点看 `AGENTS.md + MCP snippet` 这条投影路径，而不是 hidden skill mirrors
 
 ---
 
@@ -59,3 +64,11 @@
 一句话理解：
 
 > 公开文档负责告诉用户怎么用，canonical bundle 负责定义这套 skill 到底是什么。
+
+补一条当前仓库口径：
+
+> `Memory-Palace/AGENTS.md` 现在也作为 repo-local 规则入口随仓提供，便于 Antigravity 等已支持 `AGENTS.md` 的客户端直接读取本仓约束；旧环境仍可继续兼容 `GEMINI.md` 路径约定。
+
+再补一条新的统一口径：
+
+> `Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE hosts 不再以 hidden skill mirrors 作为默认接入方式。它们应通过 `AGENTS.md + python scripts/render_ide_host_config.py ...` 这条投影路径接入本仓的 skills + MCP 能力。

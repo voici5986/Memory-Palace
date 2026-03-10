@@ -6,7 +6,7 @@
 - `Gemini CLI`: After completing `sync/install`, you get **repo-local skill auto-discovery** + **workspace MCP direct connection**.
 - `Codex CLI`: After completing `sync`, you get **repo-local skill auto-discovery**; `MCP` still primarily uses **user-scope registration**.
 - `OpenCode`: After completing `sync`, you get **repo-local skill auto-discovery**; `MCP` still primarily uses **user-scope registration**.
-- `Cursor` / `.agent`: Currently remains compatible via mirror structures; not yet promoted as a unified direct connection entry point.
+- `IDE Hosts` (`Cursor / Windsurf / VSCode-host / Antigravity`): the primary path is now **repo-local `AGENTS.md` + MCP snippet**, not hidden skill mirrors.
 - The current design is aligned with the core requirements of `Anthropic skill-creator`: `frontmatter`, `trigger description`, `references`, and `eval/smoke`.
 
 ## Distinguish the Two Layers
@@ -221,10 +221,45 @@ Conclusion:
   - Skill can be auto-discovered repo-locally.
   - MCP is still recommended to be registered to the current repository via `--scope user --with-mcp`.
 
-### Cursor / `.agent`
+## IDE Hosts
 
-- Currently still based on mirror distribution and structural compatibility.
-- Not yet included in this round of unified workspace/user MCP automatic registration chains.
+`Cursor / Windsurf / VSCode-host / Antigravity` are now treated as **IDE Hosts**, instead of being modeled as direct hidden-skill-mirror consumers.
+
+Unified stance:
+
+- **skill projection entry**: repo-root `AGENTS.md`
+- **execution entry**: local MCP config pointing at `scripts/run_memory_palace_mcp_stdio.sh`
+- **host differences**: handled as small compatibility layers when needed, instead of maintaining full live-smoke workflows per IDE
+
+In practice:
+
+- `Cursor / Windsurf / VSCode-host`
+  - use the same `AGENTS.md + MCP snippet` path
+  - only when the host or extension supports local stdio MCP and workspace/project rules
+- `Antigravity`
+  - still belongs to the IDE Host category
+  - but its rule discovery should be documented as: **prefer `AGENTS.md`, while keeping `GEMINI.md` as a legacy fallback**
+  - and it may additionally project a workflow at:
+    `docs/skills/memory-palace/variants/antigravity/global_workflows/memory-palace.md`
+
+Do not hand-write these snippets. Render them directly:
+
+```bash
+python scripts/render_ide_host_config.py --host cursor
+python scripts/render_ide_host_config.py --host windsurf
+python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host antigravity
+```
+
+If a host has `stdin/stdout` or CRLF quirks, switch to the wrapper form:
+
+```bash
+python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper
+```
+
+See also:
+
+- `IDE_HOSTS_EN.md`
 
 ## Minimal Validation Chain
 

@@ -9,7 +9,7 @@ This document is intended for technical users who need to understand the interna
 | Layer | Technology | Version Requirement | Role |
 |---|---|---|---|
 | Backend | FastAPI + SQLAlchemy + SQLite | FastAPI ≥0.109 · SQLAlchemy ≥2.0 · aiosqlite ≥0.19 | Memory R/W, retrieval, review, maintenance |
-| MCP | `mcp.server.fastmcp` | mcp ≥0.1 | Exposes a unified tool interface for Codex / Claude Code / Gemini CLI / OpenCode; `Cursor` / `Antigravity` boundary notes reserved |
+| MCP | `mcp.server.fastmcp` | mcp ≥0.1 | Exposes a unified tool interface for Codex / Claude Code / Gemini CLI / OpenCode; for IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity`, the recommended path is repo-local `AGENTS.md` plus an MCP config snippet |
 | Frontend | React + Vite + TailwindCSS + Framer Motion | React ≥18.2 · Vite ≥7.3 · TailwindCSS ≥3.3 · Framer Motion ≥12.34 | Visual management Dashboard |
 | Runtime | Built-in queue and worker | — | Write serialization, index rebuilding, vitality decay, sleep consolidation |
 | Deployment | Docker Compose + profile scripts | Docker ≥20 · Compose ≥2.0 | Quick deployment with A/B/C/D tiers |

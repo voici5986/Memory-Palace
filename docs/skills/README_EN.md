@@ -10,6 +10,8 @@ If this is your first time looking here, it is recommended to read in this order
    - `SKILLS_QUICKSTART_EN.md`
 3. **Then read the full design**
    - `MEMORY_PALACE_SKILLS_EN.md`
+4. **If you are integrating an IDE host**
+   - `IDE_HOSTS_EN.md`
 
 ---
 
@@ -27,6 +29,9 @@ If this is your first time looking here, it is recommended to read in this order
 - `CLI_COMPATIBILITY_GUIDE_EN.md`
   - For multi-CLI integration scenarios
   - Mainly focuses on the differences among Claude / Gemini / Codex / OpenCode
+- `IDE_HOSTS_EN.md`
+  - For IDE-like hosts such as Cursor / Windsurf / VSCode-host / Antigravity
+  - Focuses on the `AGENTS.md + MCP snippet` projection path instead of hidden skill mirrors
 
 ---
 
@@ -59,3 +64,11 @@ What is inside:
 A one-sentence way to understand it:
 
 > The public documents are responsible for telling users how to use it, while the canonical bundle is responsible for defining what this skill actually is.
+
+One more repository-level note:
+
+> `Memory-Palace/AGENTS.md` is now shipped as a repo-local rule entry as well, so clients such as Antigravity that support `AGENTS.md` can read the repository constraints directly. Older setups can still fall back to the legacy `GEMINI.md` convention.
+
+One more unified repository stance:
+
+> IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` should no longer treat hidden skill mirrors as the default integration path. They should consume the repository through `AGENTS.md + python scripts/render_ide_host_config.py ...`, which projects the same skills + MCP capability surface into IDE hosts.

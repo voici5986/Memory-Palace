@@ -2,7 +2,7 @@
 
 > This document is specifically written for those who want to "get it running and start using it first."
 >
-> It doesn't dwell on abstract concepts; it answers three things: **what these skills actually are, how to use them directly in the current repository, and how to configure the four clients.**
+> It doesn't dwell on abstract concepts; it answers three things: **what these skills actually are, how to configure the CLI clients, and which path IDE hosts should use.**
 
 ---
 
@@ -27,7 +27,7 @@ In a nutshell:
 >
 > - **Smoke tests** for `Claude / Codex / OpenCode / Gemini` have results.
 > - `Gemini live` is not yet at a stage to be described as "fully passing"; more accurately: if the Gemini configuration cannot resolve the database path, it stops at `PARTIAL`.
-> - Results for `Cursor / agent / Antigravity` depend on the local machine environment and should not be generalized as a single state.
+> - `Cursor / Windsurf / VSCode-host / Antigravity` are now grouped as **IDE Hosts**; their primary path is `AGENTS.md + MCP snippet`, not hidden skill mirrors.
 >
 > **A prerequisite for Windows users**:
 >
@@ -94,9 +94,14 @@ So:
 - The `Codex` MCP in the recent validation environment has been corrected.
 - For `OpenCode`, it is recommended to manually confirm once with `mcp list`.
 
+If you are integrating an IDE host, do not keep reading with a hidden-mirror mental model. Jump directly to:
+
+- `IDE_HOSTS_EN.md`
+- `python scripts/render_ide_host_config.py --host <cursor|windsurf|vscode|antigravity>`
+
 ---
 
-## 🛠️ How to configure the four clients
+## 🛠️ How to configure the four CLI clients
 
 ## 1) `Claude Code`
 
@@ -259,6 +264,43 @@ The UI entry for different versions of `OpenCode` may look different, but these 
 
 ---
 
+## 5) How to configure IDE hosts
+
+These hosts are now grouped together as **IDE Hosts**:
+
+- `Cursor`
+- `Windsurf`
+- `VSCode-host`
+- `Antigravity`
+
+The unified stance is simple:
+
+- **rules entry**: `AGENTS.md`
+- **MCP entry**: `python scripts/render_ide_host_config.py --host ...`
+- **host differences**: add a wrapper / workflow only when needed; do not assume these IDEs should directly consume hidden `SKILL.md` mirrors
+
+Recommended commands:
+
+```bash
+python scripts/render_ide_host_config.py --host cursor
+python scripts/render_ide_host_config.py --host windsurf
+python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host antigravity
+```
+
+If a host has `stdin/stdout` or CRLF quirks, switch to:
+
+```bash
+python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper
+```
+
+One-line memory:
+
+- CLI clients: default to hidden skill mirrors + `install_skill.py`
+- IDE hosts: default to `AGENTS.md` + `render_ide_host_config.py`
+
+---
+
 ## 🔍 How to tell if the trigger was successful
 
 The simplest positive prompt:
@@ -291,7 +333,7 @@ Check for drift in the skill mirror:
 python scripts/sync_memory_palace_skill.py --check
 ```
 
-Check smoke tests for the four clients:
+Check the current multi-client smoke path:
 
 ```bash
 python scripts/evaluate_memory_palace_skill.py
@@ -342,16 +384,21 @@ Still not enough.
 
 `Codex` MCP primarily looks at the user-level config `~/.codex/config.toml`.
 
-### Myth 4: Antigravity can also auto-register via `--with-mcp` like other CLIs
+### Myth 4: IDE hosts should start from hidden skill mirrors
 
 No.
 
-`Antigravity` is currently distributed as a workflow target in the installation script:
+For `Cursor / Windsurf / VSCode-host / Antigravity`, the current primary path is:
 
-- workspace: `.agent/workflows/memory-palace.md`
-- user: `~/.gemini/antigravity/global_workflows/memory-palace.md`
+- repo-root `AGENTS.md`
+- `python scripts/render_ide_host_config.py --host ...`
 
-It is not part of the `--with-mcp` auto-registration chain, and its GUI smoke tests still require manual verification.
+`Antigravity` only keeps one extra host-specific difference:
+
+- a workflow can still be projected into `.agent/workflows/...` or `~/.gemini/antigravity/global_workflows/...`
+- rule discovery should prefer `AGENTS.md`, while keeping `GEMINI.md` as a legacy fallback
+
+But that does not change the fact that it belongs to the IDE-host path.
 
 ---
 
@@ -360,8 +407,9 @@ It is not part of the `--with-mcp` auto-registration chain, and its GUI smoke te
 If you've got it running, follow this order:
 
 1. `MEMORY_PALACE_SKILLS_EN.md` —— Design principles, Claude spec alignment, maintenance boundaries.
-2. `CLI_COMPATIBILITY_GUIDE_EN.md` —— Compatibility status and manual checklists for the four clients.
-3. `docs/skills/memory-palace/SKILL.md` —— The actual skill body intended for the model.
+2. `CLI_COMPATIBILITY_GUIDE_EN.md` —— Unified compatibility guidance for CLI clients and IDE hosts.
+3. `IDE_HOSTS_EN.md` —— The primary path for Cursor / Windsurf / VSCode-host / Antigravity.
+4. `docs/skills/memory-palace/SKILL.md` —— The actual skill body intended for the model.
 
 If you just want to verify if it's currently working, focus on these 3 commands:
 

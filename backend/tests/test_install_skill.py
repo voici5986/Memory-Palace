@@ -53,3 +53,211 @@ def test_write_json_file_creates_backup_before_overwrite(tmp_path: Path) -> None
     assert backup_path.is_file()
     assert json.loads(backup_path.read_text(encoding="utf-8")) == {"old": True}
     assert json.loads(config_path.read_text(encoding="utf-8")) == {"new": True}
+
+
+def test_install_target_antigravity_copies_workspace_workflow(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    workflow_source = (
+        project_root
+        / "docs"
+        / "skills"
+        / "memory-palace"
+        / "variants"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    workflow_source.parent.mkdir(parents=True, exist_ok=True)
+    workflow_source.write_text("workflow\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module, "workspace_root", lambda: project_root)
+
+    module.install_target(
+        "antigravity",
+        source=project_root / "docs" / "skills" / "memory-palace",
+        base_dir=project_root,
+        mode="copy",
+        force=False,
+        dry_run=False,
+    )
+
+    destination = project_root / ".agent" / "workflows" / "memory-palace.md"
+    assert destination.read_text(encoding="utf-8") == "workflow\n"
+
+
+def test_check_skill_target_antigravity_accepts_matching_user_workflow(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    home_dir = tmp_path / "home"
+    workflow_source = (
+        project_root
+        / "docs"
+        / "skills"
+        / "memory-palace"
+        / "variants"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    workflow_source.parent.mkdir(parents=True, exist_ok=True)
+    workflow_source.write_text("workflow\n", encoding="utf-8")
+    destination = home_dir / ".gemini" / "antigravity" / "global_workflows" / "memory-palace.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("workflow\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    ok, message = module.check_skill_target(
+        "antigravity",
+        base_dir=home_dir,
+        source=project_root / "docs" / "skills" / "memory-palace",
+        scope="user",
+    )
+
+    assert ok is True
+    assert str(destination) == message
+
+
+def test_install_target_antigravity_copies_workflow_and_removes_legacy_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_dir = tmp_path / "project"
+    workflow_source = (
+        project_dir
+        / "docs"
+        / "skills"
+        / "memory-palace"
+        / "variants"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    workflow_source.parent.mkdir(parents=True, exist_ok=True)
+    workflow_source.write_text(
+        "Use AGENTS.md first, then GEMINI.md.\n"
+        "docs/skills/memory-palace/references/mcp-workflow.md\n"
+        "docs/skills/memory-palace/references/trigger-samples.md\n",
+        encoding="utf-8",
+    )
+    base_dir = tmp_path / "home"
+    destination = base_dir / ".gemini" / "antigravity" / "global_workflows" / "memory-palace.md"
+    legacy = destination.with_name("acg-memory-palace.md")
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("legacy", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_dir)
+    monkeypatch.setattr(module, "workspace_root", lambda: project_dir / "workspace")
+
+    module.install_target(
+        "antigravity",
+        source=project_dir / "docs" / "skills" / "memory-palace",
+        base_dir=base_dir,
+        mode="copy",
+        force=False,
+        dry_run=False,
+    )
+
+    assert destination.read_text(encoding="utf-8") == workflow_source.read_text(encoding="utf-8")
+    assert not legacy.exists()
+
+
+def test_install_target_antigravity_replaces_legacy_workflow(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    workflow_source = (
+        project_root
+        / "docs"
+        / "skills"
+        / "memory-palace"
+        / "variants"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    workflow_source.parent.mkdir(parents=True, exist_ok=True)
+    workflow_source.write_text(
+        "Prefer AGENTS.md and keep GEMINI.md as legacy fallback.\n",
+        encoding="utf-8",
+    )
+
+    destination_base = tmp_path / "home"
+    legacy_path = (
+        destination_base
+        / ".gemini"
+        / "antigravity"
+        / "global_workflows"
+        / "acg-memory-palace.md"
+    )
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("old workflow", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    module.install_target(
+        "antigravity",
+        source=project_root / "docs" / "skills" / "memory-palace",
+        base_dir=destination_base,
+        mode="copy",
+        force=True,
+        dry_run=False,
+    )
+
+    installed_path = (
+        destination_base
+        / ".gemini"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    assert installed_path.is_file()
+    assert installed_path.read_text(encoding="utf-8") == workflow_source.read_text(
+        encoding="utf-8"
+    )
+    assert not legacy_path.exists()
+
+
+def test_install_target_antigravity_workspace_scope_uses_agent_workflows_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    workflow_source = (
+        project_root
+        / "docs"
+        / "skills"
+        / "memory-palace"
+        / "variants"
+        / "antigravity"
+        / "global_workflows"
+        / "memory-palace.md"
+    )
+    workflow_source.parent.mkdir(parents=True, exist_ok=True)
+    workflow_source.write_text("Prefer AGENTS.md.\n", encoding="utf-8")
+    workspace_dir = tmp_path / "workspace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module, "workspace_root", lambda: workspace_dir)
+
+    module.install_target(
+        "antigravity",
+        source=project_root / "docs" / "skills" / "memory-palace",
+        base_dir=workspace_dir,
+        mode="copy",
+        force=False,
+        dry_run=False,
+    )
+
+    installed_path = workspace_dir / ".agent" / "workflows" / "memory-palace.md"
+    assert installed_path.is_file()
+    assert installed_path.read_text(encoding="utf-8") == workflow_source.read_text(
+        encoding="utf-8"
+    )

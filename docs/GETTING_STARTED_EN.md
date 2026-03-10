@@ -2,7 +2,7 @@
 
 This guide helps you set up the Memory Palace local development environment or Docker deployment in 5 minutes.
 
-> **Memory Palace** is a long-term memory system designed for AI Agents. It provides 9 tools via the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) protocol, enabling persistent memory capabilities for clients such as Claude Code, Codex, Gemini CLI, and OpenCode. For `Cursor` and `Antigravity`, please refer to the boundary descriptions in `docs/skills/SKILLS_QUICKSTART_EN.md` first.
+> **Memory Palace** is a long-term memory system designed for AI Agents. It provides 9 tools via the [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) protocol, enabling persistent memory capabilities for clients such as Claude Code, Codex, Gemini CLI, and OpenCode. If you are integrating an IDE host such as `Cursor / Windsurf / VSCode-host / Antigravity`, start with `docs/skills/IDE_HOSTS_EN.md`.
 
 ---
 

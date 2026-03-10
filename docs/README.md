@@ -1,6 +1,6 @@
 # Memory Palace 文档中心
 
-> **Memory Palace** 是一套为 AI 编程助手设计的长期记忆系统，通过 MCP（Model Context Protocol）为 Codex / Claude Code / Gemini CLI / OpenCode 提供统一的记忆读写、检索、审查与维护路径；`Cursor` 与 `Antigravity` 仍建议先看 `docs/skills/SKILLS_QUICKSTART.md` 里的边界说明。
+> **Memory Palace** 是一套为 AI 编程助手设计的长期记忆系统，通过 MCP（Model Context Protocol）为 Codex / Claude Code / Gemini CLI / OpenCode 提供统一的记忆读写、检索、审查与维护路径；对 `Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，当前推荐先看 `docs/skills/IDE_HOSTS.md`。
 >
 > 许可证：MIT
 >
@@ -20,7 +20,7 @@
 |---|---|
 | [GETTING_STARTED.md](GETTING_STARTED.md) | 5 分钟跑通本地开发 + Docker，附 MCP 客户端配置示例 |
 | [DASHBOARD_GUIDE_CN.md](DASHBOARD_GUIDE_CN.md) | 按页面解释 Dashboard 每个按钮、字段和典型操作流程 |
-| [skills/GETTING_STARTED.md](skills/GETTING_STARTED.md) | 第一次把 skill + MCP 真正接到当前仓库 |
+| [skills/GETTING_STARTED.md](skills/GETTING_STARTED.md) | 第一次把 CLI 客户端的 skill + MCP 真正接到当前仓库 |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | 启动失败、端口冲突、鉴权失败、搜索降级等常见问题排查 |
 | [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) | API Key 安全配置、隐私保护、分享前自检 |
 
@@ -31,7 +31,7 @@
 | [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) | 后端、前端、MCP、Docker 的实现结构与技术栈一览 |
 | [TOOLS.md](TOOLS.md) | 9 个 MCP 工具的输入输出、返回约定与降级语义 |
 | [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md) | A/B/C/D 四档位配置模板、参数调优与部署方式 |
-| [skills/SKILLS_QUICKSTART.md](skills/SKILLS_QUICKSTART.md) | 一页看懂 skills 怎么触发、怎么配 MCP、怎么验收 |
+| [skills/SKILLS_QUICKSTART.md](skills/SKILLS_QUICKSTART.md) | 一页看懂 CLI 客户端怎么触发 skills、怎么配 MCP、怎么验收 |
 | [changelog/dashboard_i18n_2026-03-09.md](changelog/dashboard_i18n_2026-03-09.md) | 仪表盘默认英文、中英切换、截图与验证摘要 |
 
 ## 🧩 Skills 与客户端
@@ -40,6 +40,7 @@
 |---|---|
 | [skills/MEMORY_PALACE_SKILLS.md](skills/MEMORY_PALACE_SKILLS.md) | canonical `memory-palace` skill 设计、安装与多 CLI 编排策略 |
 | [skills/CLI_COMPATIBILITY_GUIDE.md](skills/CLI_COMPATIBILITY_GUIDE.md) | 各 CLI 的推荐安装路径、检查方式与已知边界 |
+| [skills/IDE_HOSTS.md](skills/IDE_HOSTS.md) | Cursor / Windsurf / VSCode-host / Antigravity 这类 IDE 宿主的接入方式 |
 
 ## 📊 测评与质量
 

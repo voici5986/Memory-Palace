@@ -41,7 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Install the canonical Memory Palace skill into workspace-local or user-local "
-            "CLI skill directories, and optionally register MCP bindings that point to this repo."
+            "CLI skill directories, and optionally register MCP bindings that point to this repo. "
+            "For IDE-like hosts such as Cursor/Windsurf/VSCode-host/Antigravity, prefer "
+            "scripts/render_ide_host_config.py plus repo-local AGENTS.md instead of hidden skill mirrors."
         ),
     )
     parser.add_argument(
@@ -49,7 +51,9 @@ def parse_args() -> argparse.Namespace:
         default="claude,codex,opencode,cursor,agent",
         help=(
             "Comma-separated targets. Available: claude,codex,gemini,cursor,opencode,agent,"
-            "antigravity,all. Default excludes gemini because user-scope install is more reliable there."
+            "antigravity,all. Cursor/agent/antigravity remain compatibility-only projections; "
+            "IDE hosts should prefer scripts/render_ide_host_config.py plus repo-local AGENTS.md. "
+            "Default excludes gemini because user-scope install is more reliable there."
         ),
     )
     parser.add_argument(

@@ -2,7 +2,7 @@
 
 本指南帮助你在 5 分钟内跑通 Memory Palace 本地开发环境或 Docker 部署。
 
-> **Memory Palace** 是一个为 AI Agent 设计的长期记忆系统，通过 [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) 协议提供 9 个工具，让 Claude Code、Codex、Gemini CLI、OpenCode 等客户端具备持久化记忆能力；`Cursor` 与 `Antigravity` 仍建议先参考 `docs/skills/SKILLS_QUICKSTART.md` 里的边界说明。
+> **Memory Palace** 是一个为 AI Agent 设计的长期记忆系统，通过 [MCP（Model Context Protocol）](https://modelcontextprotocol.io/) 协议提供 9 个工具，让 Claude Code、Codex、Gemini CLI、OpenCode 等客户端具备持久化记忆能力；如果你接的是 `Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，请先看 `docs/skills/IDE_HOSTS.md`。
 
 ---
 

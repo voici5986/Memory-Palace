@@ -1,6 +1,6 @@
 # Memory Palace Documentation Center
 
-> **Memory Palace** is a long-term memory system designed for AI coding assistants. Through MCP (Model Context Protocol), it provides a unified path for memory read/write, retrieval, review, and maintenance for Codex / Claude Code / Gemini CLI / OpenCode; for `Cursor` and `Antigravity`, it is still recommended to first read the boundary notes in `docs/skills/SKILLS_QUICKSTART_EN.md`.
+> **Memory Palace** is a long-term memory system designed for AI coding assistants. Through MCP (Model Context Protocol), it provides a unified path for memory read/write, retrieval, review, and maintenance for Codex / Claude Code / Gemini CLI / OpenCode; for IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity`, it is recommended to start with `docs/skills/IDE_HOSTS_EN.md`.
 >
 > License: MIT
 >
@@ -20,7 +20,7 @@
 |---|---|
 | [GETTING_STARTED_EN.md](GETTING_STARTED_EN.md) | Get local development + Docker running in 5 minutes, with example MCP client configurations |
 | [DASHBOARD_GUIDE_EN.md](DASHBOARD_GUIDE_EN.md) | Explains every Dashboard button, field, and typical operation flow page by page |
-| [skills/GETTING_STARTED_EN.md](skills/GETTING_STARTED_EN.md) | Connect skill + MCP to the current repository for the first time |
+| [skills/GETTING_STARTED_EN.md](skills/GETTING_STARTED_EN.md) | Connect the CLI-client skill + MCP path to the current repository for the first time |
 | [TROUBLESHOOTING_EN.md](TROUBLESHOOTING_EN.md) | Troubleshooting for common issues such as startup failures, port conflicts, authentication failures, and search degradation |
 | [SECURITY_AND_PRIVACY_EN.md](SECURITY_AND_PRIVACY_EN.md) | API Key secure configuration, privacy protection, and pre-sharing self-checks |
 
@@ -31,7 +31,7 @@
 | [TECHNICAL_OVERVIEW_EN.md](TECHNICAL_OVERVIEW_EN.md) | Overview of the implementation structure and tech stack for the backend, frontend, MCP, and Docker |
 | [TOOLS_EN.md](TOOLS_EN.md) | Inputs, outputs, return conventions, and degradation semantics of the 9 MCP tools |
 | [DEPLOYMENT_PROFILES_EN.md](DEPLOYMENT_PROFILES_EN.md) | Configuration templates for the four A/B/C/D tiers, parameter tuning, and deployment methods |
-| [skills/SKILLS_QUICKSTART_EN.md](skills/SKILLS_QUICKSTART_EN.md) | Understand in one page how skills are triggered, how MCP is configured, and how acceptance is verified |
+| [skills/SKILLS_QUICKSTART_EN.md](skills/SKILLS_QUICKSTART_EN.md) | Understand in one page how the CLI-client skill path is triggered, how MCP is configured, and how acceptance is verified |
 | [changelog/dashboard_i18n_2026-03-09_EN.md](changelog/dashboard_i18n_2026-03-09_EN.md) | Summary of the dashboard's default English setting, Chinese/English switching, screenshots, and verification |
 
 ## 🧩 Skills and Clients
@@ -40,6 +40,7 @@
 |---|---|
 | [skills/MEMORY_PALACE_SKILLS_EN.md](skills/MEMORY_PALACE_SKILLS_EN.md) | Canonical `memory-palace` skill design, installation, and multi-CLI orchestration strategy |
 | [skills/CLI_COMPATIBILITY_GUIDE_EN.md](skills/CLI_COMPATIBILITY_GUIDE_EN.md) | Recommended installation paths, verification methods, and known boundaries for each CLI |
+| [skills/IDE_HOSTS_EN.md](skills/IDE_HOSTS_EN.md) | How IDE hosts such as Cursor / Windsurf / VSCode-host / Antigravity should connect to this repository |
 
 ## 📊 Evaluation and Quality
 

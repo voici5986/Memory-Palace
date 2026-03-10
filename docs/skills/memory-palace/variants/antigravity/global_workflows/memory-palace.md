@@ -13,6 +13,7 @@ description: 'Memory Palace durable-memory workflow: boot, recall, inspect, muta
 ## Inputs
 
 - User request: `$ARGUMENTS`
+- Repository rule files: prefer `AGENTS.md` when present; fall back to `GEMINI.md` when a repo still uses the older rule file name.
 - Repo-local workflow reference: `docs/skills/memory-palace/references/mcp-workflow.md`
 - Repo-local trigger samples: `docs/skills/memory-palace/references/trigger-samples.md`
 
@@ -25,6 +26,7 @@ description: 'Memory Palace durable-memory workflow: boot, recall, inspect, muta
 5. If retrieval quality is degraded, inspect `index_status()` before `rebuild_index(wait=true)`.
 6. Use `compact_context(force=false)` for long or noisy sessions that should be distilled.
 7. When answering about the workflow itself, use repo-local facts from the two reference files above, not generic memory intuition.
+8. When the repository defines local execution rules, follow `AGENTS.md` first; if the repo has not migrated, accept `GEMINI.md` as the legacy fallback.
 
 ## Verification
 
@@ -32,6 +34,7 @@ description: 'Memory Palace durable-memory workflow: boot, recall, inspect, muta
 - `NOOP` is treated as stop-and-inspect, not “continue normally”.
 - Trigger sample path is reported as `docs/skills/memory-palace/references/trigger-samples.md`.
 - Repo-local references are preferred over hidden mirror-relative paths.
+- Repository-local rule discovery accepts both `AGENTS.md` and legacy `GEMINI.md`.
 
 ## Output
 

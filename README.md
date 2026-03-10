@@ -33,7 +33,7 @@
 
 **Memory Palace** provides AI agents with persistent context and seamless cross-session continuity. It gives LLMs **persistent, searchable, and auditable** historical context — so your Agent never "starts from scratch" in each conversation.
 
-Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, and OpenCode**, with documented caveats for `Cursor` and `Antigravity`. The currently verified scope and known boundaries are documented in `docs/skills/SKILLS_QUICKSTART_EN.md`.
+Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) interface, Memory Palace provides integration paths for **Codex, Claude Code, Gemini CLI, and OpenCode**. For IDE-like hosts such as `Cursor / Windsurf / VSCode-host / Antigravity`, the repository now recommends a separate **AGENTS.md + MCP snippet** path instead of treating them like full CLI skill clients. For the shortest user path, use [SKILLS_QUICKSTART_EN.md](docs/skills/SKILLS_QUICKSTART_EN.md) for CLI clients and [IDE_HOSTS_EN.md](docs/skills/IDE_HOSTS_EN.md) for IDE hosts.
 
 ### Why Memory Palace?
 
@@ -58,7 +58,7 @@ Through the unified [MCP (Model Context Protocol)](https://modelcontextprotocol.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
 - **Dashboard language is now easier to control**: the frontend defaults to English and adds a one-click English / Chinese toggle in the top-right corner, with the selection remembered in the browser.
 - **Public claims stay conservative**: the docs only describe verified paths, and still ask you to re-check your own Windows / remote deployment environment.
-- **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` have documented paths; `Gemini live`, `Cursor`, and `Antigravity` still carry explicit caveats.
+- **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` use the documented CLI path; IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` use repo-local rules plus an MCP snippet; `Gemini live` and GUI-only host validation still carry explicit caveats.
 
 ---
 
@@ -82,7 +82,7 @@ Memories are living entities with a **vitality score** that decays over time. Th
 
 ### 🌐 Multi-Client MCP Integration
 
-One protocol, many clients: the public docs focus on the most practical paths for **Claude Code / Codex / Gemini CLI / OpenCode**; `Cursor` and `Antigravity` still retain manual-validation caveats.
+One protocol, many clients: the public docs focus on the most practical paths for **Claude Code / Codex / Gemini CLI / OpenCode**, and separately document **IDE hosts** such as `Cursor / Windsurf / VSCode-host / Antigravity` through repo-local project rules plus MCP snippets.
 
 ### 📦 Flexible Deployment
 
@@ -608,7 +608,7 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 | Claude Code | Prefer a workspace install (`install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force`) |
 | Gemini CLI | Workspace install works for the current repo, but user-scope install is still the more stable default on fresh machines |
 | Codex CLI / OpenCode | `sync` gives repo-local skill discovery; use `--scope user --with-mcp` if you want MCP to reliably bind to this repo backend |
-| Cursor / Antigravity / Trae | Workspace Rules / Project Instructions |
+| Cursor / Windsurf / VSCode-host / Antigravity | Repo-local `AGENTS.md` + rendered MCP snippet |
 
 ### Install The Skill
 
@@ -618,6 +618,21 @@ python scripts/sync_memory_palace_skill.py --check
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
 python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --check
+```
+
+For IDE hosts, do not start with hidden skill mirrors. Render the repo-local MCP snippet instead:
+
+```bash
+python scripts/render_ide_host_config.py --host cursor
+python scripts/render_ide_host_config.py --host windsurf
+python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host antigravity
+```
+
+If an IDE host has `stdin/stdout` or CRLF quirks, switch to the wrapper form:
+
+```bash
+python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper
 ```
 
 Optional local verification on your own machine:
@@ -635,16 +650,20 @@ python scripts/install_skill.py --targets gemini,codex,opencode --scope user --w
 
 The two verification commands above are best treated as **extra validation**, not as the first thing every user must run.
 
-Canonical source and the local paths that appear after you run the sync/install steps:
+Canonical source and the local paths that appear after you run the CLI sync/install steps:
 
 - Canonical: `<repo-root>/docs/skills/memory-palace/`
 - Claude Code: `<repo-root>/.claude/skills/memory-palace/`
 - Codex CLI: `<repo-root>/.codex/skills/memory-palace/`
 - OpenCode: `<repo-root>/.opencode/skills/memory-palace/`
-- Cursor: `<repo-root>/.cursor/skills/memory-palace/`
-- Compatible agent CLI: `<repo-root>/.agent/skills/memory-palace/`
 
 These hidden client directories are local mirrors generated after install. A new clone normally starts with only the canonical bundle under `docs/skills/memory-palace/`.
+
+For IDE hosts, the recommended projection is different:
+
+- repo-local rules: `<repo-root>/AGENTS.md`
+- MCP config snippet: `python scripts/render_ide_host_config.py --host <cursor|windsurf|vscode|antigravity>`
+- Antigravity fallback: `backend/mcp_wrapper.py` only when the host really needs a wrapper
 
 The canonical skill is aligned with the current code contract:
 
@@ -657,7 +676,10 @@ The canonical skill is aligned with the current code contract:
 
 If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate local reports under `docs/skills/`.
 
-Full guide: [MEMORY_PALACE_SKILLS_EN.md](docs/skills/MEMORY_PALACE_SKILLS_EN.md)
+Full guides:
+
+- [MEMORY_PALACE_SKILLS_EN.md](docs/skills/MEMORY_PALACE_SKILLS_EN.md)
+- [IDE_HOSTS_EN.md](docs/skills/IDE_HOSTS_EN.md)
 
 ---
 

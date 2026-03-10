@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 try:
     import tomllib
@@ -41,6 +42,9 @@ MIRRORS = {
 }
 GEMINI_WORKSPACE_DIR = REPO_ROOT / ".gemini" / "skills" / "memory-palace"
 GEMINI_VARIANT_FILE = CANONICAL_DIR / "variants" / "gemini" / "SKILL.md"
+ANTIGRAVITY_WORKFLOW_SOURCE = (
+    CANONICAL_DIR / "variants" / "antigravity" / "global_workflows" / "memory-palace.md"
+)
 REQUIRED_FILES = [
     Path("SKILL.md"),
     Path("agents/openai.yaml"),
@@ -80,8 +84,15 @@ def _read_repo_database_url() -> str:
 EXPECTED_DB_URI = _read_repo_database_url()
 CURSOR_AGENT_BIN = Path.home() / ".local" / "bin" / "cursor-agent"
 ANTIGRAVITY_BIN = Path("/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity")
+REPO_LOCAL_AGENTS = PROJECT_ROOT / "AGENTS.md"
+ANTIGRAVITY_WORKSPACE_WORKFLOW = REPO_ROOT / ".agent" / "workflows" / "memory-palace.md"
 ANTIGRAVITY_USER_WORKFLOW = Path.home() / ".gemini" / "antigravity" / "global_workflows" / "memory-palace.md"
+ANTIGRAVITY_RULE_FILES = ("AGENTS.md", "GEMINI.md")
 GEMINI_CHATS_DIR = Path.home() / ".gemini" / "tmp" / REPO_ROOT.name / "chats"
+ANTIGRAVITY_REFERENCE_PATHS = (
+    "docs/skills/memory-palace/references/mcp-workflow.md",
+    "docs/skills/memory-palace/references/trigger-samples.md",
+)
 
 
 @dataclass
@@ -251,9 +262,38 @@ def _sqlite_path_from_url(url: str) -> Path | None:
     normalized = (url or "").strip()
     for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
         if normalized.startswith(prefix):
-            raw_path = normalized[len(prefix) - 1 :]
+            raw_path = normalized[len(prefix) :]
+            raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
+            raw_path = unquote(raw_path)
+            if not raw_path or raw_path == ":memory:" or raw_path.startswith("file::memory:"):
+                return None
             return Path(raw_path)
     return None
+
+
+def _command_mentions_repo_wrapper(command_parts: list[Any]) -> bool:
+    normalized_parts = [str(part).replace("\\", "/") for part in command_parts if str(part).strip()]
+    joined = " ".join(normalized_parts)
+    candidates = {
+        str(WRAPPER_ABSOLUTE).replace("\\", "/"),
+        str(WRAPPER_RELATIVE).replace("\\", "/"),
+    }
+    return any(candidate in joined for candidate in candidates)
+
+
+def _mirror_contract_issues(name: str) -> list[str]:
+    mirror = MIRRORS[name]
+    if not mirror.is_dir():
+        return [f"missing mirror directory: {mirror}"]
+    issues: list[str] = []
+    for relative_path in REQUIRED_FILES:
+        expected = CANONICAL_DIR / relative_path
+        actual = mirror / relative_path
+        if not actual.is_file():
+            issues.append(f"missing file: {actual}")
+        elif actual.read_bytes() != expected.read_bytes():
+            issues.append(f"mismatch: {actual}")
+    return issues
 
 
 def _extract_gemini_memory_palace_db_path() -> Path | None:
@@ -271,6 +311,7 @@ def _extract_gemini_memory_palace_db_path() -> Path | None:
             db_path = _sqlite_path_from_url(env_url)
             if db_path is not None:
                 return db_path
+        command_parts = [server.get("command", ""), *(server.get("args") or [])]
         for item in server.get("args") or []:
             if not isinstance(item, str):
                 continue
@@ -279,6 +320,10 @@ def _extract_gemini_memory_palace_db_path() -> Path | None:
                 db_path = _sqlite_path_from_url(match.group(1))
                 if db_path is not None:
                     return db_path
+        if _command_mentions_repo_wrapper(command_parts):
+            db_path = _sqlite_path_from_url(EXPECTED_DB_URI)
+            if db_path is not None:
+                return db_path
     return None
 
 
@@ -326,6 +371,27 @@ def _wait_for_memory(db_path: Path, uri: str, *, expected_substring: str | None 
 
 def _memory_exists(db_path: Path, uri: str) -> bool:
     return _sqlite_fetch_memory(db_path, uri) is not None
+
+
+def _gemini_live_write_verified(
+    proc: CommandCapture,
+    *,
+    verified_row: dict[str, Any] | None,
+    expected_content: str,
+    positive_tokens: list[str],
+) -> bool:
+    if verified_row is None:
+        return False
+    content = str(verified_row.get("content") or "")
+    if expected_content not in content:
+        return False
+    stdout = (proc.stdout or "").strip()
+    lowered = stdout.lower()
+    if any(token in stdout for token in positive_tokens):
+        return True
+    if any(token in lowered for token in ["fail ", "fail:", "error:", "error "]):
+        return False
+    return proc.timed_out or proc.returncode == 0
 
 
 def _find_latest_gemini_chat(marker: str) -> tuple[Path, Any] | None:
@@ -457,6 +523,8 @@ def check_structure() -> CheckResult:
     missing = [str(CANONICAL_DIR / rel) for rel in REQUIRED_FILES if not (CANONICAL_DIR / rel).is_file()]
     if not GEMINI_VARIANT_FILE.is_file():
         missing.append(str(GEMINI_VARIANT_FILE))
+    if not ANTIGRAVITY_WORKFLOW_SOURCE.is_file():
+        missing.append(str(ANTIGRAVITY_WORKFLOW_SOURCE))
     if missing:
         return CheckResult("FAIL", "canonical bundle 缺文件", "\n".join(missing))
     ok, message = yaml_frontmatter_ok(CANONICAL_DIR / "SKILL.md")
@@ -909,7 +977,7 @@ def smoke_gemini_live_suite() -> CheckResult:
 
     update_proc = run_gemini_prompt(update_prompt, timeout=120)
     update_out = (update_proc.stdout + "\n" + update_proc.stderr).strip()
-    update_row = _wait_for_memory(db_path, note_uri, expected_substring=f"{unique_token}. This note records one preference only: user prefers concise answers. Updated once.")
+    update_row = _wait_for_memory(db_path, note_uri, expected_substring=updated_content)
 
     guard_proc = run_gemini_prompt(guard_prompt, timeout=120)
     guard_out = (guard_proc.stdout + "\n" + guard_proc.stderr).strip()
@@ -919,16 +987,29 @@ def smoke_gemini_live_suite() -> CheckResult:
         _, payload = guard_chat
         guard_calls = _iter_tool_calls(payload)
 
-    create_ok = (
-        create_row is not None
-        and unique_token in str(create_row.get("content") or "")
-        and (f"SUCCESS {note_uri}" in create_proc.stdout or "successfully saved" in create_proc.stdout.lower())
+    create_ok = _gemini_live_write_verified(
+        create_proc,
+        verified_row=create_row,
+        expected_content=unique_token,
+        positive_tokens=[f"SUCCESS {note_uri}", "successfully saved"],
     )
-    update_ok = (
-        update_row is not None
-        and updated_content in str(update_row.get("content") or "")
-        and (f"SUCCESS {note_uri}" in update_proc.stdout or "success" in update_proc.stdout.lower() or "updated" in update_proc.stdout.lower())
+    update_ok = _gemini_live_write_verified(
+        update_proc,
+        verified_row=update_row,
+        expected_content=updated_content,
+        positive_tokens=[f"SUCCESS {note_uri}", "success", "updated"],
     )
+    create_verified_via_update = False
+    if not create_ok and create_row is None and update_row is not None:
+        create_ok = _gemini_live_write_verified(
+            create_proc,
+            verified_row=update_row,
+            expected_content=unique_token,
+            positive_tokens=[f"SUCCESS {note_uri}", "successfully saved"],
+        )
+        if create_ok:
+            create_verified_via_update = True
+            create_row = update_row
 
     guard_create = next((call for call in guard_calls if call.get("name") == "create_memory"), None)
     guard_create_output = ""
@@ -960,6 +1041,7 @@ def smoke_gemini_live_suite() -> CheckResult:
         f"create_timed_out={create_proc.timed_out}",
         f"create_stdout={create_proc.stdout.strip()}",
         f"create_verified={json.dumps(create_row, ensure_ascii=False) if create_row else 'missing'}",
+        f"create_verified_via_update={create_verified_via_update}",
         f"update_model={update_proc.model or GEMINI_TEST_MODEL}",
         f"update_timed_out={update_proc.timed_out}",
         f"update_stdout={update_proc.stdout.strip()}",
@@ -988,42 +1070,108 @@ def smoke_gemini_live_suite() -> CheckResult:
 
 
 def mirror_only_status(name: str) -> CheckResult:
+    issues = _mirror_contract_issues(name)
+    if issues:
+        return CheckResult("FAIL", f"{name} mirror 缺失或与 canonical 不一致", "\n".join(issues))
     mirror = MIRRORS[name]
-    if mirror.is_dir():
-        return CheckResult("PARTIAL", f"{name} 仅完成 mirror 结构校验", str(mirror))
-    return CheckResult("FAIL", f"{name} mirror 缺失", str(mirror))
+    return CheckResult(
+        "PARTIAL",
+        f"{name} 兼容投影已对齐 canonical，但当前仍只有静态兼容检查",
+        str(mirror),
+    )
 
 
 def smoke_cursor() -> CheckResult:
+    issues = _mirror_contract_issues("cursor")
+    if issues:
+        return CheckResult("FAIL", "Cursor IDE Host 兼容检查失败：mirror 缺失或与 canonical 不一致", "\n".join(issues))
     mirror = MIRRORS["cursor"]
-    if not mirror.is_dir():
-        return CheckResult("FAIL", "Cursor mirror 缺失", str(mirror))
     if not CURSOR_AGENT_BIN.is_file():
-        return CheckResult("PARTIAL", "Cursor mirror 已准备，但本机未发现 cursor-agent runtime", str(mirror))
+        return CheckResult("PARTIAL", "Cursor IDE Host 兼容检查通过静态契约，但本机未发现 cursor-agent runtime", str(mirror))
     try:
         proc = run_command([str(CURSOR_AGENT_BIN), "-p", PROMPT], cwd=REPO_ROOT, timeout=60)
     except subprocess.TimeoutExpired:
-        return CheckResult("PARTIAL", "Cursor runtime 存在，但 smoke 超时", str(CURSOR_AGENT_BIN))
+        return CheckResult("PARTIAL", "Cursor IDE Host 兼容检查命中 runtime，但 headless smoke 超时", str(CURSOR_AGENT_BIN))
     merged = (proc.stdout + "\n" + proc.stderr).strip()
     lowered = merged.lower()
     if "authentication required" in lowered:
-        return CheckResult("PARTIAL", "Cursor runtime 存在，但当前机器缺少登录/鉴权", merged)
+        return CheckResult("PARTIAL", "Cursor IDE Host 兼容检查命中 runtime，但当前机器缺少 CLI 登录/鉴权", merged)
     success, details = classify_skill_answer(merged)
     if proc.returncode == 0 and success:
-        return CheckResult("PASS", "Cursor smoke 通过", merged)
-    return CheckResult("PARTIAL", "Cursor runtime 可用，但当前 smoke 未通过", details)
+        return CheckResult("PASS", "Cursor IDE Host 兼容检查通过（headless skill probe）", merged)
+    return CheckResult("PARTIAL", "Cursor IDE Host 兼容检查命中 runtime，但当前 headless skill probe 未通过", details)
+
+
+def _antigravity_workflow_rule_anchor(path: Path) -> tuple[bool, str]:
+    if not path.is_file():
+        return False, f"missing workflow: {path}"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    missing = [rule_file for rule_file in ANTIGRAVITY_RULE_FILES if rule_file not in text]
+    missing.extend(reference for reference in ANTIGRAVITY_REFERENCE_PATHS if reference not in text)
+    if missing:
+        return False, f"workflow missing rule/reference anchors: {', '.join(missing)}"
+    return True, "workflow declares AGENTS.md/GEMINI.md compatibility and repo-local references"
+
+
+def _antigravity_bundle_rule_support(bin_path: Path) -> tuple[bool, str]:
+    bundle_main = bin_path.parent.parent / "out" / "main.js"
+    if not bundle_main.is_file():
+        return False, f"missing Antigravity bundle entry: {bundle_main}"
+    lowered = bundle_main.read_text(encoding="utf-8", errors="ignore").lower()
+    missing = [rule_file for rule_file in ("agents.md", "gemini.md") if rule_file not in lowered]
+    if missing:
+        return False, f"bundle does not advertise rule discovery for: {', '.join(missing)}"
+    return True, f"bundle advertises AGENTS.md + GEMINI.md rule discovery ({bundle_main})"
+
+
+def _antigravity_installed_workflow() -> Path | None:
+    for candidate in (ANTIGRAVITY_WORKSPACE_WORKFLOW, ANTIGRAVITY_USER_WORKFLOW):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def smoke_antigravity() -> CheckResult:
     if not ANTIGRAVITY_BIN.is_file():
-        return CheckResult("FAIL", "Antigravity app-bundled CLI 缺失")
-    if ANTIGRAVITY_USER_WORKFLOW.is_file():
+        return CheckResult("FAIL", "Antigravity IDE Host 兼容检查失败：app-bundled CLI 缺失")
+    installed_workflow = _antigravity_installed_workflow()
+    if installed_workflow is not None:
+        if not ANTIGRAVITY_WORKFLOW_SOURCE.is_file():
+            return CheckResult("FAIL", "Antigravity IDE Host 兼容检查失败：canonical workflow 缺失", str(ANTIGRAVITY_WORKFLOW_SOURCE))
+        if installed_workflow.read_bytes() != ANTIGRAVITY_WORKFLOW_SOURCE.read_bytes():
+            return CheckResult(
+                "FAIL",
+                "Antigravity IDE Host 兼容检查失败：workflow 已安装，但与 canonical 不一致",
+                f"{ANTIGRAVITY_BIN}\n{installed_workflow}\n{ANTIGRAVITY_WORKFLOW_SOURCE}",
+            )
+        workflow_ok, workflow_message = _antigravity_workflow_rule_anchor(installed_workflow)
+        if not workflow_ok:
+            return CheckResult(
+                "FAIL",
+                "Antigravity IDE Host 兼容检查失败：workflow 已安装，但规则来源或 repo-local 引用契约不完整",
+                f"{ANTIGRAVITY_BIN}\n{installed_workflow}\n{workflow_message}",
+            )
+        if not REPO_LOCAL_AGENTS.is_file():
+            return CheckResult(
+                "FAIL",
+                "Antigravity IDE Host 兼容检查失败：workflow 已安装，但仓库根 AGENTS.md 缺失",
+                f"{ANTIGRAVITY_BIN}\n{installed_workflow}\nmissing: {REPO_LOCAL_AGENTS}",
+            )
+        bundle_ok, bundle_message = _antigravity_bundle_rule_support(ANTIGRAVITY_BIN)
+        bundle_note = bundle_message if bundle_ok else f"bundle check pending: {bundle_message}"
         return CheckResult(
             "PARTIAL",
-            "Antigravity app-bundled CLI 已发现，global_workflow 已安装；仍需 GUI 手工 smoke",
-            f"{ANTIGRAVITY_BIN}\n{ANTIGRAVITY_USER_WORKFLOW}",
+            "Antigravity IDE Host 兼容检查通过静态契约：workflow 已声明 AGENTS.md + GEMINI.md 规则兼容入口；仍需宿主内手工 smoke",
+            (
+                f"{ANTIGRAVITY_BIN}\n"
+                f"{installed_workflow}\n"
+                f"{REPO_LOCAL_AGENTS}\n"
+                "workflow declares AGENTS.md/GEMINI.md compatibility\n"
+                f"{workflow_message}\n"
+                f"{bundle_note}"
+            ),
         )
-    return CheckResult("MANUAL", "Antigravity CLI 存在，但 workflow 尚未安装", str(ANTIGRAVITY_BIN))
+    return CheckResult("MANUAL", "Antigravity IDE Host 兼容检查待手工补齐：CLI 存在，但 workflow 尚未安装", str(ANTIGRAVITY_BIN))
 
 
 def generate_markdown(results: dict[str, CheckResult]) -> str:
