@@ -109,9 +109,29 @@ Authorization: Bearer <MCP_API_KEY>
 
 1. `readRuntimeMaintenanceAuth()` 读取 `window.__MEMORY_PALACE_RUNTIME__`
 2. axios 请求拦截器 `isProtectedApiRequest()` 判断请求是否需要鉴权
-3. 对 `/maintenance/*`、`/review/*` 和 `/browse/*`（含读写）自动注入鉴权头
+3. 对 `/maintenance/*`、`/review/*`、`/browse/*` 以及新的 `/setup/*` 自动注入鉴权头
 
 > 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（见 `frontend/src/lib/api.js` 中的 runtime config fallback 逻辑）。
+
+### 首启配置向导的安全边界
+
+当前版本新增了 Dashboard 首启配置向导，但它不是“浏览器随便改服务器配置”的通用后门：
+
+- `/setup/status` 允许两种访问方式：
+  - **直连本机回环地址**（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers，并且请求里的 host 本身也是 loopback）
+  - **携带有效 `MCP_API_KEY`**
+- `/setup/config` 的**写入能力只允许直连本机回环地址**；即使拿着有效 `MCP_API_KEY`，远端请求也不能直接改主机 `.env`
+- 向导接口只允许写入一组白名单 env 键，不支持任意文件写入
+- 现阶段只允许写本地 checkout 的 `.env`
+- 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
+- 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
+- 浏览器本地只会保存 Dashboard 使用的 `MCP_API_KEY`；embedding / reranker / LLM key 不会保存在浏览器 localStorage
+
+**新增测试锚点：**
+
+- `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、Docker fail-closed
+- `frontend/src/App.test.jsx` — 验证首启自动弹出与“只保存 Dashboard 密钥”交互
+- `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
 
 **Docker 一键部署的默认做法不一样：**
 

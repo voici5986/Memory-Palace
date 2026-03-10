@@ -87,9 +87,149 @@ const en = {
       setApiKey: 'Set API key',
       updateApiKey: 'Update API key',
       clearKey: 'Clear key',
+      openSetup: 'Setup',
       prompt: 'Enter the MCP API key for protected dashboard routes.',
       emptyKey: 'API key cannot be empty.',
       runtimeBadge: 'Runtime key active',
+    },
+  },
+  setup: {
+    kicker: 'First-Run Setup',
+    title: 'Configure Memory Palace',
+    subtitle:
+      'Use this assistant to save the dashboard key in your browser and, when supported, write the common local runtime settings into the repository .env file without editing it by hand.',
+    dashboard: {
+      title: 'Dashboard access',
+      description:
+        'This part controls protected dashboard requests such as /browse, /review, /maintenance, and /setup.',
+      apiKeyLabel: 'MCP API key',
+      apiKeyHint:
+        'If your backend uses MCP_API_KEY, enter the same value here so the browser can call protected routes immediately.',
+      apiKeyPlaceholder: 'Enter MCP_API_KEY',
+      insecureLocalLabel: 'Allow insecure local access',
+      insecureLocalHint:
+        'Maps to MCP_API_KEY_ALLOW_INSECURE_LOCAL=true. Use only for loopback debugging on your own machine.',
+      browserScope:
+        'Only the dashboard API key is stored in the browser. Provider keys entered below are sent once to the backend setup API and are not written into browser storage.',
+    },
+    retrieval: {
+      title: 'Retrieval profile',
+      description:
+        'Choose a safe starting profile first, then fill only the fields your current local setup really needs. When your router is not ready locally, prefer direct API mode.',
+      presets: {
+        b: 'Profile B · hash only',
+        c: 'Profile C · embedding API',
+        d: 'Profile D · embedding + reranker API',
+      },
+      embeddingBackendLabel: 'Embedding backend',
+      embeddingBackendHint:
+        'This maps to RETRIEVAL_EMBEDDING_BACKEND. Use api for local direct wiring, router for your final routed deployment, or hash/none for lighter setups.',
+      backends: {
+        none: 'None',
+        hash: 'Hash (local baseline)',
+        api: 'Direct API',
+        router: 'Router',
+      },
+      embeddingApiBaseLabel: 'Embedding API base',
+      embeddingApiBasePlaceholder: 'http://127.0.0.1:9000/v1',
+      embeddingModelLabel: 'Embedding model',
+      embeddingModelPlaceholder: 'text-embedding-model',
+      embeddingApiKeyLabel: 'Embedding API key',
+      embeddingApiKeyPlaceholder: 'Optional API key',
+      optionalApiKeyHint:
+        'Leave blank if your local service does not require a key. Blank values keep the current server value untouched.',
+      routerApiBaseLabel: 'Router API base',
+      routerApiBasePlaceholder: 'http://127.0.0.1:8001/v1',
+      routerApiKeyLabel: 'Router API key',
+      routerApiKeyPlaceholder: 'Optional router key',
+      routerEmbeddingModelLabel: 'Router embedding model',
+      routerEmbeddingModelPlaceholder: 'router-embedding-model',
+      routerRerankerModelLabel: 'Router reranker model',
+      routerRerankerModelPlaceholder: 'router-reranker-model',
+      rerankerEnabledLabel: 'Enable reranker',
+      rerankerEnabledHint:
+        'Maps to RETRIEVAL_RERANKER_ENABLED. Keep it off until the reranker service is actually reachable.',
+      rerankerApiBaseLabel: 'Reranker API base',
+      rerankerApiBasePlaceholder: 'http://127.0.0.1:9100/v1',
+      rerankerModelLabel: 'Reranker model',
+      rerankerModelPlaceholder: 'reranker-model',
+      rerankerApiKeyLabel: 'Reranker API key',
+      rerankerApiKeyPlaceholder: 'Optional reranker key',
+    },
+    llm: {
+      title: 'Write guard and intent LLMs',
+      description:
+        'These switches control optional LLM-assisted write guard and intent routing. Leave them off until the backing chat endpoint is ready.',
+      writeGuardEnabledLabel: 'Enable write_guard LLM',
+      writeGuardEnabledHint:
+        'When enabled, the backend uses WRITE_GUARD_LLM_* to help decide whether a write should proceed.',
+      writeGuardApiBaseLabel: 'write_guard API base',
+      writeGuardApiBasePlaceholder: 'http://127.0.0.1:9200/v1',
+      writeGuardModelLabel: 'write_guard model',
+      writeGuardModelPlaceholder: 'chat-model',
+      writeGuardApiKeyLabel: 'write_guard API key',
+      writeGuardApiKeyPlaceholder: 'Optional write_guard key',
+      intentEnabledLabel: 'Enable intent LLM',
+      intentEnabledHint:
+        'When enabled, the backend uses INTENT_LLM_* for query intent routing. Keep it off if you only want deterministic retrieval.',
+      intentApiBaseLabel: 'Intent API base',
+      intentApiBasePlaceholder: 'http://127.0.0.1:9300/v1',
+      intentModelLabel: 'Intent model',
+      intentModelPlaceholder: 'intent-model',
+      intentApiKeyLabel: 'Intent API key',
+      intentApiKeyPlaceholder: 'Optional intent key',
+      routerChatModelLabel: 'Router chat model',
+      routerChatModelPlaceholder: 'router-chat-model',
+      gistFallbackHint:
+        'compact_context gist generation already falls back to WRITE_GUARD_LLM_* by default, so you usually do not need a separate gist section for first-run setup.',
+    },
+    summary: {
+      title: 'Current status',
+      loading: 'Checking local setup support and masked runtime status…',
+      subtitle:
+        'The assistant only reports safe summary signals here. Existing secrets are never echoed back into the UI.',
+      targetLabel: 'Target file: {{target}}',
+      applySupported:
+        'Saving to the local repository .env file is available in this runtime. Most backend-side changes still require a restart.',
+      configured: 'Configured',
+      missing: 'Missing',
+      notEnabled: 'Disabled',
+      dashboardAuth: 'Dashboard auth',
+      embedding: 'Embedding',
+      reranker: 'Reranker',
+      writeGuard: 'write_guard',
+      intent: 'Intent LLM',
+      restartHint: 'Restart required for full effect: {{targets}}.',
+      browserOnlyHint:
+        'Saving the dashboard key to the browser only affects this browser session and does not rewrite backend runtime settings.',
+    },
+    actions: {
+      nextTitle: 'Apply changes',
+      nextHint:
+        'Use the browser-only path when you just need the dashboard to authenticate. Use the .env path when you want to persist local backend settings.',
+      saveEnv: 'Save local .env settings',
+      savingEnv: 'Saving .env settings…',
+      saveBrowserOnly: 'Save dashboard key only',
+      close: 'Close assistant',
+    },
+    messages: {
+      statusUnavailable: 'Unable to load setup status.',
+      browserOnlyRequiresKey: 'Enter an MCP API key before saving browser-only auth.',
+      browserOnlySaved: 'Dashboard key saved to this browser.',
+      serverSaved: 'Saved local setup to {{target}}.',
+      saveFailed: 'Failed to save setup.',
+    },
+    reasons: {
+      docker_runtime_not_persisted:
+        'This process is running inside Docker. Writing the repository .env here would be ephemeral, so the assistant stays in guidance mode.',
+      env_example_missing:
+        'The setup template .env.example is missing, so the assistant cannot safely seed a local .env file.',
+      target_parent_unwritable:
+        'The target directory is not writable from the current process.',
+      env_file_not_writable:
+        'The target .env file exists but is not writable from the current process.',
+      status_unavailable:
+        'Setup status is unavailable right now. You can still save the dashboard key in this browser.',
     },
   },
   snapshotList: {
@@ -435,10 +575,15 @@ const en = {
     authHint: 'Click "Set API key" in the top-right corner, or configure MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL first.',
     codes: {
       maintenance_auth_failed: 'Maintenance API authentication failed',
+      setup_access_denied: 'Setup access denied',
       mcp_sse_auth_failed: 'SSE authentication failed',
       invalid_or_missing_api_key: 'API key is missing or invalid',
+      local_loopback_or_api_key_required: 'Setup requires loopback access or a valid API key',
+      local_loopback_required_for_write: 'Saving local setup is allowed only from direct loopback requests',
       api_key_not_configured: 'Server API key is not configured',
       insecure_local_override_requires_loopback: 'Insecure local override only works on loopback addresses',
+      setup_apply_unsupported: 'Setup apply is not available in this runtime',
+      setup_write_failed: 'Failed to write local setup file',
       confirmation_phrase_mismatch: 'Confirmation phrase mismatch',
       job_not_found: 'Job not found',
       queue_full: 'Queue is full',
@@ -466,6 +611,8 @@ const en = {
       'failed to load snapshots.': 'Failed to load snapshots.',
       'failed to retrieve memory fragment.': 'Failed to retrieve memory fragment.',
       'failed to load observability summary': 'Failed to load observability summary',
+      'no configuration changes were provided.': 'No configuration changes were provided.',
+      'configuration values cannot contain line breaks.': 'Configuration values cannot contain line breaks.',
     },
   },
   resourceTypes: {

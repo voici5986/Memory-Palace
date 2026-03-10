@@ -32,6 +32,7 @@ backend/
 │   ├── browse.py          # 记忆浏览与写入接口（prefix: /browse）
 │   ├── review.py          # 审查、回滚与集成接口（prefix: /review）
 │   ├── maintenance.py     # 维护、观测与 vitality 清理接口（prefix: /maintenance）
+│   ├── setup.py           # 首启配置与本地 .env 写入接口（prefix: /setup）
 │   └── utils.py           # Diff 计算工具（优先 diff-match-patch，缺失时回退到 difflib.HtmlDiff）
 ├── db/
 │   ├── __init__.py        # 客户端工厂（get_sqlite_client / close_sqlite_client）
@@ -48,8 +49,8 @@ backend/
 
 ### 核心模块说明
 
-- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。
-- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。`stdio` 直接连工具进程；SSE / streamable HTTP 的远程访问则跟随 `HOST` 配置，并继续受 API Key 与网络侧安全控制约束。
+- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复）、CORS 配置、路由注册（`review`、`browse`、`maintenance`、`setup`）和健康检查（含索引状态、write lane 与 index worker 运行时状态报告）。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。
+- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。
 - **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。同时它也暴露一个轻量级 `/health` 端点，主要给 Docker / 进程级 readiness 探测使用；真正的 SSE 数据通道仍然是 `/sse`，并继续受鉴权保护。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。
@@ -211,7 +212,7 @@ frontend/src/
 - 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
-- 按推荐的一键 Docker 路径启动时，通常不需要再手动点 `Set API key`：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；如果你不是按这条路径启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮
+- 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `Set API key`，因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
 
 ---
 
@@ -236,6 +237,8 @@ frontend/src/
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >
+> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`，如果这些都没配，再回退到仓库里的默认 SQLite 路径。
+
 > Docker 一键部署走的是第三种方式：不把 key 注入页面，而是在前端代理层自动转发。
 
 ---

@@ -228,6 +228,25 @@ describe('api contract regression', () => {
     expect(config.headers.Authorization).toBeUndefined();
   });
 
+  it('treats setup endpoints as protected and injects stored auth headers', () => {
+    const interceptor = interceptorRef.current;
+    window.localStorage.setItem(
+      'memory-palace.dashboardAuth',
+      JSON.stringify({
+        maintenanceApiKey: 'stored-key',
+        maintenanceApiKeyMode: 'header',
+      })
+    );
+
+    const config = interceptor({
+      url: '/setup/status',
+      headers: {},
+      method: 'get',
+    });
+
+    expect(config.headers['X-MCP-API-Key']).toBe('stored-key');
+  });
+
   it('prefers runtime maintenance key over stored fallback', () => {
     const interceptor = interceptorRef.current;
     window.localStorage.setItem(

@@ -98,6 +98,7 @@ const isProtectedPath = (pathname) => {
   if (normalizedPath.startsWith('/maintenance/')) return true;
   if (normalizedPath.startsWith('/review/')) return true;
   if (normalizedPath.startsWith('/browse/')) return true;
+  if (normalizedPath.startsWith('/setup/')) return true;
   return false;
 };
 
@@ -258,9 +259,12 @@ export const extractApiError = (
     const isAuthError =
       error?.response?.status === 401
       || errorCode === 'maintenance_auth_failed'
+      || errorCode === 'setup_access_denied'
       || errorCode === 'mcp_sse_auth_failed'
       || reasonCode === 'invalid_or_missing_api_key'
       || reasonCode === 'api_key_not_configured'
+      || reasonCode === 'local_loopback_or_api_key_required'
+      || reasonCode === 'local_loopback_required_for_write'
       || reasonCode === 'insecure_local_override_requires_loopback';
     if (isAuthError) {
       pushPart(i18n.t('apiErrors.authHint'));
@@ -282,6 +286,12 @@ export const extractApiError = (
 };
 
 // ============ Review API (Session & Snapshot) ============
+
+export const getSetupStatus = () =>
+  api.get('/setup/status').then(res => res.data);
+
+export const saveSetupConfig = (payload) =>
+  api.post('/setup/config', payload).then(res => res.data);
 
 export const getSessions = () => api.get('/review/sessions').then(res => res.data);
 

@@ -87,9 +87,149 @@ const zhCN = {
       setApiKey: '设置 API 密钥',
       updateApiKey: '更新 API 密钥',
       clearKey: '清除密钥',
+      openSetup: '配置向导',
       prompt: '请输入用于受保护控制台路由的 MCP API 密钥。',
       emptyKey: 'API 密钥不能为空。',
       runtimeBadge: '运行时密钥已启用',
+    },
+  },
+  setup: {
+    kicker: '首启配置',
+    title: '配置 Memory Palace',
+    subtitle:
+      '这个向导可以帮你在浏览器里保存 Dashboard 密钥，并在支持的本地环境中把常用运行参数写进仓库的 .env 文件，不需要手改原始配置文件。',
+    dashboard: {
+      title: 'Dashboard 鉴权',
+      description:
+        '这一部分控制 /browse、/review、/maintenance、/setup 等受保护接口的访问。',
+      apiKeyLabel: 'MCP API 密钥',
+      apiKeyHint:
+        '如果后端启用了 MCP_API_KEY，请在这里输入同一把 key，这样浏览器就能立刻访问受保护页面。',
+      apiKeyPlaceholder: '输入 MCP_API_KEY',
+      insecureLocalLabel: '允许本地不安全访问',
+      insecureLocalHint:
+        '对应 MCP_API_KEY_ALLOW_INSECURE_LOCAL=true。只建议在你自己机器的回环地址调试时开启。',
+      browserScope:
+        '只有 Dashboard API key 会保存在浏览器里。下面填写的 provider key 只会发送一次到后端 setup API，并不会写入浏览器本地存储。',
+    },
+    retrieval: {
+      title: '检索配置',
+      description:
+        '先选一个安全起步档位，再只填写当前本地环境真正需要的字段。如果本地 router 还没接好，优先用直连 API 模式。',
+      presets: {
+        b: 'Profile B · 仅 hash',
+        c: 'Profile C · embedding API',
+        d: 'Profile D · embedding + reranker API',
+      },
+      embeddingBackendLabel: 'Embedding 后端',
+      embeddingBackendHint:
+        '对应 RETRIEVAL_EMBEDDING_BACKEND。本地直连排障优先选 api，最终路由部署再选 router；轻量环境可以用 hash/none。',
+      backends: {
+        none: '关闭',
+        hash: 'Hash（本地基线）',
+        api: '直连 API',
+        router: 'Router',
+      },
+      embeddingApiBaseLabel: 'Embedding API 地址',
+      embeddingApiBasePlaceholder: 'http://127.0.0.1:9000/v1',
+      embeddingModelLabel: 'Embedding 模型',
+      embeddingModelPlaceholder: 'text-embedding-model',
+      embeddingApiKeyLabel: 'Embedding API 密钥',
+      embeddingApiKeyPlaceholder: '可选 API key',
+      optionalApiKeyHint:
+        '如果你的本地服务不需要 key，可以留空。留空字段会保留服务端当前已有值，不会被清空。',
+      routerApiBaseLabel: 'Router API 地址',
+      routerApiBasePlaceholder: 'http://127.0.0.1:8001/v1',
+      routerApiKeyLabel: 'Router API 密钥',
+      routerApiKeyPlaceholder: '可选 router key',
+      routerEmbeddingModelLabel: 'Router embedding 模型',
+      routerEmbeddingModelPlaceholder: 'router-embedding-model',
+      routerRerankerModelLabel: 'Router reranker 模型',
+      routerRerankerModelPlaceholder: 'router-reranker-model',
+      rerankerEnabledLabel: '开启 reranker',
+      rerankerEnabledHint:
+        '对应 RETRIEVAL_RERANKER_ENABLED。只有在 reranker 服务真的可达时再打开。',
+      rerankerApiBaseLabel: 'Reranker API 地址',
+      rerankerApiBasePlaceholder: 'http://127.0.0.1:9100/v1',
+      rerankerModelLabel: 'Reranker 模型',
+      rerankerModelPlaceholder: 'reranker-model',
+      rerankerApiKeyLabel: 'Reranker API 密钥',
+      rerankerApiKeyPlaceholder: '可选 reranker key',
+    },
+    llm: {
+      title: 'write_guard 与意图 LLM',
+      description:
+        '这些开关控制可选的 LLM 辅助写入守卫和意图路由。在 chat 接口没准备好之前，建议先保持关闭。',
+      writeGuardEnabledLabel: '开启 write_guard LLM',
+      writeGuardEnabledHint:
+        '开启后，后端会使用 WRITE_GUARD_LLM_* 辅助判断这次写入是否应该执行。',
+      writeGuardApiBaseLabel: 'write_guard API 地址',
+      writeGuardApiBasePlaceholder: 'http://127.0.0.1:9200/v1',
+      writeGuardModelLabel: 'write_guard 模型',
+      writeGuardModelPlaceholder: 'chat-model',
+      writeGuardApiKeyLabel: 'write_guard API 密钥',
+      writeGuardApiKeyPlaceholder: '可选 write_guard key',
+      intentEnabledLabel: '开启意图 LLM',
+      intentEnabledHint:
+        '开启后，后端会使用 INTENT_LLM_* 做查询意图路由。如果你只想保持确定性检索，可以先关掉。',
+      intentApiBaseLabel: 'Intent API 地址',
+      intentApiBasePlaceholder: 'http://127.0.0.1:9300/v1',
+      intentModelLabel: 'Intent 模型',
+      intentModelPlaceholder: 'intent-model',
+      intentApiKeyLabel: 'Intent API 密钥',
+      intentApiKeyPlaceholder: '可选 intent key',
+      routerChatModelLabel: 'Router chat 模型',
+      routerChatModelPlaceholder: 'router-chat-model',
+      gistFallbackHint:
+        'compact_context 的 gist 默认就会回退到 WRITE_GUARD_LLM_*，所以首启配置通常不需要再单独给 gist 配一套字段。',
+    },
+    summary: {
+      title: '当前状态',
+      loading: '正在检查本地 setup 支持与已脱敏的运行状态……',
+      subtitle:
+        '这里仅展示安全的汇总信号，不会把现有 secret 原样回显到前端界面。',
+      targetLabel: '目标文件：{{target}}',
+      applySupported:
+        '当前运行环境支持把配置写入本地仓库 .env 文件，但大多数后端侧改动仍然需要重启后才能完全生效。',
+      configured: '已配置',
+      missing: '缺失',
+      notEnabled: '未开启',
+      dashboardAuth: 'Dashboard 鉴权',
+      embedding: 'Embedding',
+      reranker: 'Reranker',
+      writeGuard: 'write_guard',
+      intent: '意图 LLM',
+      restartHint: '完全生效前需要重启：{{targets}}。',
+      browserOnlyHint:
+        '只保存浏览器密钥时，只会影响当前浏览器的 Dashboard 请求，不会改写后端运行参数。',
+    },
+    actions: {
+      nextTitle: '应用改动',
+      nextHint:
+        '如果你只是想先让 Dashboard 通过鉴权，用浏览器保存即可；如果你想持久化本地后端配置，再使用 .env 保存路径。',
+      saveEnv: '保存到本地 .env',
+      savingEnv: '正在写入 .env……',
+      saveBrowserOnly: '只保存 Dashboard 密钥',
+      close: '关闭向导',
+    },
+    messages: {
+      statusUnavailable: '加载 setup 状态失败。',
+      browserOnlyRequiresKey: '请先输入 MCP API 密钥，再执行仅浏览器保存。',
+      browserOnlySaved: 'Dashboard 密钥已保存到当前浏览器。',
+      serverSaved: '本地配置已写入 {{target}}。',
+      saveFailed: '保存配置失败。',
+    },
+    reasons: {
+      docker_runtime_not_persisted:
+        '当前进程运行在 Docker 内部。在这里写仓库 .env 只会是临时结果，所以向导会退回到说明模式。',
+      env_example_missing:
+        '缺少 .env.example 模板，向导无法安全地初始化本地 .env 文件。',
+      target_parent_unwritable:
+        '当前进程没有目标目录的写权限。',
+      env_file_not_writable:
+        '目标 .env 文件存在，但当前进程没有写权限。',
+      status_unavailable:
+        '当前无法获取 setup 状态，你仍然可以先把 Dashboard 密钥保存到浏览器里。',
     },
   },
   snapshotList: {
@@ -435,10 +575,15 @@ const zhCN = {
     authHint: '点击右上角“设置 API 密钥”，或先配置 MCP_API_KEY / MCP_API_KEY_ALLOW_INSECURE_LOCAL。',
     codes: {
       maintenance_auth_failed: '维护接口鉴权失败',
+      setup_access_denied: '配置向导访问被拒绝',
       mcp_sse_auth_failed: 'SSE 鉴权失败',
       invalid_or_missing_api_key: 'API 密钥缺失或无效',
+      local_loopback_or_api_key_required: '配置向导要求回环地址访问或有效 API 密钥',
+      local_loopback_required_for_write: '只有直连本机回环地址的请求才能写入本地配置',
       api_key_not_configured: '服务端尚未配置 API 密钥',
       insecure_local_override_requires_loopback: '仅回环地址允许关闭本地鉴权',
+      setup_apply_unsupported: '当前运行环境不支持直接应用 setup 配置',
+      setup_write_failed: '写入本地配置文件失败',
       confirmation_phrase_mismatch: '确认短语不匹配',
       job_not_found: '任务不存在',
       queue_full: '队列已满',
@@ -466,6 +611,8 @@ const zhCN = {
       'failed to load snapshots.': '加载快照失败。',
       'failed to retrieve memory fragment.': '获取记忆片段失败。',
       'failed to load observability summary': '加载观测概览失败',
+      'no configuration changes were provided.': '没有提供任何配置改动。',
+      'configuration values cannot contain line breaks.': '配置值不能包含换行符。',
     },
   },
   resourceTypes: {

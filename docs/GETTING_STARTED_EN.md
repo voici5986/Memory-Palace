@@ -200,14 +200,20 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 
 - `docs/DASHBOARD_GUIDE_EN.md`
 
-> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Section 5 will explain local validation.
+> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Clicking this button now opens the **first-run setup assistant**, which can either save the Dashboard key in the current browser or, when you are running against a non-Docker local checkout, write the common runtime fields into `.env`. The assistant also has its own language toggle in the upper right corner, so you do not need to close it first just to switch to Chinese. Section 5 will explain local validation.
 
-> If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key.
+> If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key in the assistant. If you only want the Dashboard to authenticate first, prefer the browser-only save path.
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
+
+> The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
 > The frontend defaults to English; if you prefer Chinese, click the language button in the top right to switch, and the browser will remember your choice.
 
 > The frontend dev server proxies `/api` paths to the backend at `http://127.0.0.1:8000` via the configuration in `vite.config.js`, so no manual CORS configuration is needed between the front and back ends.
+
+<p align="center">
+  <img src="images/setup-assistant-en.png" width="900" alt="Memory Palace first-run setup assistant (English mode)" />
+</p>
 
 <p align="center">
   <img src="images/memory-zh.png" width="900" alt="Memory Palace Interface Example" />
@@ -231,13 +237,13 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template.
+> If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template. The current gate-aligned local-debug command is `--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file <your local .env>`; release verification must go back to `--runtime-env-mode none` without injection.
 
 > `docker_one_click.sh/.ps1` defaults to generating an independent temporary Docker env file for **each run**, passed to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`; it only reuses a specific file if that environment variable is explicitly set, rather than sharing a fixed `.env.docker`.
 >
 > Concurrent deployments under the same checkout will be serialized by a deployment lock; if another one-click deployment is already executing, subsequent processes will exit immediately with a prompt to retry later.
 >
-> If `MCP_API_KEY` in the Docker env file is empty, `apply_profile.*` will automatically generate a local key. The Docker frontend will automatically include this key in its proxy layer, so **when starting via the recommended one-click script path**, in most cases you don't need to manually click `Set API key` to access protected pages; if you didn't use the one-click script or manually modified the env/proxy config, you might still see this button.
+> If `MCP_API_KEY` in the Docker env file is empty, `apply_profile.*` will automatically generate a local key. The Docker frontend will automatically include this key in its proxy layer, so **when starting via the recommended one-click script path**, protected requests usually already work; however, the page may still keep showing `Set API key`, because the browser page itself does not know the proxy-held key. Treat that as expected unless protected data also starts failing with `401` or empty states. Even then, the first-run setup assistant stays in guidance mode for Docker instead of pretending it can persist container env changes.
 >
 > Currently, Docker Compose also waits for **both backend and SSE `/health` checks** to pass before considering the frontend ready. This means that when the container first shows `running`, the page might take a few more seconds to become truly available, which is normal.
 >
@@ -419,7 +425,7 @@ python mcp_server.py
 >
 > The `python mcp_server.py` here assumes you are still using the **`backend/.venv` created and populated with dependencies in Step 2**. If you switch to a new terminal or are configuring local MCP in a client, prioritize using the project's own `.venv` interpreter. Otherwise, errors like `ModuleNotFoundError: No module named 'sqlalchemy'` will occur before the MCP process truly starts.
 >
-> If you are accessing MCP in a client configuration, it is highly recommended to use `scripts/run_memory_palace_mcp_stdio.sh` directly. This wrapper prioritizes reusing the current repository's `.env` / `DATABASE_URL`, avoiding the MCP client and Dashboard/API connecting to two different SQLite databases.
+> If you are accessing MCP in a client configuration, it is highly recommended to use `scripts/run_memory_palace_mcp_stdio.sh` directly. Think of it as the safer default entry: it reuses the current repository `.env` / `DATABASE_URL` first, and only falls back to the repo's default SQLite path when those are missing. That makes client configs less brittle across terminals and machines.
 
 ### 6.2 SSE Mode
 
@@ -428,7 +434,7 @@ cd backend
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `run_sse.py` listens on `0.0.0.0:8000` by default (customizable via `HOST` and `PORT` environment variables), and the SSE endpoint path is `/sse`. SSE mode is protected by `MCP_API_KEY` authentication.
+> The `run_sse.py` process itself uses uvicorn's default `0.0.0.0:8000` listener (customizable via `HOST` and `PORT`), and the SSE endpoint path is `/sse`. But for FastMCP, the effective `HOST` still defaults to `127.0.0.1`, so if you really want remote clients to connect, set `HOST=0.0.0.0` (or your actual bind address) explicitly instead of assuming that "uvicorn is listening" already means "remote clients can connect". SSE mode is still protected by `MCP_API_KEY`.
 >
 > The same SSE process also provides a lightweight `/health` endpoint, mainly for Docker / scripts to perform readiness checks; the truly open streaming entry point for MCP clients remains `/sse`.
 >

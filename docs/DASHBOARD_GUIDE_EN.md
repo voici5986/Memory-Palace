@@ -34,15 +34,23 @@ The top of the page has four tabs. Click any tab to switch pages:
 
 In the top-right corner, you may see one of these states:
 
-- **Set API key**: no stored key is configured yet
+- **Set API key**: no stored key is configured yet; clicking it now opens the **first-run setup assistant**
 - **Update API key / Clear key**: a local key is already stored in the browser
-- **Runtime key active**: the page received a runtime-injected key, so manual entry is usually not needed and the manual key buttons are hidden
+- **Runtime key active**: the page received a runtime-injected key, so manual key entry is usually not needed; the page still keeps a `Setup` entry so you can inspect masked status or fill local `.env` fields
 
 If the Dashboard shell opens but protected data does not load, the usual fix is:
 
-**Set API key** → enter the `MCP_API_KEY` value from your `.env` file → confirm.
+**Set API key** → open the first-run setup assistant → enter the `MCP_API_KEY` value from your `.env` file → choose **Save dashboard key only** or **Save local `.env` settings**.
 
 > If you set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local development, protected data can load automatically without entering a key, as long as the request is a direct loopback request.
+
+> The `.env` write path is only enabled when the app is running directly against a non-Docker local checkout. If the page is talking to Docker containers, the assistant stays in guidance mode instead of pretending it can persist container env / proxy changes.
+
+> If you hit the assistant first and it opens in English, that is still fine on fresh first-run: the assistant has its own language toggle in the upper right corner.
+
+<p align="center">
+  <img src="images/setup-assistant-en.png" width="900" alt="Memory Palace first-run setup assistant (English mode)" />
+</p>
 
 ### 🌍 Language Toggle
 
@@ -78,7 +86,7 @@ This is where you create new memories.
 |-------|-----------------|-------------|
 | **Memory title** | `Memory title (optional)` | A short name for this memory. Optional but recommended — makes it easier to find later. |
 | **Conversation** | Large text area (with grey sample text) | Paste the LLM / Agent dialogue you want to save. **This field is required.** |
-| **Priority** | `Priority` | Enter a number. Higher numbers = more important. Higher-priority memories rank higher in search results. Leave blank for the default value. |
+| **Priority** | `Priority` | Enter a number. **Smaller numbers mean higher priority**; for example, `0` ranks ahead of `5`. Leave blank for the default value. |
 | **Disclosure** | `Disclosure` | A text description controlling when this memory should be surfaced to an Agent. For example: `"Only show when the user explicitly asks"`. Optional — leave blank for no restriction. |
 
 > **What is "Disclosure"?** Think of it as a visibility rule you write in plain language. It tells the system under what conditions this memory should be shown to the AI. For example, if you store a sensitive preference, you might write "only surface when the user asks about preferences." If you're unsure, just leave it blank.
@@ -330,7 +338,7 @@ Lists running or recently completed index tasks. Each task can be:
 
 ### Q: The page loads but shows no data?
 
-This usually means **the API key hasn't been configured**. Click **Set API key** in the top-right corner and enter the `MCP_API_KEY` value from your `.env` file.
+This usually means **the API key hasn't been configured**. Click **Set API key** in the top-right corner to open the setup assistant, enter the `MCP_API_KEY` value from your `.env` file, and first use the browser-only save path so the Dashboard can authenticate. Only use the `.env` write path when you are on a non-Docker local checkout.
 
 ### Q: I clicked "Store Memory" and it says "Skipped"?
 
@@ -338,7 +346,7 @@ The Write Guard blocked this write request. From the Dashboard side, the exact b
 
 ### Q: What number should I use for Priority?
 
-There's no fixed range. A simple rule of thumb: use `0` for normal memories, `5` for important ones, and `10` for critical core memories. Higher number = more important.
+There's no fixed range. A simple rule of thumb: use `0` for critical core memories, `5` for normal ones, and larger numbers for weaker hints that can rank later. Remember: **smaller number = higher priority**.
 
 ### Q: Can I undo "Integrate" or "Reject"?
 

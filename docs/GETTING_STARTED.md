@@ -200,14 +200,20 @@ VITE v7.x.x  ready in xxx ms
 
 - `docs/DASHBOARD_GUIDE_CN.md`
 
-> 如果你在本地手动启动时看到右上角的 `Set API key`，这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。第 5 节会继续说明本地验证方式。
+> 如果你在本地手动启动时看到右上角的 `Set API key`，这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。第 5 节会继续说明本地验证方式。
 
-> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，输入同一把 key。
+> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
+
+> 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要你改的是 embedding / reranker / write_guard / intent 这类后端运行参数，保存后仍然需要重启 `backend` / `sse`（Docker 路径则继续建议用 profile 脚本重启容器）。
 
 > 当前前端默认英文；如果你更习惯中文，直接点右上角语言按钮即可切换，浏览器会记住你的选择。
 
 > 前端开发服务器通过 `vite.config.js` 中配置的 proxy 将 `/api` 路径代理到后端 `http://127.0.0.1:8000`，因此前后端无需手动配置 CORS。
+
+<p align="center">
+  <img src="images/setup-assistant-zh.png" width="900" alt="Memory Palace 首启配置向导（中文模式）" />
+</p>
 
 <p align="center">
   <img src="images/memory-zh.png" width="900" alt="Memory Palace 中文界面示例" />
@@ -231,13 +237,13 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。
+> 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。当前更贴近门禁语义的本地联调命令是：`--runtime-env-mode none --allow-runtime-env-injection --runtime-env-file <你的本地 .env>`；发布复验则必须回到 `--runtime-env-mode none` 且**不启用注入**。
 
 > `docker_one_click.sh/.ps1` 默认会为**每次运行**生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定文件，而不是固定共享 `.env.docker`。
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
 >
-> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，大多数情况下不需要再手动点 `Set API key` 才能访问受保护页面；如果你不是用一键脚本启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮。
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `Set API key`，因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
 >
 > 当前 Docker Compose 还会额外等 **backend 和 SSE 各自的 `/health`** 都通过，才把 frontend 视为 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
@@ -419,7 +425,7 @@ python mcp_server.py
 >
 > 这里的 `python mcp_server.py` 默认你还在使用 **Step 2 里创建并装好依赖的 `backend/.venv`**。如果你换了一个新终端，或者是在客户端里单独配置本地 MCP，优先直接用项目自己的 `.venv` 解释器。否则会在 MCP 进程真正启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'` 这类错误。
 >
-> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。这个 wrapper 会优先复用当前仓库的 `.env` / `DATABASE_URL`，避免 MCP 客户端和 Dashboard/API 连到两份不同的 SQLite 数据库。
+> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。把它理解成“更稳的默认入口”更准确：它会优先复用当前仓库的 `.env` / `DATABASE_URL`，只有这些都没配时才回退到仓库默认 SQLite 路径，所以在不同终端或不同客户端里更不容易配歪。
 
 ### 6.2 SSE 模式
 
@@ -428,7 +434,7 @@ cd backend
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `run_sse.py` 默认监听 `0.0.0.0:8000`（通过 `HOST` 和 `PORT` 环境变量可自定义），SSE 端点路径为 `/sse`。SSE 模式受 `MCP_API_KEY` 鉴权保护。
+> `run_sse.py` 这个进程本身会用 `uvicorn` 默认监听 `0.0.0.0:8000`（可通过 `HOST` 和 `PORT` 自定义），SSE 端点路径为 `/sse`。但对 FastMCP 来说，`HOST` 默认仍是 `127.0.0.1`，所以如果你真要给远程客户端接入，请显式设置 `HOST=0.0.0.0`（或你的实际绑定地址），不要把“uvicorn 在监听”误当成“远程客户端天然可用”。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给 Docker / 脚本做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >

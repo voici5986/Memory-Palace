@@ -32,6 +32,7 @@ backend/
 │   ├── browse.py          # Memory browsing and writing interfaces (prefix: /browse)
 │   ├── review.py          # Review, rollback, and integration interfaces (prefix: /review)
 │   ├── maintenance.py     # Maintenance, observation, and vitality cleanup interfaces (prefix: /maintenance)
+│   ├── setup.py           # First-run setup and local .env write interfaces (prefix: /setup)
 │   └── utils.py           # Diff calculation tools (prefers diff-match-patch, falls back to difflib.HtmlDiff)
 ├── db/
 │   ├── __init__.py        # Client factory (get_sqlite_client / close_sqlite_client)
@@ -48,8 +49,8 @@ backend/
 
 ### Core Module Description
 
-- **`main.py`**: FastAPI application entry point, responsible for lifecycle management (database initialization, legacy database file compatibility recovery), CORS configuration, route registration (`review`, `browse`, `maintenance`), and health checks (including index status, write lane, and index worker runtime status reports). Default CORS origins are converged to a local common list (`localhost/127.0.0.1` on `5173/3000`); explicitly configured wildcards (`*`) will automatically disable credentials; legacy sqlite recovery will execute regular-file + quick_check + core table existence validation before proceeding, and will strip query/fragment when parsing SQLite URLs, skipping non-file targets like `:memory:` / `file::memory:`.
-- **`mcp_server.py`**: Implements 9 MCP tools, including URI parsing (`domain://path` format), snapshot management, write guard decision-making, session caching, and asynchronous index enqueuing logic. It also provides system URI resources (`system://boot`, `system://index`, `system://index-lite`, `system://audit`, `system://recent`). `stdio` connects directly to the tool process; remote access via SSE / streamable HTTP follows the `HOST` configuration and remains subject to API Key and network-side security controls.
+- **`main.py`**: FastAPI application entry point, responsible for lifecycle management (database initialization, legacy database file compatibility recovery), CORS configuration, route registration (`review`, `browse`, `maintenance`, `setup`), and health checks (including index status, write lane, and index worker runtime status reports). Default CORS origins are converged to a local common list (`localhost/127.0.0.1` on `5173/3000`); explicitly configured wildcards (`*`) will automatically disable credentials; legacy sqlite recovery will execute regular-file + quick_check + core table existence validation before proceeding, and will strip query/fragment when parsing SQLite URLs, skipping non-file targets like `:memory:` / `file::memory:`.
+- **`mcp_server.py`**: Implements 9 MCP tools, including URI parsing (`domain://path` format), snapshot management, write guard decision-making, session caching, and asynchronous index enqueuing logic. It also provides system URI resources (`system://boot`, `system://index`, `system://index-lite`, `system://audit`, `system://recent`). The currently public MCP entry points are `stdio` and SSE: `stdio` connects directly to the tool process; remote access goes through the `/sse + /messages` SSE chain and remains subject to API Key and network-side security controls.
 - **`runtime_state.py`**: Manages the write lane (serialized write operations), index worker (asynchronous queue processing for index rebuilding tasks), vitality decay scheduling, cleanup review approval process, and sleep consolidation scheduling.
 - **`run_sse.py`**: SSE transport layer, responsible for API Key authentication and session management for the `/sse` and `/messages` links. The current implementation clears sessions upon client disconnection; if you continue to send requests to `/messages` using an old `session_id`, the server will explicitly return `404/410` instead of pretending `202 Accepted`. It also exposes a lightweight `/health` endpoint primarily for Docker / process-level readiness probes; the actual SSE data channel remains `/sse` and continues to be protected by authentication.
 - **`db/sqlite_client.py`**: SQLite database operation layer, containing memory CRUD, keyword/semantic/hybrid retrieval modes, write_guard logic (supports three-level determination: semantic matching + keyword matching + LLM decision), gist generation and caching, vitality scoring and decay, embedding retrieval (supports remote API and local hash modes), and reranker integration. Database initialization now uses `.init.lock` based on the database file path for process-level serialization, preventing `backend` / `sse` from competing for the database during initial concurrent startup; non-file targets like `:memory:` will not generate this lock.
@@ -211,7 +212,7 @@ Additional notes:
 - Language switching supports one-click switching between English and Chinese, results will be saved in the browser's `localStorage` as `memory-palace.locale`.
 - Common static copy, date/number formats, and common frontend-side error mappings will follow the current language switch.
 - If authentication is not yet configured, the page shell will still open, but protected data requests will show an authorization prompt, empty state, or `401`.
-- When starting via the recommended one-click Docker path, manual `Set API key` is usually not required: the frontend proxy automatically forwards the same `MCP_API_KEY` on the server side; if you did not start via this path, or manually changed the env/proxy configuration, you may still see this button on the page.
+- When starting via the recommended one-click Docker path, protected requests usually already work: the frontend proxy automatically forwards the same `MCP_API_KEY` on the server side; however, the page may still keep showing `Set API key`, because the browser page itself does not know the proxy-held key. Only when protected data also starts failing with `401` or empty states should you keep troubleshooting env / proxy configuration.
 
 ---
 
@@ -236,6 +237,8 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 >
 > In plain English: the frontend makes authentication "runtime-decided," so you can either fill in the key directly at the top of the page or have it injected by a deployment script before the page loads.
 >
+> The extra value of `run_memory_palace_mcp_stdio.sh` is not that `mcp_server.py` would otherwise "randomly pick the wrong database" by itself. Its value is that it gives CLI/client configs a safer default entry: prefer the repository `.env` / `DATABASE_URL`, and only fall back to the repo's default SQLite path when those are missing.
+
 > Docker one-click deployment uses a third way: it doesn't inject the key into the page but automatically forwards it at the frontend proxy layer.
 
 ---

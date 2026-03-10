@@ -109,9 +109,29 @@ The frontend does not hardcode keys at build time; instead, it reads them via ru
 
 1. `readRuntimeMaintenanceAuth()` reads `window.__MEMORY_PALACE_RUNTIME__`
 2. axios request interceptor `isProtectedApiRequest()` determines if the request needs authentication
-3. Automatically injects authentication headers for `/maintenance/*`, `/review/*`, and `/browse/*` (including read/write)
+3. Automatically injects authentication headers for `/maintenance/*`, `/review/*`, `/browse/*`, and the new `/setup/*`
 
 > Compatibility: Also supports the old field name `window.__MCP_RUNTIME_CONFIG__` (see the runtime config fallback logic in `frontend/src/lib/api.js`).
+
+### Security Boundary of the First-run Setup Assistant
+
+The current release adds a Dashboard first-run setup assistant, but it is not a generic “edit server config from the browser” backdoor:
+
+- `/setup/status` is allowed when:
+  - the request is a direct loopback request (`127.0.0.1` / `::1` / `localhost`, with no forwarded headers, and with a loopback host in the request itself), or
+  - the request carries a valid `MCP_API_KEY`
+- the `/setup/config` **write path is loopback-only**; even a request with a valid `MCP_API_KEY` cannot rewrite the host `.env` remotely
+- the assistant only writes a white-listed set of env keys; it is not an arbitrary file writer
+- it only targets the local checkout `.env`
+- when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
+- existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
+- only the Dashboard `MCP_API_KEY` may be stored in browser localStorage; embedding / reranker / LLM provider keys are not stored in the browser
+
+**New validation anchors:**
+
+- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, and Docker fail-closed behavior
+- `frontend/src/App.test.jsx` — Verifies first-run auto-open and the browser-only Dashboard-key flow
+- `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path
 
 **Default approach for Docker one-click deployment is different:**
 

@@ -94,6 +94,8 @@ A React-powered dashboard with four views: **Memory Browser**, **Review & Rollba
 
 The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints.
 
+When no Dashboard auth has been stored yet, the frontend now opens a first-run setup assistant. It can save the Dashboard `MCP_API_KEY` in the current browser and, when the app is running directly against a local checkout, write the common local runtime fields into `.env` without hand-editing the file. Backend-side changes still require a restart.
+
 If you want a page-by-page walkthrough of the Dashboard, see [Dashboard User Guide (English)](docs/DASHBOARD_GUIDE_EN.md).
 
 ---
@@ -206,13 +208,13 @@ If you want a page-by-page walkthrough of the Dashboard, see [Dashboard User Gui
 ```
 memory-palace/
 ├── backend/
-│   ├── main.py                 # FastAPI entrypoint; registers Review/Browse/Maintenance routes
+│   ├── main.py                 # FastAPI entrypoint; registers Review/Browse/Maintenance/Setup routes
 │   ├── mcp_server.py           # 9 MCP tools + snapshot logic + URI parsing
 │   ├── runtime_state.py        # Write Lane queue, Index Worker, vitality decay scheduler
 │   ├── run_sse.py              # SSE transport layer with API Key auth gating
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema definition, CRUD, retrieval, Write Guard, Gist
-│   ├── api/                    # REST routers: review, browse, maintenance
+│   ├── api/                    # REST routers: review, browse, maintenance, setup
 ├── frontend/
 │   └── src/
 │       ├── App.jsx             # Routing and page scaffold
@@ -387,7 +389,9 @@ Open your browser at **<http://localhost:5173>** — you should see the Memory P
 
 > If local manual setup shows `Set API key` in the top-right corner, that is expected. The dashboard shell is up, but protected data requests (`/browse/*`, `/review/*`, `/maintenance/*`) still follow `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL`. The separate MCP SSE endpoints (`/sse` and `/messages`) follow the same rule.
 >
-> If you set `MCP_API_KEY`, click `Set API key` in the top-right corner and enter the same key. If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct loopback requests (`127.0.0.1` / `::1` / `localhost`, without forwarded headers) can load those protected requests without manually entering a key.
+> If you set `MCP_API_KEY`, click `Set API key` to open the setup assistant, then either save the same key to the current browser or, on a local non-Docker checkout, write it into `.env` together with the other common runtime fields. If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct loopback requests (`127.0.0.1` / `::1` / `localhost`, without forwarded headers) can load those protected requests without manually entering a key.
+>
+> The setup assistant stays in guidance mode when the frontend is talking to Docker containers. It does not pretend that container env / proxy changes can be persisted or hot-reloaded from the browser.
 
 #### Step 6: Connect an AI Client
 
@@ -410,7 +414,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > The plain `python mcp_server.py` form assumes you are still using the same `backend/.venv` where you ran `pip install -r requirements.txt`. If you launch MCP from a new terminal or a client config, it is safer to point to the project venv directly. Otherwise the process can fail before startup with errors like `ModuleNotFoundError: No module named 'sqlalchemy'`.
 >
-> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh`. That wrapper reuses the repository's current `.env` / `DATABASE_URL` first, so your MCP client and the Dashboard/API do not accidentally write to two different SQLite files.
+> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh`. Think of it as the safer default entry: it reuses the repository `.env` / `DATABASE_URL` first, and only falls back to the repo's default SQLite path when those are missing. That makes client configs less brittle across terminals and machines.
 >
 > This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
@@ -439,7 +443,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - Backend API: `http://127.0.0.1:18000`
 > - SSE: `http://127.0.0.1:3000/sse`
 >
-> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path you usually do not need to click `Set API key` just to use protected dashboard requests. If you started containers some other way, or changed env / proxy wiring manually, you may still see the button.
+> If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path, **protected requests usually already work**. The page may still keep showing `Set API key`, because the browser itself does not know the proxy-held key. Treat that as expected unless protected data also starts failing with `401` or empty states.
 >
 > The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
@@ -797,8 +801,16 @@ than part of the public user package.
 >
 > - They show the **typical post-entry dashboard state**
 > - The current frontend defaults to English; the screenshots below show the Chinese mode after switching from the top-right language button
-> - The top bar now provides a unified auth entry (`Set API key` / `Update API key` / `Clear key`, or `Runtime key active` when injected at runtime)
+> - The top bar now provides a unified auth/setup entry (`Set API key` / `Update API key` / `Clear key`; when runtime auth is injected, the page shows `Runtime key active` plus a `Setup` button)
 > - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
+
+<details>
+<summary>🪄 First-Run Setup Assistant</summary>
+
+<img src="docs/images/setup-assistant-en.png" width="900" alt="Memory Palace — First-run setup assistant (English mode)" />
+
+Use the assistant to save the Dashboard key in the browser and, on a local non-Docker checkout, write the common `.env` fields without hand-editing the file. Backend-side changes still require a restart.
+</details>
 
 <details>
 <summary>📂 Memory — Tree Browser & Editor</summary>

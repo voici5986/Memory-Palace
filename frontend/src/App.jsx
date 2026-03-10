@@ -11,10 +11,12 @@ import MaintenancePage from './features/maintenance/MaintenancePage';
 import ObservabilityPage from './features/observability/ObservabilityPage';
 import AgentationLite from './components/AgentationLite';
 import FluidBackground from './components/FluidBackground';
+import SetupAssistantModal, {
+  SETUP_ASSISTANT_DISMISSED_STORAGE_KEY,
+} from './components/SetupAssistantModal';
 import {
   clearStoredMaintenanceAuth,
   getMaintenanceAuthState,
-  saveStoredMaintenanceAuth,
 } from './lib/api';
 import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
 
@@ -48,13 +50,23 @@ function NavItem({ to, icon: Icon, label }) {
   );
 }
 
-function AuthControls({ authState, onSetApiKey, onClearApiKey }) {
+function AuthControls({ authState, onOpenSetup, onClearApiKey }) {
   const { t } = useTranslation();
 
   if (authState?.source === 'runtime') {
     return (
-      <div className="hidden md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
-        {t('app.auth.runtimeBadge')}
+      <div className="flex items-center gap-2">
+        <div className="hidden md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
+          {t('app.auth.runtimeBadge')}
+        </div>
+        <button
+          type="button"
+          onClick={onOpenSetup}
+          data-testid="auth-open-setup"
+          className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+        >
+          {t('app.auth.openSetup')}
+        </button>
       </div>
     );
   }
@@ -63,7 +75,7 @@ function AuthControls({ authState, onSetApiKey, onClearApiKey }) {
     <div className="flex items-center gap-2">
       <button
         type="button"
-        onClick={onSetApiKey}
+        onClick={onOpenSetup}
         data-testid="auth-set-api-key"
         className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
       >
@@ -119,7 +131,7 @@ export function buildRoutesKey(authState, authRevision) {
     : `no-auth:${authRevision}`;
 }
 
-function Layout({ authState, authRevision, onSetApiKey, onClearApiKey }) {
+function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
   const { t } = useTranslation();
   const routesKey = buildRoutesKey(authState, authRevision);
 
@@ -156,7 +168,7 @@ function Layout({ authState, authRevision, onSetApiKey, onClearApiKey }) {
             <LanguageToggle />
             <AuthControls
               authState={authState}
-              onSetApiKey={onSetApiKey}
+              onOpenSetup={onOpenSetup}
               onClearApiKey={onClearApiKey}
             />
           </div>
@@ -186,29 +198,45 @@ function App() {
   const { t, i18n } = useTranslation();
   const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
   const [authRevision, setAuthRevision] = React.useState(0);
+  const [setupOpen, setSetupOpen] = React.useState(false);
 
   React.useEffect(() => {
     document.title = t('app.documentTitle');
   }, [i18n.resolvedLanguage, t]);
 
-  const handleSetApiKey = React.useCallback(() => {
-    const nextValue = window.prompt(
-      t('app.auth.prompt'),
-      authState?.source === 'stored' ? authState.key : ''
-    );
-    if (typeof nextValue !== 'string') return;
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (authState?.source === 'runtime') return;
+    if (authState?.source === 'stored') return;
+    const dismissed = window.localStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    if (dismissed === '1') return;
+    setSetupOpen(true);
+  }, [authState?.source]);
 
-    const saved = saveStoredMaintenanceAuth(nextValue, authState?.mode ?? 'header');
-    if (!saved) {
-      window.alert(t('app.auth.emptyKey'));
-      return;
+  const handleOpenSetup = React.useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
     }
-    setAuthState(saved);
+    setSetupOpen(true);
+  }, []);
+
+  const handleCloseSetup = React.useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
+    }
+    setSetupOpen(false);
+  }, []);
+
+  const handleAuthUpdated = React.useCallback((nextAuth) => {
+    setAuthState(nextAuth ?? getMaintenanceAuthState());
     setAuthRevision((value) => value + 1);
-  }, [authState, t]);
+  }, []);
 
   const handleClearApiKey = React.useCallback(() => {
     clearStoredMaintenanceAuth();
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    }
     setAuthState(getMaintenanceAuthState());
     setAuthRevision((value) => value + 1);
   }, []);
@@ -218,8 +246,14 @@ function App() {
       <Layout
         authState={authState}
         authRevision={authRevision}
-        onSetApiKey={handleSetApiKey}
+        onOpenSetup={handleOpenSetup}
         onClearApiKey={handleClearApiKey}
+      />
+      <SetupAssistantModal
+        open={setupOpen}
+        authState={authState}
+        onAuthUpdated={handleAuthUpdated}
+        onClose={handleCloseSetup}
       />
     </BrowserRouter>
   );

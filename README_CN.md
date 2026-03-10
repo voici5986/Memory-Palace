@@ -208,7 +208,7 @@ memory-palace/
 │   ├── run_sse.py              # SSE 传输层，带 API Key 鉴权网关
 │   ├── db/
 │   │   └── sqlite_client.py    # Schema 定义、CRUD、检索、Write Guard、Gist
-│   ├── api/                    # REST 路由：review、browse、maintenance
+│   ├── api/                    # REST 路由：review、browse、maintenance、setup
 ├── frontend/
 │   └── src/
 │       ├── App.jsx             # 路由与页面脚手架
@@ -387,7 +387,9 @@ curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.t
 
 > 如果本地手动启动后右上角出现 `Set API key`，这是正常现象。说明前端页面已经起来了，但受保护的数据请求（`/browse/*`、`/review/*`、`/maintenance/*`）仍然遵循 `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL` 的鉴权规则。独立的 MCP SSE 端点（`/sse`、`/messages`）也遵循同一规则。
 >
-> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，填入同一把 key。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求。
+> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key` 打开首启向导；你可以只把同一把 key 保存到当前浏览器，也可以在“本地 checkout + 非 Docker 运行”的场景下，把常见运行参数一起写进 `.env`。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求。
+>
+> 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要涉及 embedding / reranker / write_guard / intent 这类后端侧参数，保存之后仍然需要按实际部署方式重启对应服务。
 
 #### 第 6 步：连接 AI 客户端
 
@@ -410,7 +412,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > 上面这条 `python mcp_server.py` 默认你还在使用刚才安装依赖的那个 `backend/.venv`。如果你换了一个新终端，或者是在 Claude Code / Codex / OpenCode 这类客户端里配置本地 MCP，优先直接指向项目自己的 `.venv`。否则很容易因为解释器不对，在启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'`。
 >
-> 如果你要把 MCP 接到客户端配置里，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。这个 wrapper 会优先复用当前仓库的 `.env` / `DATABASE_URL`，避免 MCP 客户端和 Dashboard/API 不小心各自写到两份 SQLite 库里。
+> 如果你要把 MCP 接到客户端配置里，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。把它理解成“更稳的默认入口”更准确：它会优先复用当前仓库的 `.env` / `DATABASE_URL`，只有这些都没配时才回退到仓库默认 SQLite 路径，所以在不同终端或不同客户端里更不容易配歪。
 >
 > 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
 
@@ -439,7 +441,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > - Backend API：`http://127.0.0.1:18000`
 > - SSE：`http://127.0.0.1:3000/sse`
 >
-> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，通常不需要再手动点 `Set API key` 才能访问受保护页面；如果你不是按这条路径启动，或者手动改了 env / 代理配置，页面里仍可能看到这个按钮。
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，**受保护请求通常已经能直接用**；但页面右上角仍可能继续显示 `Set API key`，因为浏览器页面本身并不知道代理层的真实 key。这不一定代表配置坏了；只有当受保护数据也一起报 `401` 或空态时，才需要继续排查 env / 代理配置。
 >
 > 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
@@ -802,8 +804,16 @@ curl -fsS http://127.0.0.1:8000/health
 >
 > - 它们展示的是**已经进入 Dashboard 后**的典型页面状态
 > - 当前前端默认英文；下面这组图展示的是切到中文后的界面
-> - 当前版本顶部统一提供鉴权入口（`Set API key` / `Update API key` / `Clear key`；若运行时已注入则显示 `Runtime key active`）
+> - 当前版本顶部统一提供鉴权 / 配置入口（`Set API key` / `Update API key` / `Clear key`；若运行时已注入则显示 `Runtime key active`，同时仍可打开 `Setup`）
 > - 如果还没配置鉴权，页面外壳仍然会打开，但受保护的数据请求会先显示授权提示、空态或 `401`，而不是直接显示完整数据
+
+<details>
+<summary>🪄 首启配置向导</summary>
+
+<img src="docs/images/setup-assistant-zh.png" width="900" alt="Memory Palace — 首启配置向导（中文模式）" />
+
+这个向导可以把 Dashboard key 保存到浏览器里，并且在“非 Docker 的本地 checkout”场景下，把常见运行参数直接写进 `.env`。涉及后端运行链路的改动仍然需要重启服务。
+</details>
 
 <details>
 <summary>📂 记忆 — 树形浏览器与编辑器</summary>
