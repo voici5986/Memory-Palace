@@ -172,6 +172,10 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 > 后端通过 `main.py` 中的 `lifespan` 上下文管理器完成初始化，包括 SQLite 数据库创建、运行时状态（Write Lane、Index Worker）启动等。
+>
+> 上面这条 `uvicorn main:app --host 127.0.0.1 ...` 是推荐的**本机开发**写法。
+>
+> 如果你改为直接运行 `python main.py`，当前默认会绑定 `0.0.0.0:8000`。这更适合局域网 / 远程直连，但也意味着服务会监听到外部网卡。在用这条路径前，请先确认 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护已经配好。
 
 ### Step 3：启动前端
 
@@ -436,6 +440,23 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > 如果你自己用 `curl` 或脚本先连了一次 `/sse`，然后把这条连接断掉，再单独往 `/messages` 发同一个 `session_id`，看到 `404` / `410` 是正常的：这表示前一条 SSE session 已经关闭。真正的正常链路应该是“先保持 `/sse` 连接活着，再由客户端继续往 `/messages` 发请求”。
 
+### 6.2.1 多客户端并发（可选，但建议提前配好）
+
+如果你会让多个 CLI / IDE 宿主同时指向**同一份 SQLite 库**，建议在 `.env` 里显式加上这组配置：
+
+```env
+RUNTIME_WRITE_WAL_ENABLED=true
+RUNTIME_WRITE_JOURNAL_MODE=wal
+RUNTIME_WRITE_WAL_SYNCHRONOUS=normal
+RUNTIME_WRITE_BUSY_TIMEOUT_MS=5000
+```
+
+这几项的作用可以直接理解成：
+
+- 每个 stdio MCP 客户端通常都是独立 Python 进程
+- 不同进程不会共享同一把进程内写锁，只能靠 SQLite 文件锁协调
+- 打开 WAL 并适当增大 `busy_timeout`，能明显降低多客户端同时写入时的 `database is locked`
+
 ### 6.3 客户端配置示例
 
 **stdio 模式**（适用于 Claude Code / Codex / OpenCode 等常见 stdio 客户端）：
@@ -467,7 +488,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 }
 ```
 
-> ⚠️ 请将 `/path/to/memory-palace` 替换为你的实际项目路径。SSE 模式的端口需与你启动 `run_sse.py` 时的 `PORT` 一致。
+> ⚠️ 请将这里的 `127.0.0.1:8010` 替换为你实际启动 `run_sse.py` 时使用的监听地址和端口。
 >
 > ⚠️ SSE 仍受 `MCP_API_KEY` 保护。多数客户端还需要额外配置请求头或 Bearer Token；具体字段名请以客户端自己的 MCP 文档为准。
 >

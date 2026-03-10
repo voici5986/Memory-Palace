@@ -3246,55 +3246,56 @@ async def create_memory(
             operation="create_memory",
             uri=parent_uri,
         )
-        try:
-            guard_decision = _normalize_guard_decision(
-                await client.write_guard(
-                    content=content,
-                    domain=domain,
-                    path_prefix=parent_path if parent_path else None,
-                )
-            )
-        except Exception as guard_exc:
-            guard_decision = _normalize_guard_decision(
-                {
-                    "action": "NOOP",
-                    "method": "exception",
-                    "reason": f"write_guard_unavailable: {guard_exc}",
-                    "degraded": True,
-                    "degrade_reasons": ["write_guard_exception"],
-                }
-            )
-
-        guard_action = str(guard_decision.get("action") or "NOOP").upper()
-        blocked = guard_action != "ADD"
-        try:
-            await _record_guard_event(
-                operation="create_memory",
-                decision=guard_decision,
-                blocked=blocked,
-            )
-        except Exception:
-            pass
-        if blocked:
-            target_uri = guard_decision.get("target_uri")
-            message = (
-                "Skipped: write_guard blocked create_memory "
-                f"(action={guard_action}, method={guard_decision.get('method')})."
-            )
-            if isinstance(target_uri, str) and target_uri:
-                message += f" suggested_target={target_uri}"
-            return _tool_response(
-                ok=False,
-                message=message,
-                created=False,
-                reason="write_guard_blocked",
-                uri=target_uri,
-                **_guard_fields(guard_decision),
-            )
-
         defer_index = await _should_defer_index_on_write()
 
         async def _write_task():
+            nonlocal guard_decision
+            try:
+                guard_decision = _normalize_guard_decision(
+                    await client.write_guard(
+                        content=content,
+                        domain=domain,
+                        path_prefix=parent_path if parent_path else None,
+                    )
+                )
+            except Exception as guard_exc:
+                guard_decision = _normalize_guard_decision(
+                    {
+                        "action": "NOOP",
+                        "method": "exception",
+                        "reason": f"write_guard_unavailable: {guard_exc}",
+                        "degraded": True,
+                        "degrade_reasons": ["write_guard_exception"],
+                    }
+                )
+
+            guard_action = str(guard_decision.get("action") or "NOOP").upper()
+            blocked = guard_action != "ADD"
+            try:
+                await _record_guard_event(
+                    operation="create_memory",
+                    decision=guard_decision,
+                    blocked=blocked,
+                )
+            except Exception:
+                pass
+            if blocked:
+                target_uri = guard_decision.get("target_uri")
+                message = (
+                    "Skipped: write_guard blocked create_memory "
+                    f"(action={guard_action}, method={guard_decision.get('method')})."
+                )
+                if isinstance(target_uri, str) and target_uri:
+                    message += f" suggested_target={target_uri}"
+                return _tool_response(
+                    ok=False,
+                    message=message,
+                    created=False,
+                    reason="write_guard_blocked",
+                    uri=target_uri,
+                    **_guard_fields(guard_decision),
+                )
+
             result = await client.create_memory(
                 parent_path=parent_path,
                 content=content,
@@ -3306,9 +3307,13 @@ async def create_memory(
             )
             created_uri = result.get("uri", make_uri(domain, result["path"]))
             await _snapshot_path_create(created_uri, result["id"], operation_type="create")
+            result["_guard_decision"] = guard_decision
             return result
 
-        result = await _run_write_lane("create_memory", _write_task)
+        lane_result = await _run_write_lane("create_memory", _write_task)
+        if isinstance(lane_result, str):
+            return lane_result
+        result = lane_result
         index_enqueue = {"queued": [], "dropped": [], "deduped": []}
         if defer_index:
             index_enqueue = await _enqueue_index_targets(result, reason="create_memory")
@@ -3436,8 +3441,6 @@ async def update_memory(
             operation="update_memory",
             uri=full_uri,
         )
-        current_memory_id: Optional[int] = None
-
         # --- Validate mutually exclusive content-editing modes ---
         if old_string is not None and append is not None:
             return _tool_response(
@@ -3474,208 +3477,184 @@ async def update_memory(
                 uri=full_uri,
                 **_guard_fields(guard_decision),
             )
-
-        client = None
-
-        # --- Resolve content for patch/append modes ---
-        content = None
-
-        if old_string is not None:
-            # Patch mode: find and replace within existing content
-            if old_string == new_string:
-                return _tool_response(
-                    ok=False,
-                    message=(
-                        "Error: old_string and new_string are identical. "
-                        "No change would be made."
-                    ),
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-
-            if client is None:
-                client = get_sqlite_client()
-            memory = await client.get_memory_by_path(path, domain)
-            if not memory:
-                return _tool_response(
-                    ok=False,
-                    message=f"Error: Memory at '{full_uri}' not found.",
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-            current_memory_id = memory.get("id")
-
-            current_content = memory.get("content", "")
-            count = current_content.count(old_string)
-
-            if count == 0:
-                return _tool_response(
-                    ok=False,
-                    message=(
-                        f"Error: old_string not found in memory content at '{full_uri}'. "
-                        "Make sure it matches the existing text exactly."
-                    ),
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-            if count > 1:
-                return _tool_response(
-                    ok=False,
-                    message=(
-                        f"Error: old_string found {count} times in memory content at '{full_uri}'. "
-                        "Provide more surrounding context to make it unique."
-                    ),
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-
-            # Perform the replacement
-            content = current_content.replace(old_string, new_string, 1)
-
-            # Safety check: ensure the replacement actually changed something.
-            # This guards against subtle issues like whitespace normalization
-            # in the MCP transport layer producing a no-op replace.
-            if content == current_content:
-                return _tool_response(
-                    ok=False,
-                    message=(
-                        f"Error: Replacement produced identical content at '{full_uri}'. "
-                        "The old_string was found but replacing it with new_string "
-                        "resulted in no change. Check for subtle whitespace differences."
-                    ),
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-
-        elif append is not None:
-            # Reject empty append to avoid creating a no-op version
-            if not append:
-                return _tool_response(
-                    ok=False,
-                    message=(
-                        f"Error: Empty append for '{full_uri}'. "
-                        "Provide non-empty text to append."
-                    ),
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-            # Append mode: add to end of existing content
-            if client is None:
-                client = get_sqlite_client()
-            memory = await client.get_memory_by_path(path, domain)
-            if not memory:
-                return _tool_response(
-                    ok=False,
-                    message=f"Error: Memory at '{full_uri}' not found.",
-                    updated=False,
-                    uri=full_uri,
-                    **_guard_fields(guard_decision),
-                )
-            current_memory_id = memory.get("id")
-
-            current_content = memory.get("content", "")
-            content = current_content + append
-
-        # Reject no-op requests where no valid update fields were provided.
-        # This catches malformed tool calls (e.g. oldString/newString instead
-        # of old_string/new_string) that previously returned a false "Success".
-        if content is None and priority is None and disclosure is None:
-            return _tool_response(
-                ok=False,
-                message=(
-                    f"Error: No update fields provided for '{full_uri}'. "
-                    "Use patch mode (old_string + new_string), append mode (append), "
-                    "or metadata fields (priority/disclosure)."
-                ),
-                updated=False,
-                uri=full_uri,
-                **_guard_fields(guard_decision),
-            )
-
-        if client is None:
-            client = get_sqlite_client()
-
-        if content is not None:
-            try:
-                guard_decision = _normalize_guard_decision(
-                    await client.write_guard(
-                        content=content,
-                        domain=domain,
-                        path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
-                        exclude_memory_id=current_memory_id,
-                    )
-                )
-            except Exception as guard_exc:
-                guard_decision = _normalize_guard_decision(
-                    {
-                        "action": "NOOP",
-                        "method": "exception",
-                        "reason": f"write_guard_unavailable: {guard_exc}",
-                        "degraded": True,
-                        "degrade_reasons": ["write_guard_exception"],
-                    }
-                )
-        else:
-            guard_decision = _normalize_guard_decision(
-                {
-                    "action": "BYPASS",
-                    "method": "none",
-                    "reason": "metadata_only_update",
-                },
-                allow_bypass=True,
-            )
-
-        guard_action = str(guard_decision.get("action") or "NOOP").upper()
-        blocked = False
-        if content is not None:
-            if guard_action == "ADD":
-                blocked = False
-            elif guard_action == "UPDATE":
-                target_id = guard_decision.get("target_id")
-                if (
-                    not isinstance(target_id, int)
-                    or not isinstance(current_memory_id, int)
-                    or target_id != current_memory_id
-                ):
-                    blocked = True
-            else:
-                blocked = True
-        try:
-            await _record_guard_event(
-                operation="update_memory",
-                decision=guard_decision,
-                blocked=blocked,
-            )
-        except Exception:
-            pass
-        if blocked:
-            return _tool_response(
-                ok=False,
-                message=(
-                    "Skipped: write_guard blocked update_memory "
-                    f"(action={guard_action}, method={guard_decision.get('method')})."
-                ),
-                updated=False,
-                reason="write_guard_blocked",
-                uri=full_uri,
-                **_guard_fields(guard_decision),
-            )
-
-        # --- Snapshot before modification (each is idempotent) ---
-        if content is not None:
-            await _snapshot_memory_content(full_uri)
-        if priority is not None or disclosure is not None:
-            await _snapshot_path_meta(full_uri)
         defer_index = await _should_defer_index_on_write()
+        client = get_sqlite_client()
+        preview_text: Optional[str] = None
 
         async def _write_task():
-            return await client.update_memory(
+            nonlocal guard_decision, preview_text
+            current_memory_id: Optional[int] = None
+            content = None
+
+            if old_string is not None:
+                if old_string == new_string:
+                    return _tool_response(
+                        ok=False,
+                        message=(
+                            "Error: old_string and new_string are identical. "
+                            "No change would be made."
+                        ),
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                memory = await client.get_memory_by_path(path, domain)
+                if not memory:
+                    return _tool_response(
+                        ok=False,
+                        message=f"Error: Memory at '{full_uri}' not found.",
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                current_memory_id = memory.get("id")
+                current_content = memory.get("content", "")
+                count = current_content.count(old_string)
+                if count == 0:
+                    return _tool_response(
+                        ok=False,
+                        message=(
+                            f"Error: old_string not found in memory content at '{full_uri}'. "
+                            "Make sure it matches the existing text exactly."
+                        ),
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                if count > 1:
+                    return _tool_response(
+                        ok=False,
+                        message=(
+                            f"Error: old_string found {count} times in memory content at '{full_uri}'. "
+                            "Provide more surrounding context to make it unique."
+                        ),
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                content = current_content.replace(old_string, new_string, 1)
+                if content == current_content:
+                    return _tool_response(
+                        ok=False,
+                        message=(
+                            f"Error: Replacement produced identical content at '{full_uri}'. "
+                            "The old_string was found but replacing it with new_string "
+                            "resulted in no change. Check for subtle whitespace differences."
+                        ),
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+            elif append is not None:
+                if not append:
+                    return _tool_response(
+                        ok=False,
+                        message=(
+                            f"Error: Empty append for '{full_uri}'. "
+                            "Provide non-empty text to append."
+                        ),
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                memory = await client.get_memory_by_path(path, domain)
+                if not memory:
+                    return _tool_response(
+                        ok=False,
+                        message=f"Error: Memory at '{full_uri}' not found.",
+                        updated=False,
+                        uri=full_uri,
+                        **_guard_fields(guard_decision),
+                    )
+                current_memory_id = memory.get("id")
+                current_content = memory.get("content", "")
+                content = current_content + append
+
+            if content is None and priority is None and disclosure is None:
+                return _tool_response(
+                    ok=False,
+                    message=(
+                        f"Error: No update fields provided for '{full_uri}'. "
+                        "Use patch mode (old_string + new_string), append mode (append), "
+                        "or metadata fields (priority/disclosure)."
+                    ),
+                    updated=False,
+                    uri=full_uri,
+                    **_guard_fields(guard_decision),
+                )
+
+            if content is not None:
+                try:
+                    guard_decision = _normalize_guard_decision(
+                        await client.write_guard(
+                            content=content,
+                            domain=domain,
+                            path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
+                            exclude_memory_id=current_memory_id,
+                        )
+                    )
+                except Exception as guard_exc:
+                    guard_decision = _normalize_guard_decision(
+                        {
+                            "action": "NOOP",
+                            "method": "exception",
+                            "reason": f"write_guard_unavailable: {guard_exc}",
+                            "degraded": True,
+                            "degrade_reasons": ["write_guard_exception"],
+                        }
+                    )
+            else:
+                guard_decision = _normalize_guard_decision(
+                    {
+                        "action": "BYPASS",
+                        "method": "none",
+                        "reason": "metadata_only_update",
+                    },
+                    allow_bypass=True,
+                )
+
+            guard_action = str(guard_decision.get("action") or "NOOP").upper()
+            blocked = False
+            if content is not None:
+                if guard_action == "ADD":
+                    blocked = False
+                elif guard_action == "UPDATE":
+                    target_id = guard_decision.get("target_id")
+                    if (
+                        not isinstance(target_id, int)
+                        or not isinstance(current_memory_id, int)
+                        or target_id != current_memory_id
+                    ):
+                        blocked = True
+                else:
+                    blocked = True
+            try:
+                await _record_guard_event(
+                    operation="update_memory",
+                    decision=guard_decision,
+                    blocked=blocked,
+                )
+            except Exception:
+                pass
+            if blocked:
+                return _tool_response(
+                    ok=False,
+                    message=(
+                        "Skipped: write_guard blocked update_memory "
+                        f"(action={guard_action}, method={guard_decision.get('method')})."
+                    ),
+                    updated=False,
+                    reason="write_guard_blocked",
+                    uri=full_uri,
+                    **_guard_fields(guard_decision),
+                )
+
+            if content is not None:
+                await _snapshot_memory_content(full_uri)
+            if priority is not None or disclosure is not None:
+                await _snapshot_path_meta(full_uri)
+
+            result = await client.update_memory(
                 path=path,
                 content=content,
                 priority=priority,
@@ -3683,18 +3662,22 @@ async def update_memory(
                 domain=domain,
                 index_now=not defer_index,
             )
+            preview_text = content
+            if preview_text is None:
+                preview_text = (
+                    f"meta update priority={priority if priority is not None else '(unchanged)'} "
+                    f"disclosure={disclosure if disclosure is not None else '(unchanged)'}"
+                )
+            result["_guard_decision"] = guard_decision
+            return result
 
-        update_result = await _run_write_lane("update_memory", _write_task)
+        lane_result = await _run_write_lane("update_memory", _write_task)
+        if isinstance(lane_result, str):
+            return lane_result
+        update_result = lane_result
         index_enqueue = {"queued": [], "dropped": [], "deduped": []}
         if defer_index:
             index_enqueue = await _enqueue_index_targets(update_result, reason="update_memory")
-
-        preview_text = content
-        if preview_text is None:
-            preview_text = (
-                f"meta update priority={priority if priority is not None else '(unchanged)'} "
-                f"disclosure={disclosure if disclosure is not None else '(unchanged)'}"
-            )
         try:
             await _record_session_hit(
                 uri=full_uri,

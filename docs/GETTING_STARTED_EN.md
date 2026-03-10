@@ -172,6 +172,10 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 > The backend completes initialization via the `lifespan` context manager in `main.py`, including SQLite database creation and starting runtime states (Write Lane, Index Worker).
+>
+> The `uvicorn main:app --host 127.0.0.1 ...` command above is the recommended **local development** form.
+>
+> If you instead run `python main.py`, the current default is `0.0.0.0:8000`. That is more suitable for LAN / remote direct access, but it also means the service listens on external interfaces. Before using that path, make sure your `MCP_API_KEY`, firewall rules, reverse proxy, or equivalent network-side protections are already in place.
 
 ### Step 3: Start Frontend
 
@@ -436,6 +440,23 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > If you connect to `/sse` once with `curl` or a script, then disconnect and separately send the same `session_id` to `/messages`, seeing a `404` / `410` is normal: it indicates the previous SSE session has closed. The correct normal chain should be "keep the `/sse` connection alive first, and then have the client continue sending requests to `/messages`."
 
+### 6.2.1 Multi-client concurrency (optional, but recommended)
+
+If multiple CLI / IDE hosts will point to the **same SQLite file**, add this block to `.env`:
+
+```env
+RUNTIME_WRITE_WAL_ENABLED=true
+RUNTIME_WRITE_JOURNAL_MODE=wal
+RUNTIME_WRITE_WAL_SYNCHRONOUS=normal
+RUNTIME_WRITE_BUSY_TIMEOUT_MS=5000
+```
+
+In plain language:
+
+- each stdio MCP client is usually a separate Python process
+- different processes do not share the same in-process write lock
+- WAL plus a larger `busy_timeout` reduces `database is locked` failures when several clients write at the same time
+
 ### 6.3 Client Configuration Examples
 
 **stdio Mode** (applicable to common stdio clients like Claude Code / Codex / OpenCode):
@@ -467,7 +488,7 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 }
 ```
 
-> ⚠️ Replace `/path/to/memory-palace` with your actual project path. The port for SSE mode must match the `PORT` used when starting `run_sse.py`.
+> ⚠️ Replace `127.0.0.1:8010` here with the actual host and port you used when starting `run_sse.py`.
 >
 > ⚠️ SSE is still protected by `MCP_API_KEY`. Most clients also need to configure request headers or a Bearer Token; please refer to the client's own MCP documentation for specific field names.
 >

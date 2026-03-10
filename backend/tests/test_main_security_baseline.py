@@ -1,5 +1,8 @@
 import json
+import runpy
 import sqlite3
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -157,3 +160,18 @@ async def test_health_hides_internal_exception_details(
     assert payload["runtime"]["write_lanes"]["reason"] == "internal_error"
     assert payload["runtime"]["index_worker"]["reason"] == "internal_error"
     assert "boom-secret-detail" not in serialized
+
+
+def test_main_script_binds_all_interfaces_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, int]] = []
+    fake_uvicorn = types.SimpleNamespace(
+        run=lambda app, host, port: calls.append((host, port))
+    )
+
+    monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+
+    runpy.run_module("main", run_name="__main__")
+
+    assert calls == [("0.0.0.0", 8000)]

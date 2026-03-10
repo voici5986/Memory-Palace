@@ -16,8 +16,11 @@ class _FakeBrowseClient:
         self.create_called = False
         self.update_called = False
         self.remove_called = False
+        self.in_lane = False
+        self.guard_calls_in_lane: list[bool] = []
 
     async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        self.guard_calls_in_lane.append(self.in_lane)
         return {
             "action": "ADD",
             "reason": "allow",
@@ -70,7 +73,11 @@ async def test_browse_write_endpoints_run_through_write_lane(
 
     async def _run_write(*, session_id: Optional[str], operation: str, task):
         lane_calls.append({"session_id": session_id, "operation": operation})
-        return await task()
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
 
     monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
     monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
@@ -101,8 +108,9 @@ async def test_browse_write_endpoints_run_through_write_lane(
     assert fake_client.create_called is True
     assert fake_client.update_called is True
     assert fake_client.remove_called is True
+    assert fake_client.guard_calls_in_lane == [True, True]
     assert lane_calls == [
-        {"session_id": None, "operation": "browse.create_node"},
-        {"session_id": None, "operation": "browse.update_node"},
-        {"session_id": None, "operation": "browse.delete_node"},
+        {"session_id": "dashboard", "operation": "browse.create_node"},
+        {"session_id": "dashboard", "operation": "browse.update_node"},
+        {"session_id": "dashboard", "operation": "browse.delete_node"},
     ]

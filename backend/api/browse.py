@@ -52,6 +52,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
+_DASHBOARD_WRITE_SESSION_ID = "dashboard"
 
 
 def _normalize_domain_or_422(domain: str) -> str:
@@ -136,7 +137,7 @@ async def _run_write_lane(operation: str, task):
     if not ENABLE_WRITE_LANE_QUEUE:
         return await task()
     return await runtime_state.write_lanes.run_write(
-        session_id=None,
+        session_id=_DASHBOARD_WRITE_SESSION_ID,
         operation=operation,
         task=task,
     )
@@ -255,40 +256,41 @@ async def create_node(
     parent_path = body.parent_path.strip().strip("/")
     domain = _ensure_writable_domain_or_422(body.domain, operation="create_node")
     title = (body.title or "").strip() or None
-    try:
-        guard_decision = _normalize_guard_decision(
-            await client.write_guard(
-                content=body.content,
-                domain=domain,
-                path_prefix=parent_path if parent_path else None,
-            )
-        )
-    except Exception as exc:
-        guard_decision = _normalize_guard_decision(
-            {
-                "action": "NOOP",
-                "reason": f"write_guard_unavailable: {exc}",
-                "method": "exception",
-            }
-        )
-
-    guard_action = str(guard_decision.get("action") or "NOOP").upper()
-    blocked = guard_action != "ADD"
-    await _record_guard_event("browse.create_node", guard_decision, blocked=blocked)
-    if blocked:
-        return {
-            "success": False,
-            "created": False,
-            "reason": "write_guard_blocked",
-            "message": (
-                "Skipped: write_guard blocked create_node "
-                f"(action={guard_action}, method={guard_decision.get('method')})."
-            ),
-            **_guard_fields(guard_decision),
-        }
 
     async def _write_task():
-        return await client.create_memory(
+        try:
+            guard_decision = _normalize_guard_decision(
+                await client.write_guard(
+                    content=body.content,
+                    domain=domain,
+                    path_prefix=parent_path if parent_path else None,
+                )
+            )
+        except Exception as exc:
+            guard_decision = _normalize_guard_decision(
+                {
+                    "action": "NOOP",
+                    "reason": f"write_guard_unavailable: {exc}",
+                    "method": "exception",
+                }
+            )
+
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
+        blocked = guard_action != "ADD"
+        await _record_guard_event("browse.create_node", guard_decision, blocked=blocked)
+        if blocked:
+            return {
+                "success": False,
+                "created": False,
+                "reason": "write_guard_blocked",
+                "message": (
+                    "Skipped: write_guard blocked create_node "
+                    f"(action={guard_action}, method={guard_decision.get('method')})."
+                ),
+                **_guard_fields(guard_decision),
+            }
+
+        result = await client.create_memory(
             parent_path=parent_path,
             content=body.content,
             priority=body.priority,
@@ -296,18 +298,19 @@ async def create_node(
             disclosure=body.disclosure,
             domain=domain,
         )
+        return {
+            "success": True,
+            "created": True,
+            **result,
+            **_guard_fields(guard_decision),
+        }
 
     try:
         result = await _run_write_lane("browse.create_node", _write_task)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    return {
-        "success": True,
-        "created": True,
-        **result,
-        **_guard_fields(guard_decision),
-    }
+    return result
 
 
 @router.put("/node")
@@ -330,67 +333,74 @@ async def update_node(
     if not memory:
         raise HTTPException(status_code=404, detail=f"Path not found: {domain}://{path}")
 
-    if body.content is not None:
-        try:
-            guard_decision = _normalize_guard_decision(
-                await client.write_guard(
-                    content=body.content,
-                    domain=domain,
-                    path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
-                    exclude_memory_id=memory.get("id"),
-                )
-            )
-        except Exception as exc:
-            guard_decision = _normalize_guard_decision(
-                {
-                    "action": "NOOP",
-                    "reason": f"write_guard_unavailable: {exc}",
-                    "method": "exception",
-                }
-            )
-    else:
-        guard_decision = _normalize_guard_decision(
-            {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"},
-            allow_bypass=True,
-        )
-
-    guard_action = str(guard_decision.get("action") or "NOOP").upper()
-    blocked = False
-    if body.content is not None:
-        if guard_action == "ADD":
-            blocked = False
-        elif guard_action == "UPDATE":
-            target_id = guard_decision.get("target_id")
-            current_memory_id = memory.get("id")
-            if (
-                not isinstance(target_id, int)
-                or not isinstance(current_memory_id, int)
-                or target_id != current_memory_id
-            ):
-                blocked = True
-        else:
-            blocked = True
-    await _record_guard_event("browse.update_node", guard_decision, blocked=blocked)
-    if blocked:
-        return {
-            "success": False,
-            "updated": False,
-            "reason": "write_guard_blocked",
-            "message": (
-                "Skipped: write_guard blocked update_node "
-                f"(action={guard_action}, method={guard_decision.get('method')})."
-            ),
-            **_guard_fields(guard_decision),
-        }
-
     async def _write_task():
-        return await client.update_memory(
+        if body.content is not None:
+            try:
+                guard_decision = _normalize_guard_decision(
+                    await client.write_guard(
+                        content=body.content,
+                        domain=domain,
+                        path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
+                        exclude_memory_id=memory.get("id"),
+                    )
+                )
+            except Exception as exc:
+                guard_decision = _normalize_guard_decision(
+                    {
+                        "action": "NOOP",
+                        "reason": f"write_guard_unavailable: {exc}",
+                        "method": "exception",
+                    }
+                )
+        else:
+            guard_decision = _normalize_guard_decision(
+                {"action": "BYPASS", "reason": "metadata_only_update", "method": "none"},
+                allow_bypass=True,
+            )
+
+        guard_action = str(guard_decision.get("action") or "NOOP").upper()
+        blocked = False
+        if body.content is not None:
+            if guard_action == "ADD":
+                blocked = False
+            elif guard_action == "UPDATE":
+                target_id = guard_decision.get("target_id")
+                current_memory_id = memory.get("id")
+                if (
+                    not isinstance(target_id, int)
+                    or not isinstance(current_memory_id, int)
+                    or target_id != current_memory_id
+                ):
+                    blocked = True
+            else:
+                blocked = True
+
+        await _record_guard_event("browse.update_node", guard_decision, blocked=blocked)
+        if blocked:
+            return {
+                "success": False,
+                "updated": False,
+                "reason": "write_guard_blocked",
+                "message": (
+                    "Skipped: write_guard blocked update_node "
+                    f"(action={guard_action}, method={guard_decision.get('method')})."
+                ),
+                **_guard_fields(guard_decision),
+            }
+
+        result = await client.update_memory(
             path=path,
             domain=domain,
             content=body.content,
             priority=body.priority,
             disclosure=body.disclosure,
         )
+        return {
+            "success": True,
+            "updated": True,
+            "memory_id": result["new_memory_id"],
+            **_guard_fields(guard_decision),
+        }
 
     # Update (creates new version if content changed, updates path metadata otherwise)
     try:
@@ -398,12 +408,7 @@ async def update_node(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    return {
-        "success": True,
-        "updated": True,
-        "memory_id": result["new_memory_id"],
-        **_guard_fields(guard_decision),
-    }
+    return result
 
 
 @router.delete("/node")

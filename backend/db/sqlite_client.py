@@ -324,7 +324,7 @@ class SQLiteClient:
             )
         )
         self._runtime_write_busy_timeout_ms = max(
-            1, self._env_int("RUNTIME_WRITE_BUSY_TIMEOUT_MS", 120)
+            1, self._env_int("RUNTIME_WRITE_BUSY_TIMEOUT_MS", 5000)
         )
         self._runtime_write_wal_autocheckpoint = max(
             1, self._env_int("RUNTIME_WRITE_WAL_AUTOCHECKPOINT", 1000)

@@ -323,7 +323,7 @@ For the **docker** platform only, `apply_profile` auto-generates a local `MCP_AP
 cd backend
 
 # Create and activate virtual environment
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate        # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
@@ -340,6 +340,10 @@ Memory API starting...
 SQLite database initialized.
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
+
+> The `uvicorn main:app --host 127.0.0.1 ...` command above is the recommended **local development** form.
+>
+> If you instead run `python main.py`, the current default is `0.0.0.0:8000`. That is more suitable for LAN / remote direct access, but it also means the service listens on external interfaces. Before using that path, make sure your `MCP_API_KEY`, firewall rules, reverse proxy, or equivalent network-side protections are already in place.
 
 #### Step 4: Start the Frontend
 

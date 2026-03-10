@@ -130,7 +130,7 @@ def test_phase_d_hold_default_flags_off_in_env_and_profiles() -> None:
         "RUNTIME_WRITE_WAL_ENABLED": "false",
         "RUNTIME_WRITE_JOURNAL_MODE": "delete",
         "RUNTIME_WRITE_WAL_SYNCHRONOUS": "normal",
-        "RUNTIME_WRITE_BUSY_TIMEOUT_MS": "120",
+        "RUNTIME_WRITE_BUSY_TIMEOUT_MS": "5000",
         "RUNTIME_WRITE_WAL_AUTOCHECKPOINT": "1000",
     }
 

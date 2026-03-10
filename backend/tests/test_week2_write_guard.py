@@ -33,8 +33,11 @@ class _FakeClient:
         self.create_called = False
         self.update_called = False
         self.update_payload: Dict[str, Any] = {}
+        self.in_lane = False
+        self.guard_calls_in_lane: list[bool] = []
 
     async def write_guard(self, **_: Any) -> Dict[str, Any]:
+        self.guard_calls_in_lane.append(self.in_lane)
         return dict(self.guard_decision)
 
     async def create_memory(self, **_: Any) -> Dict[str, Any]:
@@ -223,6 +226,40 @@ async def test_create_memory_returns_guard_fields_on_success(
     assert payload["created"] is True
     assert payload["guard_action"] == "ADD"
     assert fake_client.create_called is True
+
+
+@pytest.mark.asyncio
+async def test_create_memory_runs_write_guard_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "ADD",
+            "reason": "no strong duplicate signal",
+            "method": "keyword",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    async def _run_write_lane_stub(_operation: str, task):
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
+
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_lane_stub)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert fake_client.guard_calls_in_lane == [True]
 
 
 @pytest.mark.asyncio
@@ -463,6 +500,49 @@ async def test_update_memory_metadata_only_marks_guard_bypass(
     assert payload["updated"] is True
     assert payload["guard_action"] == "BYPASS"
     assert fake_client.update_called is True
+
+
+@pytest.mark.asyncio
+async def test_update_memory_runs_guard_and_snapshots_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "UPDATE",
+            "reason": "same memory",
+            "method": "keyword",
+            "target_id": 7,
+            "target_uri": "core://agent/current",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+    snapshot_calls_in_lane: list[bool] = []
+
+    async def _snapshot_in_lane(*_: Any, **__: Any) -> None:
+        snapshot_calls_in_lane.append(fake_client.in_lane)
+
+    async def _run_write_lane_stub(_operation: str, task):
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
+
+    monkeypatch.setattr(mcp_server, "_snapshot_memory_content", _snapshot_in_lane)
+    monkeypatch.setattr(mcp_server, "_snapshot_path_meta", _snapshot_in_lane)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_lane_stub)
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/current",
+        old_string="world",
+        new_string="planet",
+        priority=5,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert fake_client.guard_calls_in_lane == [True]
+    assert snapshot_calls_in_lane == [True, True]
 
 
 @pytest.mark.asyncio

@@ -62,7 +62,7 @@ X-MCP-API-Key: <MCP_API_KEY>
 Authorization: Bearer <MCP_API_KEY>
 ```
 
-> 后端使用 `hmac.compare_digest` 进行恒等时间比较（参见 `backend/api/maintenance.py` 第 75 行、`backend/run_sse.py` 第 75 行），防止时序攻击。
+> 后端使用 `hmac.compare_digest` 进行恒等时间比较（参见 `backend/api/maintenance.py` 与 `backend/run_sse.py` 中的鉴权实现），防止时序攻击。
 
 ### 无 Key 时的默认行为
 
@@ -111,7 +111,7 @@ Authorization: Bearer <MCP_API_KEY>
 2. axios 请求拦截器 `isProtectedApiRequest()` 判断请求是否需要鉴权
 3. 对 `/maintenance/*`、`/review/*` 和 `/browse/*`（含读写）自动注入鉴权头
 
-> 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（同一文件第 14 行 fallback 逻辑）。
+> 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（见 `frontend/src/lib/api.js` 中的 runtime config fallback 逻辑）。
 
 **Docker 一键部署的默认做法不一样：**
 
@@ -134,10 +134,10 @@ Authorization: Bearer <MCP_API_KEY>
 | 非 root 运行（后端） | `groupadd --gid 10001 app && useradd --uid 10001` | `deploy/docker/Dockerfile.backend` |
 | 非 root 运行（前端） | 使用 `nginxinc/nginx-unprivileged:1.27-alpine` 基础镜像 | `deploy/docker/Dockerfile.frontend` |
 | 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key | `deploy/docker/nginx.conf.template` |
-| 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` 第 13 行 |
-| 数据持久化 | Docker Volumes `memory_palace_data` → `/app/data`，`memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` 第 9、10、30、31、60、62 行 |
-| 健康检查（后端） | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `docker-compose.yml` 第 15 行 |
-| 健康检查（前端） | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` 第 32 行 |
+| 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
+| 数据持久化 | Docker Volumes `memory_palace_data` → `/app/data`，`memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` |
+| 健康检查（后端） | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `docker-compose.yml` 中的 `backend.healthcheck` |
+| 健康检查（前端） | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` 中的 `frontend.healthcheck` |
 
 ---
 

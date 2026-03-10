@@ -17,7 +17,7 @@ async def test_runtime_write_wal_defaults_keep_delete_mode(
     monkeypatch.setenv("RUNTIME_WRITE_WAL_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_WRITE_JOURNAL_MODE", "delete")
     monkeypatch.setenv("RUNTIME_WRITE_WAL_SYNCHRONOUS", "normal")
-    monkeypatch.setenv("RUNTIME_WRITE_BUSY_TIMEOUT_MS", "120")
+    monkeypatch.setenv("RUNTIME_WRITE_BUSY_TIMEOUT_MS", "5000")
     monkeypatch.setenv("RUNTIME_WRITE_WAL_AUTOCHECKPOINT", "1000")
 
     client = SQLiteClient(_sqlite_url(tmp_path / "runtime-write-wal-defaults.db"))
@@ -30,7 +30,7 @@ async def test_runtime_write_wal_defaults_keep_delete_mode(
     assert capabilities["runtime_write_journal_mode_requested"] == "delete"
     assert capabilities["runtime_write_journal_mode_effective"] == "delete"
     assert capabilities["runtime_write_wal_synchronous_effective"] == "default"
-    assert capabilities["runtime_write_busy_timeout_ms"] == 120
+    assert capabilities["runtime_write_busy_timeout_ms"] == 5000
     assert capabilities["runtime_write_wal_autocheckpoint"] == 1000
     assert capabilities["runtime_write_pragma_status"] == "disabled"
     assert capabilities["runtime_write_pragma_error"] == ""

@@ -232,7 +232,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 
 > Compatibility: The runtime object is also compatible with the old field name `window.__MCP_RUNTIME_CONFIG__`.
 >
-> Code reference: `frontend/src/lib/api.js` line 14.
+> Code reference: `readWindowRuntimeMaintenanceAuth()` and `getMaintenanceAuthState()` in `frontend/src/lib/api.js`.
 >
 > In plain English: the frontend makes authentication "runtime-decided," so you can either fill in the key directly at the top of the page or have it injected by a deployment script before the page loads.
 >

@@ -232,7 +232,7 @@ frontend/src/
 
 > 兼容性：运行时对象也兼容旧字段名 `window.__MCP_RUNTIME_CONFIG__`。
 >
-> 代码参考：`frontend/src/lib/api.js` 第 14 行。
+> 代码参考：`frontend/src/lib/api.js` 中的 `readWindowRuntimeMaintenanceAuth()` 与 `getMaintenanceAuthState()`。
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >

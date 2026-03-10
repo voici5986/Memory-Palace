@@ -323,7 +323,7 @@ bash scripts/apply_profile.sh macos b
 cd backend
 
 # 创建并激活虚拟环境
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate        # Windows PowerShell：.\.venv\Scripts\Activate.ps1
 
 # 安装依赖
@@ -340,6 +340,10 @@ Memory API starting...
 SQLite database initialized.
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
+
+> 上面这条 `uvicorn main:app --host 127.0.0.1 ...` 是推荐的**本机开发**写法。
+>
+> 如果你改为直接运行 `python main.py`，当前默认会绑定 `0.0.0.0:8000`。这更适合局域网 / 远程直连，但也意味着服务会监听到外部网卡。在用这条路径前，请先确认 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护已经配好。
 
 #### 第 4 步：启动前端
 

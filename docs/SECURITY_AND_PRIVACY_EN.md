@@ -62,7 +62,7 @@ X-MCP-API-Key: <MCP_API_KEY>
 Authorization: Bearer <MCP_API_KEY>
 ```
 
-> The backend uses `hmac.compare_digest` for constant-time comparison (see `backend/api/maintenance.py` line 75, `backend/run_sse.py` line 75) to prevent timing attacks.
+> The backend uses `hmac.compare_digest` for constant-time comparison (see the authentication logic in `backend/api/maintenance.py` and `backend/run_sse.py`) to prevent timing attacks.
 
 ### Default Behavior When No Key is Provided
 
@@ -111,7 +111,7 @@ The frontend does not hardcode keys at build time; instead, it reads them via ru
 2. axios request interceptor `isProtectedApiRequest()` determines if the request needs authentication
 3. Automatically injects authentication headers for `/maintenance/*`, `/review/*`, and `/browse/*` (including read/write)
 
-> Compatibility: Also supports the old field name `window.__MCP_RUNTIME_CONFIG__` (fallback logic on line 14 of the same file).
+> Compatibility: Also supports the old field name `window.__MCP_RUNTIME_CONFIG__` (see the runtime config fallback logic in `frontend/src/lib/api.js`).
 
 **Default approach for Docker one-click deployment is different:**
 
@@ -134,10 +134,10 @@ The following security configurations can be directly verified in the project's 
 | Non-root execution (Backend) | `groupadd --gid 10001 app && useradd --uid 10001` | `deploy/docker/Dockerfile.backend` |
 | Non-root execution (Frontend) | Using `nginxinc/nginx-unprivileged:1.27-alpine` base image | `deploy/docker/Dockerfile.frontend` |
 | Frontend proxy authentication | Nginx forwards `X-MCP-API-Key` at the server side; the real key is not stored on the browser side | `deploy/docker/nginx.conf.template` |
-| Prohibit privilege escalation | `security_opt: no-new-privileges:true` | `docker-compose.yml` line 13 |
-| Data persistence | Docker Volumes `memory_palace_data` → `/app/data`, `memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` lines 9, 10, 30, 31, 60, 62 |
-| Health check (Backend) | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `docker-compose.yml` line 15 |
-| Health check (Frontend) | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` line 32 |
+| Prohibit privilege escalation | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
+| Data persistence | Docker Volumes `memory_palace_data` → `/app/data`, `memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` |
+| Health check (Backend) | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `backend.healthcheck` in `docker-compose.yml` |
+| Health check (Frontend) | `wget -q -O - http://127.0.0.1:8080/` | `frontend.healthcheck` in `docker-compose.yml` |
 
 ---
 
