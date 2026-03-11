@@ -82,7 +82,7 @@ def test_pull_based_ghcr_release_artifacts_exist() -> None:
         encoding="utf-8"
     )
 
-    assert "pull_policy: always" in ghcr_compose
+    assert "pull_policy: missing" in ghcr_compose
     assert "ghcr.io/agi-is-going-to-arrive/memory-palace-backend:latest" in ghcr_compose
     assert "ghcr.io/agi-is-going-to-arrive/memory-palace-frontend:latest" in ghcr_compose
     assert "docker/login-action" in workflow

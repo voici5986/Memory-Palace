@@ -282,6 +282,7 @@ This path is for **running the service quickly**:
 - If you want the current repo's repo-local skill + MCP installation path, continue with `docs/skills/GETTING_STARTED_EN.md`.
 - If you only want MCP without repo-local install automation, configure an SSE-capable client manually against `http://localhost:3000/sse`.
 - Unlike `docker_one_click.sh/.ps1`, this path does **not** auto-adjust ports. Set `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT` explicitly if the defaults are occupied.
+- If a containerized C / D setup still needs to reach a **model service running on your host machine**, do not use `127.0.0.1` as the host-side address from inside the container. From the container's point of view, `127.0.0.1` loops back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address).
 
 The rest of this section describes the **local build / maintainer path** using `docker_one_click.sh/.ps1`.
 

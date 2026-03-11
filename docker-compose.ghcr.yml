@@ -1,7 +1,7 @@
 services:
   backend:
     image: ${MEMORY_PALACE_BACKEND_IMAGE:-ghcr.io/agi-is-going-to-arrive/memory-palace-backend:latest}
-    pull_policy: always
+    pull_policy: missing
     env_file:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     volumes:
@@ -21,7 +21,7 @@ services:
 
   sse:
     image: ${MEMORY_PALACE_BACKEND_IMAGE:-ghcr.io/agi-is-going-to-arrive/memory-palace-backend:latest}
-    pull_policy: always
+    pull_policy: missing
     env_file:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     command: ["python", "run_sse.py"]
@@ -40,7 +40,7 @@ services:
 
   frontend:
     image: ${MEMORY_PALACE_FRONTEND_IMAGE:-ghcr.io/agi-is-going-to-arrive/memory-palace-frontend:latest}
-    pull_policy: always
+    pull_policy: missing
     env_file:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     depends_on:

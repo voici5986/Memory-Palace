@@ -264,6 +264,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 安装链路，保留这个 checkout，再继续看 `docs/skills/GETTING_STARTED.md`。
 - 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。
 - 和 `docker_one_click.sh/.ps1` 不同，这条 GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
+- 如果容器还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，`127.0.0.1` 指向的是容器自己，不是你的宿主机。优先使用 `host.docker.internal`（或你的实际可达地址）。
 
 停止服务：
 
