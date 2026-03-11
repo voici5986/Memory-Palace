@@ -70,8 +70,8 @@ python scripts/sync_memory_palace_skill.py --check
 
 补一条很实用的细节：
 
-- 如果脚本准备改写现有配置文件（例如 `.mcp.json`、`.gemini/settings.json`、`~/.codex/config.toml`），现在会先在同目录生成一个 `*.bak` 备份
-  - 例如：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`
+- 如果脚本准备改写现有配置文件（例如 `.mcp.json`、`.gemini/settings.json`、`~/.gemini/policies/memory-palace-overrides.toml`、`~/.codex/config.toml`），现在会先在同目录生成一个 `*.bak` 备份
+  - 例如：`.mcp.json.bak`、`settings.json.bak`、`memory-palace-overrides.toml.bak`、`config.toml.bak`
 - 如果目标 JSON 本身已经坏掉，脚本会直接报出具体文件路径和行列号，不再吐一整屏 Python traceback
 
 ### 推荐命令
@@ -107,6 +107,7 @@ python scripts/install_skill.py \
 2. 给当前仓库补两个直连入口：
    - `Claude Code` → `.mcp.json`
    - `Gemini CLI` → `.gemini/settings.json`
+   - `Gemini CLI` → `.gemini/policies/memory-palace-overrides.toml`
 
 这两个入口现在都会统一调用：
 
@@ -155,6 +156,7 @@ python scripts/install_skill.py \
 - `Claude Code` → `~/.claude.json` 当前仓库 project block
 - `Codex CLI` → `~/.codex/config.toml`
 - `Gemini CLI` → `~/.gemini/settings.json`
+- `Gemini CLI` → `~/.gemini/policies/memory-palace-overrides.toml`
 - `OpenCode` → `~/.config/opencode/opencode.json`
 
 这些 user-scope MCP 配置本质上也还是调用同一个 wrapper，所以默认行为和 workspace 入口一致：
@@ -183,11 +185,13 @@ python scripts/install_skill.py \
 
 - repo-local skill：有
 - workspace MCP：有
+- policy 覆盖文件：有
 
 结论：
 
 - **workspace 入口已经就位**
 - 如果你想更稳，或者准备跨仓复用，再补一次 `--scope user --with-mcp`
+- 如果你看到 `Policy file warning in memory-palace-overrides.toml`，优先重跑一遍 `--scope user --with-mcp --force`
 - 写给别人看时仍建议保守：smoke 已通过，但 `gemini_live` 还没有到“完全通过”的程度
 
 ### Codex CLI

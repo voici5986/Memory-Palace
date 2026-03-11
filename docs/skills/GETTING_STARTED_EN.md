@@ -70,8 +70,8 @@ This step only resolves **skill auto-discovery**, not yet MCP.
 
 A very useful detail:
 
-- If the script is about to overwrite existing configuration files (e.g., `.mcp.json`, `.gemini/settings.json`, `~/.codex/config.toml`), it will first create a `*.bak` backup in the same directory.
-  - Examples: `.mcp.json.bak`, `settings.json.bak`, `config.toml.bak`.
+- If the script is about to overwrite existing configuration files (e.g., `.mcp.json`, `.gemini/settings.json`, `~/.gemini/policies/memory-palace-overrides.toml`, `~/.codex/config.toml`), it will first create a `*.bak` backup in the same directory.
+  - Examples: `.mcp.json.bak`, `settings.json.bak`, `memory-palace-overrides.toml.bak`, `config.toml.bak`.
 - If the target JSON itself is corrupted, the script will directly report the specific file path, line, and column number, instead of vomiting a full screen of Python tracebacks.
 
 ### Recommended Command
@@ -107,6 +107,7 @@ This step does two things:
 2. Adds two direct entry points to the current repository:
    - `Claude Code` → `.mcp.json`
    - `Gemini CLI` → `.gemini/settings.json`
+   - `Gemini CLI` → `.gemini/policies/memory-palace-overrides.toml`
 
 Both entry points now uniformly call:
 
@@ -155,6 +156,7 @@ This step will register MCP in these locations:
 - `Claude Code` → `~/.claude.json` current repository project block
 - `Codex CLI` → `~/.codex/config.toml`
 - `Gemini CLI` → `~/.gemini/settings.json`
+- `Gemini CLI` → `~/.gemini/policies/memory-palace-overrides.toml`
 - `OpenCode` → `~/.config/opencode/opencode.json`
 
 These user-scope MCP configurations essentially call the same wrapper, so the default behavior matches the workspace entry:
@@ -183,11 +185,13 @@ Conclusion:
 
 - repo-local skill: Yes
 - workspace MCP: Yes
+- policy override file: Yes
 
 Conclusion:
 
 - **Workspace entry point is in place**
 - If you want to be more stable or prepare for cross-repository reuse, add `--scope user --with-mcp` once more.
+- If you see `Policy file warning in memory-palace-overrides.toml`, rerun `--scope user --with-mcp --force` first.
 - When writing for others, still be conservative: smoke tests have passed, but `gemini_live` hasn't reached "fully passed" status yet.
 
 ### Codex CLI

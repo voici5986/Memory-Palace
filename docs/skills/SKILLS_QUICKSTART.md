@@ -76,6 +76,7 @@
 | `.opencode/skills/memory-palace/SKILL.md` | OpenCode 的 repo-local skill 镜像（本地生成） |
 | `.gemini/skills/memory-palace/SKILL.md` | Gemini 的 repo-local skill 入口（本地生成） |
 | `.gemini/settings.json` | Gemini 的项目级 MCP 配置（workspace 安装后生成） |
+| `.gemini/policies/memory-palace-overrides.toml` | Gemini 的 Memory Palace policy 覆盖文件（安装后生成，用来避免旧 `__` MCP tool 语法告警） |
 | `.mcp.json` | Claude Code 的项目级 MCP 配置（workspace 安装后生成） |
 
 按本文默认推荐的 `--scope user --with-mcp` 路线，本机 home 目录里通常还会出现：
@@ -84,6 +85,7 @@
 - `~/.codex/config.toml`
 - `~/.gemini/skills/memory-palace/SKILL.md`
 - `~/.gemini/settings.json`
+- `~/.gemini/policies/memory-palace-overrides.toml`
 - `~/.config/opencode/opencode.json`
 
 所以：
@@ -152,11 +154,13 @@ python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
 
 - `~/.gemini/skills/memory-palace/SKILL.md`
 - `~/.gemini/settings.json`
+- `~/.gemini/policies/memory-palace-overrides.toml`
 
 如果你还想让**当前仓库**额外落一个项目级入口，再补一次 workspace 安装；那时工作区里会补齐：
 
 - `.gemini/skills/memory-palace/SKILL.md`
 - `.gemini/settings.json`
+- `.gemini/policies/memory-palace-overrides.toml`
 
 所以在**当前工作区本地**里，Gemini 可以走项目级入口；而跨仓复用时，默认还是 user-scope 更稳。
 
@@ -166,6 +170,13 @@ python scripts/install_skill.py --targets gemini --scope user --with-mcp --force
 gemini skills list --all
 gemini mcp list
 ```
+
+如果你看到这种提示：
+
+- `Policy file warning in memory-palace-overrides.toml`
+- `The "__" syntax for MCP tools is strictly deprecated`
+
+优先重新执行一遍当前仓库里的 Gemini 安装命令；新版安装脚本会把 `memory-palace-overrides.toml` 改写成 Gemini 当前认可的 `mcpName = "memory-palace"` 规则格式。
 
 如果你看到这种提示：
 

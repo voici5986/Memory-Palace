@@ -76,6 +76,7 @@ The public repository only contains the canonical bundle by default. After execu
 | `.opencode/skills/memory-palace/SKILL.md` | repo-local skill mirror for OpenCode (locally generated) |
 | `.gemini/skills/memory-palace/SKILL.md` | repo-local skill entry for Gemini (locally generated) |
 | `.gemini/settings.json` | Project-level MCP config for Gemini (generated after workspace install) |
+| `.gemini/policies/memory-palace-overrides.toml` | Gemini policy override for Memory Palace (generated after install to avoid deprecated `__` MCP tool syntax warnings) |
 | `.mcp.json` | Project-level MCP config for Claude Code (generated after workspace install) |
 
 If you follow the default `--scope user --with-mcp` path in this document, you will also usually see these home-directory entries:
@@ -84,6 +85,7 @@ If you follow the default `--scope user --with-mcp` path in this document, you w
 - `~/.codex/config.toml`
 - `~/.gemini/skills/memory-palace/SKILL.md`
 - `~/.gemini/settings.json`
+- `~/.gemini/policies/memory-palace-overrides.toml`
 - `~/.config/opencode/opencode.json`
 
 So:
@@ -152,11 +154,13 @@ After that, your home directory will at least contain:
 
 - `~/.gemini/skills/memory-palace/SKILL.md`
 - `~/.gemini/settings.json`
+- `~/.gemini/policies/memory-palace-overrides.toml`
 
 If you also want the **current repository** to get an extra project-level entry, add a workspace install afterwards; then the workspace will be supplemented with:
 
 - `.gemini/skills/memory-palace/SKILL.md`
 - `.gemini/settings.json`
+- `.gemini/policies/memory-palace-overrides.toml`
 
 In the **current local workspace**, Gemini can then use the project-level entry; for cross-repo reuse, user-scope remains the more stable default.
 
@@ -166,6 +170,13 @@ Recommended check:
 gemini skills list --all
 gemini mcp list
 ```
+
+If you see this prompt:
+
+- `Policy file warning in memory-palace-overrides.toml`
+- `The "__" syntax for MCP tools is strictly deprecated`
+
+rerun the Gemini install command from this repository first. The current installer rewrites `memory-palace-overrides.toml` to Gemini's supported `mcpName = "memory-palace"` policy format.
 
 If you see this prompt:
 

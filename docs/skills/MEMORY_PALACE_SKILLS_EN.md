@@ -96,7 +96,7 @@ For Gemini, there is a known boundary:
 Therefore, the current recommendation is two-layered:
 
 - **More reliable by default**: First run `python scripts/install_skill.py --targets gemini --scope user --with-mcp --force`.
-- **If you also want a project-level entry in the current workspace**: Then add workspace installation to generate `.gemini/skills/...` + `.gemini/settings.json`.
+- **If you also want a project-level entry in the current workspace**: Then add workspace installation to generate `.gemini/skills/...` + `.gemini/settings.json` + `.gemini/policies/memory-palace-overrides.toml`.
 - **For cross-repo reuse / copying to other workspaces**: Still prioritize `user-scope install`.
 
 Public communication suggestion:
@@ -121,6 +121,14 @@ Responsible for:
 - Providing Gemini with a shorter, stronger-triggering skill body.
 - Hardcoding the first move, `NOOP` handling, and trigger sample paths as anchors.
 - Reducing under-triggering and irrelevant responses from Gemini on skill introspection.
+
+### `docs/skills/memory-palace/variants/gemini/memory-palace-overrides.toml`
+
+Responsible for:
+
+- Providing the recommended Gemini policy override for this repository.
+- Moving `memory-palace` MCP tool matching to the `mcpName = "memory-palace"` style.
+- Preventing old `__` MCP tool syntax from continuing to trigger warnings in newer Gemini CLI builds.
 
 ### `docs/skills/memory-palace/references/mcp-workflow.md`
 
@@ -163,6 +171,7 @@ Responsible for:
 - Populating `--with-mcp` CLI configs when needed, while still binding MCP to the **current checkout** via `scripts/run_memory_palace_mcp_stdio.sh`.
 - For Gemini, this is currently the more reliable recommended installation path.
 - When the target is Gemini, it automatically replaces the content with `variants/gemini/SKILL.md`.
+- When the target is Gemini, it also installs `variants/gemini/memory-palace-overrides.toml`.
 - For `cursor / agent / antigravity`, the script is now better understood as a compatibility projection or workflow distribution path, not the default public user path.
 
 ### `scripts/render_ide_host_config.py`

@@ -101,7 +101,7 @@ Gemini 端当前有一个已知边界：
 因此当前推荐分两层：
 
 - **默认更稳的推荐**：先跑 `python scripts/install_skill.py --targets gemini --scope user --with-mcp --force`
-- **当前工作区如果还想补项目级入口**：再运行 workspace 安装，补齐项目级 `.gemini/skills/...` + `.gemini/settings.json`
+- **当前工作区如果还想补项目级入口**：再运行 workspace 安装，补齐项目级 `.gemini/skills/...` + `.gemini/settings.json` + `.gemini/policies/memory-palace-overrides.toml`
 - **跨仓复用 / 复制到别的工作区**：仍然优先 `user-scope install`
 
 公开口径建议：
@@ -126,6 +126,14 @@ Gemini 端当前有一个已知边界：
 - 给 Gemini 提供更短、更强触发的技能正文
 - 把 first move、`NOOP` 处理、trigger sample path 直接写成锚点
 - 降低 Gemini 在 skill 自省问题上的 under-trigger 与答非所问
+
+### `docs/skills/memory-palace/variants/gemini/memory-palace-overrides.toml`
+
+负责：
+
+- 给 Gemini 提供当前仓库推荐的 policy 覆盖规则
+- 把 `memory-palace` MCP 工具改成 `mcpName = "memory-palace"` 口径
+- 避免旧 `__` MCP tool 语法在新版本 Gemini CLI 里继续报 warning
 
 ### `docs/skills/memory-palace/references/mcp-workflow.md`
 
@@ -168,6 +176,7 @@ Gemini 端当前有一个已知边界：
 - 在需要时补齐 `--with-mcp` 的 CLI 配置，但 MCP 仍绑定到**当前 checkout** 的 `scripts/run_memory_palace_mcp_stdio.sh`
 - 对 Gemini，这也是当前更稳妥的推荐安装路径
 - 当目标是 Gemini 时，自动替换为 `variants/gemini/SKILL.md`
+- 当目标是 Gemini 时，也会同步安装 `variants/gemini/memory-palace-overrides.toml`
 - 对 `cursor / agent / antigravity`，当前更适合作为兼容投影或 workflow 分发入口，而不是公开用户默认路径
 
 ### `scripts/render_ide_host_config.py`

@@ -147,6 +147,17 @@ def gemini_variant_file(source: Path) -> Path:
     return variant
 
 
+def gemini_policy_variant_file(source: Path) -> Path:
+    variant = source / "variants" / "gemini" / "memory-palace-overrides.toml"
+    if not variant.is_file():
+        raise SystemExit(f"Gemini policy variant missing: {variant}")
+    return variant
+
+
+def gemini_policy_destination(base_dir: Path) -> Path:
+    return base_dir / ".gemini" / "policies" / "memory-palace-overrides.toml"
+
+
 def antigravity_workflow_file(project_dir: Path) -> Path:
     variant = (
         project_dir
@@ -312,6 +323,35 @@ def _user_mcp_supported(target_name: str) -> bool:
     return target_name in {"claude", "codex", "gemini", "opencode"}
 
 
+def install_gemini_policy(
+    *,
+    source: Path,
+    base_dir: Path,
+    mode: str,
+    dry_run: bool,
+) -> None:
+    variant = gemini_policy_variant_file(source)
+    destination = gemini_policy_destination(base_dir)
+    action = "symlink" if mode == "symlink" else "copy"
+    print(f"[gemini] {action} policy -> {destination}")
+
+    if dry_run:
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if mode == "symlink":
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                raise SystemExit(f"Gemini policy destination is a directory: {destination}")
+            backup_file(destination, dry_run=dry_run)
+            destination.unlink()
+        destination.symlink_to(variant)
+        return
+
+    write_text_file(destination, variant.read_text(encoding="utf-8"), dry_run=dry_run)
+
+
 def install_target(
     target_name: str,
     *,
@@ -354,6 +394,8 @@ def install_target(
     print(f"[{target_name}] {action} -> {destination_dir}")
 
     if dry_run:
+        if target_name == "gemini":
+            install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
         return
 
     destination_root.mkdir(parents=True, exist_ok=True)
@@ -375,6 +417,7 @@ def install_target(
             skill_target = destination_dir / "SKILL.md"
             skill_target.parent.mkdir(parents=True, exist_ok=True)
             skill_target.symlink_to(gemini_variant_file(source))
+            install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
             return
         for relative_path in SKILL_RELATIVE_FILES:
             link_path = destination_dir / relative_path
@@ -384,6 +427,7 @@ def install_target(
 
     if target_name == "gemini":
         shutil.copy2(gemini_variant_file(source), destination_dir / "SKILL.md")
+        install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
         return
 
     for relative_path in SKILL_RELATIVE_FILES:
@@ -478,9 +522,18 @@ def check_skill_target(target_name: str, *, base_dir: Path, source: Path, scope:
     if target_name == "gemini":
         destination_file = base_dir / TARGET_MAP[target_name] / SKILL_NAME / "SKILL.md"
         expected = gemini_variant_file(source)
-        if destination_file.is_file() and destination_file.read_bytes() == expected.read_bytes():
-            return True, str(destination_file)
-        return False, f"missing or mismatched file: {destination_file}"
+        policy_file = gemini_policy_destination(base_dir)
+        expected_policy = gemini_policy_variant_file(source)
+        skill_ok = destination_file.is_file() and destination_file.read_bytes() == expected.read_bytes()
+        policy_ok = policy_file.is_file() and policy_file.read_bytes() == expected_policy.read_bytes()
+        if skill_ok and policy_ok:
+            return True, f"{destination_file}; {policy_file}"
+        problems: list[str] = []
+        if not skill_ok:
+            problems.append(f"missing or mismatched file: {destination_file}")
+        if not policy_ok:
+            problems.append(f"missing or mismatched policy: {policy_file}")
+        return False, "; ".join(problems)
     return _check_regular_skill_target(target_name, base_dir=base_dir, source=source)
 
 

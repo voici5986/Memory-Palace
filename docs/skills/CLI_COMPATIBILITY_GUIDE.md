@@ -45,6 +45,7 @@
 - `Gemini CLI`
   - `.gemini/skills/memory-palace/`
   - `.gemini/settings.json`
+  - `.gemini/policies/memory-palace-overrides.toml`
 
 对应的 canonical skill 真源是：
 
@@ -69,6 +70,7 @@ docs/skills/memory-palace/
 
 - **装 skill**
   - 把 canonical bundle 分发到 workspace 或 user 的 skill 目录
+  - 如果 target 是 `gemini`，还会同步分发 `memory-palace-overrides.toml`，避免旧 `__` MCP tool 语法告警
 - **装 MCP**
   - 通过 `--with-mcp` 把对应 CLI 的 MCP 配置绑到当前仓库
 
@@ -81,7 +83,7 @@ docs/skills/memory-palace/
 当前还有两个和“少踩坑”直接相关的行为：
 
 - 如果脚本要覆盖已有配置，会先在原目录留一份 `*.bak`
-  - 常见文件名会长这样：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`
+  - 常见文件名会长这样：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`、`memory-palace-overrides.toml.bak`
 - 如果某个 JSON 配置已经被手工改坏，脚本会直接报出坏文件路径和行列号，方便你先修文件再重跑
 
 ## 推荐命令
@@ -99,6 +101,7 @@ python scripts/sync_memory_palace_skill.py --check
 
 - `Claude Code` 绑定到 `.mcp.json`
 - `Gemini CLI` 绑定到 `.gemini/settings.json`
+- `Gemini CLI` 补齐 `.gemini/policies/memory-palace-overrides.toml`
 
 ```bash
 python scripts/install_skill.py \
@@ -175,11 +178,15 @@ python scripts/install_skill.py \
 - MCP 层：
   - workspace 走 `.gemini/settings.json`
   - user-scope 走 `~/.gemini/settings.json`
+- policy 层：
+  - workspace 走 `.gemini/policies/memory-palace-overrides.toml`
+  - user-scope 走 `~/.gemini/policies/memory-palace-overrides.toml`
 
 结论：
 
 - **跑完 workspace 安装后，workspace 入口就位**
 - 若你想更稳，或准备跨仓复用，仍推荐再补一次 `--scope user --with-mcp`
+- 如果你看到 `Policy file warning in memory-palace-overrides.toml`，优先重跑同一条 `--scope user --with-mcp --force`
 - 写给别人看时，建议写成“smoke 已通过，但 `gemini_live` 尚未完全通过”
 
 ### Codex CLI

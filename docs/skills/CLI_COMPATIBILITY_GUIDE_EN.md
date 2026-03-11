@@ -45,6 +45,7 @@ After executing `sync_memory_palace_skill.py` / `install_skill.py`, these entry 
 - `Gemini CLI`
   - `.gemini/skills/memory-palace/`
   - `.gemini/settings.json`
+  - `.gemini/policies/memory-palace-overrides.toml`
 
 The canonical skill source of truth is:
 
@@ -69,6 +70,7 @@ Currently, `install_skill.py` supports two types of actions:
 
 - **Install Skill**
   - Distributes the canonical bundle to the workspace or user skill directory.
+  - If the target is `gemini`, it also installs `memory-palace-overrides.toml` to avoid deprecated `__` MCP tool syntax warnings.
 - **Install MCP**
   - Binds the corresponding CLI's MCP configuration to the current repository via `--with-mcp`.
 
@@ -81,7 +83,7 @@ It also supports:
 There are two behaviors directly related to "avoiding pitfalls":
 
 - If the script is about to overwrite an existing configuration, it will first leave a `*.bak` file in the original directory.
-  - Common filenames look like: `.mcp.json.bak`, `settings.json.bak`, `config.toml.bak`.
+  - Common filenames look like: `.mcp.json.bak`, `settings.json.bak`, `config.toml.bak`, `memory-palace-overrides.toml.bak`.
 - If a JSON configuration is already manually broken, the script will directly report the bad file path and line/column number, making it easy for you to fix the file before rerunning.
 
 ## Recommended Commands
@@ -111,6 +113,7 @@ This step will:
 
 - Bind `Claude Code` to `.mcp.json`.
 - Bind `Gemini CLI` to `.gemini/settings.json`.
+- Add `.gemini/policies/memory-palace-overrides.toml` for `Gemini CLI`.
 
 ```bash
 python scripts/install_skill.py \
@@ -187,11 +190,15 @@ Conclusion:
 - MCP Layer:
   - Workspace uses `.gemini/settings.json`.
   - User-scope uses `~/.gemini/settings.json`.
+- Policy Layer:
+  - Workspace uses `.gemini/policies/memory-palace-overrides.toml`.
+  - User-scope uses `~/.gemini/policies/memory-palace-overrides.toml`.
 
 Conclusion:
 
 - **After running the workspace installation, the workspace entry point is ready.**
 - If you want to be more stable or plan to reuse it across repositories, it's still recommended to add `--scope user --with-mcp`.
+- If you see `Policy file warning in memory-palace-overrides.toml`, rerun the same `--scope user --with-mcp --force` install first.
 - When documenting for others, it's suggested to state: "smoke has passed, but `gemini_live` has not yet fully passed."
 
 ### Codex CLI

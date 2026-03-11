@@ -1,0 +1,15 @@
+[[rule]]
+toolName = ["activate_skill", "discovered_tool_*"]
+decision = "allow"
+priority = 700
+
+[[rule]]
+mcpName = "memory-palace"
+toolName = "*"
+decision = "allow"
+priority = 700
+
+[[rule]]
+toolName = ["save_memory"]
+decision = "deny"
+priority = 800
