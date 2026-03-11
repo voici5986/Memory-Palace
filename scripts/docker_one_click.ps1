@@ -174,11 +174,14 @@ function Resolve-DataVolume {
         return $env:NOCTURNE_DATA_VOLUME
     }
 
-    $newVolume = 'memory_palace_data'
-    $projectSlug = (Split-Path -Leaf $projectRoot).ToLower() -replace '[^a-z0-9]', '_'
+    $projectName = $composeProjectName
+    if ([string]::IsNullOrWhiteSpace($projectName)) {
+        $projectName = Get-DefaultComposeProjectName
+    }
+
+    $newVolume = "${projectName}_data"
     $legacyCandidates = @(
-        "${projectSlug}_nocturne_data",
-        "${projectSlug}_nocturne_memory_data",
+        'memory_palace_data',
         'nocturne_data',
         'nocturne_memory_data'
     )
@@ -193,19 +196,8 @@ function Resolve-DataVolume {
         if ($LASTEXITCODE -ne 0) {
             continue
         }
-
-        if ($legacyVolume.StartsWith("${projectSlug}_")) {
-            Write-Host "[compat] detected project-scoped legacy docker volume '$legacyVolume'; reusing it for data continuity."
-            return $legacyVolume
-        }
-
-        $ownerLabel = docker volume inspect $legacyVolume --format '{{ index .Labels "com.docker.compose.project" }}' 2>$null
-        if ($LASTEXITCODE -eq 0 -and $ownerLabel -eq $projectSlug) {
-            Write-Host "[compat] detected legacy docker volume '$legacyVolume' owned by compose project '$ownerLabel'; reusing it for data continuity."
-            return $legacyVolume
-        }
-
-        Write-Host "[compat] found legacy-like volume '$legacyVolume' but skipped auto-reuse (owner label mismatch). Set MEMORY_PALACE_DATA_VOLUME explicitly if this is the expected volume."
+        Write-Host "[compat] found legacy shared docker volume '$legacyVolume', but defaulting to isolated volume '$newVolume'. Set MEMORY_PALACE_DATA_VOLUME=$legacyVolume to reuse old data intentionally."
+        break
     }
 
     return $newVolume
@@ -218,7 +210,32 @@ function Resolve-SnapshotsVolume {
     if ($env:NOCTURNE_SNAPSHOTS_VOLUME) {
         return $env:NOCTURNE_SNAPSHOTS_VOLUME
     }
-    return 'memory_palace_snapshots'
+
+    $projectName = $composeProjectName
+    if ([string]::IsNullOrWhiteSpace($projectName)) {
+        $projectName = Get-DefaultComposeProjectName
+    }
+
+    $newVolume = "${projectName}_snapshots"
+    docker volume inspect $newVolume 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        return $newVolume
+    }
+
+    $legacyCandidates = @(
+        'memory_palace_snapshots',
+        'nocturne_snapshots'
+    )
+    foreach ($legacyVolume in $legacyCandidates) {
+        docker volume inspect $legacyVolume 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            continue
+        }
+        Write-Host "[compat] found legacy shared docker volume '$legacyVolume', but defaulting to isolated volume '$newVolume'. Set MEMORY_PALACE_SNAPSHOTS_VOLUME=$legacyVolume to reuse old snapshots intentionally."
+        break
+    }
+
+    return $newVolume
 }
 
 function Get-EnvValueFromFile {
@@ -583,69 +600,76 @@ function Get-ComposePublishedPort {
         [string]$EnvFile,
         [string]$Service,
         [int]$TargetPort,
-        [int]$FallbackPort
+        [int]$FallbackPort,
+        [int]$Attempts = 10
     )
 
     $previousComposeProjectName = $env:COMPOSE_PROJECT_NAME
-    try {
-        $portsOutput = docker ps `
-            --filter "label=com.docker.compose.project=$ComposeProjectName" `
-            --filter "label=com.docker.compose.service=$Service" `
-            --format '{{.Ports}}' 2>$null | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $portsOutput) {
-            $portsLine = $portsOutput.ToString().Trim()
-            if ($portsLine -match ":(\d+)->$TargetPort/tcp") {
-                return [int]$Matches[1]
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            $portsOutput = docker ps `
+                --filter "label=com.docker.compose.project=$ComposeProjectName" `
+                --filter "label=com.docker.compose.service=$Service" `
+                --format '{{.Ports}}' 2>$null | Select-Object -First 1
+            if ($LASTEXITCODE -eq 0 -and $portsOutput) {
+                $portsLine = $portsOutput.ToString().Trim()
+                if ($portsLine -match ":(\d+)->$TargetPort/tcp") {
+                    return [int]$Matches[1]
+                }
             }
-        }
 
-        $containerName = docker ps `
-            --filter "label=com.docker.compose.project=$ComposeProjectName" `
-            --filter "label=com.docker.compose.service=$Service" `
-            --format '{{.Names}}' 2>$null | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $containerName) {
-            $mappedPort = docker port $containerName $TargetPort 2>$null | Select-Object -First 1
-            if ($LASTEXITCODE -eq 0 -and $mappedPort) {
-                $line = $mappedPort.ToString().Trim()
+            $containerName = docker ps `
+                --filter "label=com.docker.compose.project=$ComposeProjectName" `
+                --filter "label=com.docker.compose.service=$Service" `
+                --format '{{.Names}}' 2>$null | Select-Object -First 1
+            if ($LASTEXITCODE -eq 0 -and $containerName) {
+                $mappedPort = docker port $containerName $TargetPort 2>$null | Select-Object -First 1
+                if ($LASTEXITCODE -eq 0 -and $mappedPort) {
+                    $line = $mappedPort.ToString().Trim()
+                    if ($line -match ':(\d+)\s*$') {
+                        return [int]$Matches[1]
+                    }
+                }
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
+                $env:COMPOSE_PROJECT_NAME = $ComposeProjectName
+            }
+
+            $portArgs = @()
+            if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
+                $portArgs += @('--env-file', $EnvFile)
+            }
+            $portArgs += @('-f', 'docker-compose.yml', 'port', $Service, "$TargetPort")
+
+            if ($script:UseComposePlugin) {
+                $output = & docker compose @portArgs 2>$null
+            }
+            else {
+                $output = & docker-compose @portArgs 2>$null
+            }
+
+            if ($LASTEXITCODE -eq 0 -and $output) {
+                $line = ($output | Select-Object -First 1).ToString().Trim()
                 if ($line -match ':(\d+)\s*$') {
                     return [int]$Matches[1]
                 }
             }
         }
-
-        if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
-            $env:COMPOSE_PROJECT_NAME = $ComposeProjectName
+        catch {
+            # Fall back to the planned port when compose cannot report a binding.
         }
-
-        $portArgs = @()
-        if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
-            $portArgs += @('--env-file', $EnvFile)
-        }
-        $portArgs += @('-f', 'docker-compose.yml', 'port', $Service, "$TargetPort")
-
-        if ($script:UseComposePlugin) {
-            $output = & docker compose @portArgs 2>$null
-        }
-        else {
-            $output = & docker-compose @portArgs 2>$null
-        }
-
-        if ($LASTEXITCODE -eq 0 -and $output) {
-            $line = ($output | Select-Object -First 1).ToString().Trim()
-            if ($line -match ':(\d+)\s*$') {
-                return [int]$Matches[1]
+        finally {
+            if ([string]::IsNullOrWhiteSpace($previousComposeProjectName)) {
+                Remove-Item Env:COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:COMPOSE_PROJECT_NAME = $previousComposeProjectName
             }
         }
-    }
-    catch {
-        # Fall back to the planned port when compose cannot report a binding.
-    }
-    finally {
-        if ([string]::IsNullOrWhiteSpace($previousComposeProjectName)) {
-            Remove-Item Env:COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:COMPOSE_PROJECT_NAME = $previousComposeProjectName
+
+        if ($attempt -lt $Attempts) {
+            Start-Sleep -Seconds 1
         }
     }
 
@@ -765,6 +789,14 @@ try {
     Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_BACKEND_PORT' -Value "$BackendPort"
     Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_DATA_VOLUME' -Value "$dataVolume"
     Set-EnvValueInFile -FilePath $envFile -Key 'NOCTURNE_SNAPSHOTS_VOLUME' -Value "$snapshotsVolume"
+    $plannedFrontendPort = Get-EnvValueFromFile -FilePath $envFile -Key 'MEMORY_PALACE_FRONTEND_PORT'
+    $plannedBackendPort = Get-EnvValueFromFile -FilePath $envFile -Key 'MEMORY_PALACE_BACKEND_PORT'
+    if ([string]::IsNullOrWhiteSpace($plannedFrontendPort)) {
+        $plannedFrontendPort = "$FrontendPort"
+    }
+    if ([string]::IsNullOrWhiteSpace($plannedBackendPort)) {
+        $plannedBackendPort = "$BackendPort"
+    }
     $env:MEMORY_PALACE_FRONTEND_PORT = "$FrontendPort"
     $env:MEMORY_PALACE_BACKEND_PORT = "$BackendPort"
     $env:MEMORY_PALACE_DATA_VOLUME = "$dataVolume"
@@ -790,16 +822,16 @@ try {
     }
     catch {
         Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..."
-        $probeFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort $FrontendPort
-        $probeBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort $BackendPort
+        $probeFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort ([int]$plannedFrontendPort)
+        $probeBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort ([int]$plannedBackendPort)
         if (-not (Wait-DeploymentReady -FrontendPort $probeFrontendPort -BackendPort $probeBackendPort)) {
             throw
         }
         Write-Warning "[compose-up] services became ready after compose reported failure; continuing."
     }
 
-    $reportedFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort $FrontendPort
-    $reportedBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort $BackendPort
+    $reportedFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort ([int]$plannedFrontendPort)
+    $reportedBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort ([int]$plannedBackendPort)
 }
 finally {
     Release-PathLock -LockDir $script:DeploymentLockDir

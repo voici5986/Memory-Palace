@@ -156,7 +156,7 @@ Authorization: Bearer <MCP_API_KEY>
 | 非 root 运行（前端） | 使用 `nginxinc/nginx-unprivileged:1.27-alpine` 基础镜像 | `deploy/docker/Dockerfile.frontend` |
 | 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key | `deploy/docker/nginx.conf.template` |
 | 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
-| 数据持久化 | Docker Volumes `memory_palace_data` → `/app/data`，`memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` |
+| 数据持久化 | Docker Volumes 默认按 compose project 隔离：`<compose-project>_data` → `/app/data`，`<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
 | 健康检查（后端） | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `docker-compose.yml` 中的 `backend.healthcheck` |
 | 健康检查（前端） | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` 中的 `frontend.healthcheck` |
 

@@ -261,7 +261,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Currently, Docker Compose also waits for **both backend and SSE `/health` checks** to pass before considering the frontend ready. This means that when the container first shows `running`, the page might take a few more seconds to become truly available, which is normal.
 >
-> Docker also persists two types of runtime data by default: `memory_palace_data` for the database (internal container path `/app/data`) and `memory_palace_snapshots` for Review snapshots (internal container path `/app/snapshots`). If you execute `docker compose down -v` or manually delete these two volumes, these parts will be cleared together.
+> Docker also persists two runtime data paths by default: the database volume is isolated per compose project as `<compose-project>_data` (container path `/app/data`), and the Review snapshots volume is isolated as `<compose-project>_snapshots` (container path `/app/snapshots`). If you intentionally want to reuse an old shared volume, set `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` explicitly. If you execute `docker compose down -v` or manually delete these volumes, both parts are cleared together.
 >
 > **C/D Local Joint Debugging Suggestions**:
 >
@@ -274,7 +274,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 1. Calls the Profile script to generate the Docker env file for this run (defaults to a temporary file; reuses the specified path if `MEMORY_PALACE_DOCKER_ENV_FILE` is set).
 > 2. Defaults to not reading current process environment variables to override template strategy keys (avoiding implicit profile changes); injects API address/key/model fields only when the injection toggle is explicitly enabled.
 > 3. Detects port conflicts and automatically finds available ports.
-> 4. Parses and injects Docker persistent volumes: database defaults to `memory_palace_data`, Review snapshots default to `memory_palace_snapshots`.
+> 4. Parses and injects Docker persistent volumes: by default the script isolates them per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); it only reuses an old volume when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
 > 5. Locks concurrent deployments for the same checkout to avoid multiple `docker_one_click` instances overwriting each other.
 > 6. Builds and starts containers via `docker compose`.
 

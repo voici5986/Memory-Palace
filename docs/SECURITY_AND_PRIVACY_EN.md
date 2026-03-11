@@ -156,7 +156,7 @@ The following security configurations can be directly verified in the project's 
 | Non-root execution (Frontend) | Using `nginxinc/nginx-unprivileged:1.27-alpine` base image | `deploy/docker/Dockerfile.frontend` |
 | Frontend proxy authentication | Nginx forwards `X-MCP-API-Key` at the server side; the real key is not stored on the browser side | `deploy/docker/nginx.conf.template` |
 | Prohibit privilege escalation | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
-| Data persistence | Docker Volumes `memory_palace_data` → `/app/data`, `memory_palace_snapshots` → `/app/snapshots` | `docker-compose.yml` |
+| Data persistence | Docker volumes are isolated per compose project by default: `<compose-project>_data` → `/app/data`, `<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
 | Health check (Backend) | Python `urllib.request.urlopen('http://127.0.0.1:8000/health')` | `backend.healthcheck` in `docker-compose.yml` |
 | Health check (Frontend) | `wget -q -O - http://127.0.0.1:8080/` | `frontend.healthcheck` in `docker-compose.yml` |
 

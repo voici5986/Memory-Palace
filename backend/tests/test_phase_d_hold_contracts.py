@@ -171,7 +171,8 @@ def test_docker_env_file_is_parameterized_for_isolated_runs() -> None:
     compose_text = (project_root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}" in compose_text
     assert "memory_palace_snapshots:/app/snapshots" in compose_text
-    assert "${MEMORY_PALACE_SNAPSHOTS_VOLUME:-${NOCTURNE_SNAPSHOTS_VOLUME:-memory_palace_snapshots}}" in compose_text
+    assert "${MEMORY_PALACE_SNAPSHOTS_VOLUME:-${NOCTURNE_SNAPSHOTS_VOLUME:-${COMPOSE_PROJECT_NAME:-memory-palace}_snapshots}}" in compose_text
+    assert "${MEMORY_PALACE_DATA_VOLUME:-${NOCTURNE_DATA_VOLUME:-${COMPOSE_PROJECT_NAME:-memory-palace}_data}}" in compose_text
 
     workspace_post_check = project_root.parent / "new" / "run_post_change_checks.sh"
     if workspace_post_check.exists():

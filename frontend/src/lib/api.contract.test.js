@@ -339,24 +339,26 @@ describe('api contract regression', () => {
   });
 
   it('returns false instead of throwing when saving browser auth hits storage failure', () => {
-    const originalSetItem = window.localStorage.setItem;
-    window.localStorage.setItem = vi.fn(() => {
-      throw new Error('quota');
+    const originalSetItem = Storage.prototype.setItem;
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'memory-palace.dashboardAuth') {
+        throw new Error('quota');
+      }
+      return originalSetItem.call(this, key, value);
     });
 
     expect(saveStoredMaintenanceAuth('stored-key')).toBe(false);
 
-    window.localStorage.setItem = originalSetItem;
+    setItemSpy.mockRestore();
   });
 
   it('returns false instead of throwing when clearing browser auth hits storage failure', () => {
-    const originalRemoveItem = window.localStorage.removeItem;
-    window.localStorage.removeItem = vi.fn(() => {
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
       throw new Error('quota');
     });
 
     expect(clearStoredMaintenanceAuth()).toBe(false);
 
-    window.localStorage.removeItem = originalRemoveItem;
+    removeItemSpy.mockRestore();
   });
 });

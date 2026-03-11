@@ -123,7 +123,7 @@ describe('App routing', () => {
 
   it('shows an error instead of crashing when browser storage rejects the API key write', async () => {
     const user = userEvent.setup();
-    const originalSetItem = window.localStorage.setItem;
+    const originalSetItem = Storage.prototype.setItem;
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -134,15 +134,15 @@ describe('App routing', () => {
       within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
       'stored-key'
     );
-    window.localStorage.setItem = vi.fn((key, value) => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
       if (key === 'memory-palace.dashboardAuth') {
         throw new Error('quota');
       }
-      return originalSetItem.call(window.localStorage, key, value);
+      return originalSetItem.call(this, key, value);
     });
 
     await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
-    window.localStorage.setItem = originalSetItem;
+    setItemSpy.mockRestore();
 
     expect((await screen.findAllByText(i18n.t('setup.messages.saveFailed'))).length).toBeGreaterThan(0);
     expect(screen.getByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();

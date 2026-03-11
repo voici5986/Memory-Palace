@@ -261,7 +261,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 当前 Docker Compose 还会额外等 **backend 和 SSE 各自的 `/health`** 都通过，才把 frontend 视为 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
-> Docker 默认还会分别持久化两类运行期数据：`memory_palace_data` 用于数据库（容器内 `/app/data`），`memory_palace_snapshots` 用于 Review snapshots（容器内 `/app/snapshots`）。如果你执行 `docker compose down -v` 或手动删除这两个卷，这两部分都会一起清空。
+> Docker 默认还会分别持久化两类运行期数据：数据库卷会按 compose project 隔离为 `<compose-project>_data`（容器内 `/app/data`），Review snapshots 会隔离为 `<compose-project>_snapshots`（容器内 `/app/snapshots`）。如果你确实要复用旧的共享卷，请显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`。如果你执行 `docker compose down -v` 或手动删除这些卷，这两部分都会一起清空。
 >
 > **C/D 本地联调建议**：
 >
@@ -274,7 +274,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 1. 调用 Profile 脚本生成本次运行使用的 Docker env 文件（默认临时文件；若显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 则复用指定路径）
 > 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段
 > 3. 检测端口占用并自动寻找可用端口
-> 4. 解析并注入 Docker 持久化卷：数据库默认使用 `memory_palace_data`，Review snapshots 默认使用 `memory_palace_snapshots`
+> 4. 解析并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，Review snapshots `<compose-project>_snapshots`）；只有显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` 时才复用旧卷
 > 5. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖
 > 6. 通过 `docker compose` 构建并启动容器
 

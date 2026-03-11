@@ -454,7 +454,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
-> Docker also persists two runtime data paths by default: `memory_palace_data` stores the database (`/app/data` in the container), and `memory_palace_snapshots` stores Review snapshots (`/app/snapshots` in the container). If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
+> Docker also persists two runtime data paths by default: the database volume is isolated per compose project as `<compose-project>_data` (`/app/data` in the container), and the snapshots volume is isolated as `<compose-project>_snapshots` (`/app/snapshots` in the container). If you want to intentionally reuse an old shared volume, set `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` explicitly. If you run `docker compose down -v` or delete those volumes manually, both are cleared together.
 
 | Service | URL |
 |---|---|

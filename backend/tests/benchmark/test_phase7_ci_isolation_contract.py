@@ -111,6 +111,8 @@ def test_phase7_docker_compose_persists_snapshots_and_entrypoint_prepares_mount(
     assert "- memory_palace_snapshots:/app/snapshots" in compose_text
     assert "MEMORY_PALACE_SNAPSHOTS_VOLUME" in compose_text
     assert "NOCTURNE_SNAPSHOTS_VOLUME" in compose_text
+    assert "COMPOSE_PROJECT_NAME:-memory-palace}_snapshots" in compose_text
+    assert "COMPOSE_PROJECT_NAME:-memory-palace}_data" in compose_text
     assert "resolve_snapshots_volume" in shell_text
     assert "MEMORY_PALACE_SNAPSHOTS_VOLUME" in shell_text
     assert "Resolve-SnapshotsVolume" in ps1_text
@@ -127,8 +129,8 @@ def test_phase7_public_docs_explain_docker_snapshot_persistence() -> None:
     )
 
     for text in (readme_text, readme_cn_text, getting_started_text):
-        assert "memory_palace_data" in text
-        assert "memory_palace_snapshots" in text
+        assert "<compose-project>_data" in text
+        assert "<compose-project>_snapshots" in text
         assert "down -v" in text
 
 

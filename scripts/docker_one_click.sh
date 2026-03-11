@@ -16,6 +16,7 @@ BACKEND_PORT_LOCK=""
 DEPLOYMENT_LOCK=""
 TEMP_DOCKER_ENV_FILE=""
 TEMP_DOCKER_ENV_FILE_AUTO=0
+compose_project_name=""
 
 default_compose_project_name() {
   local project_slug path_checksum
@@ -159,55 +160,60 @@ resolve_published_port_from_compose() {
   local service="$1"
   local target_port="$2"
   local fallback_port="$3"
+  local attempts="${4:-10}"
+  local attempt=1
   local container_name=""
   local port_output=""
   local ports_output=""
   local ports_regex=""
 
-  ports_output="$(
-    docker ps \
-      --filter "label=com.docker.compose.project=${compose_project_name}" \
-      --filter "label=com.docker.compose.service=${service}" \
-      --format '{{.Ports}}' \
-      | head -n 1
-  )"
-  ports_output="${ports_output//$'\r'/}"
-  ports_regex=":([0-9]+)->${target_port}/tcp"
-  if [[ "${ports_output}" =~ ${ports_regex} ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
-
-  container_name="$(
-    docker ps \
-      --filter "label=com.docker.compose.project=${compose_project_name}" \
-      --filter "label=com.docker.compose.service=${service}" \
-      --format '{{.Names}}' \
-      | head -n 1
-  )"
-  if [[ -n "${container_name}" ]]; then
-    port_output="$(docker port "${container_name}" "${target_port}" 2>/dev/null | head -n 1 || true)"
-    port_output="${port_output//$'\r'/}"
-    if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    ports_output="$(
+      docker ps \
+        --filter "label=com.docker.compose.project=${compose_project_name}" \
+        --filter "label=com.docker.compose.service=${service}" \
+        --format '{{.Ports}}' \
+        | head -n 1
+    )"
+    ports_output="${ports_output//$'\r'/}"
+    ports_regex=":([0-9]+)->${target_port}/tcp"
+    if [[ "${ports_output}" =~ ${ports_regex} ]]; then
       echo "${BASH_REMATCH[1]}"
       return 0
     fi
-  fi
 
-  if ! port_output="$(
-    COMPOSE_PROJECT_NAME="${compose_project_name}" \
-      "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml port "${service}" "${target_port}" 2>/dev/null \
-      | head -n 1
-  )"; then
-    echo "${fallback_port}"
-    return 0
-  fi
+    container_name="$(
+      docker ps \
+        --filter "label=com.docker.compose.project=${compose_project_name}" \
+        --filter "label=com.docker.compose.service=${service}" \
+        --format '{{.Names}}' \
+        | head -n 1
+    )"
+    if [[ -n "${container_name}" ]]; then
+      port_output="$(docker port "${container_name}" "${target_port}" 2>/dev/null | head -n 1 || true)"
+      port_output="${port_output//$'\r'/}"
+      if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+      fi
+    fi
 
-  port_output="${port_output//$'\r'/}"
-  if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}"
-    return 0
-  fi
+    if port_output="$(
+      COMPOSE_PROJECT_NAME="${compose_project_name}" \
+        "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml port "${service}" "${target_port}" 2>/dev/null \
+        | head -n 1
+    )"; then
+      port_output="${port_output//$'\r'/}"
+      if [[ "${port_output}" =~ :([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+      fi
+    fi
+
+    if [[ "${attempt}" -lt "${attempts}" ]]; then
+      sleep 1
+    fi
+  done
 
   echo "${fallback_port}"
 }
@@ -230,20 +236,15 @@ resolve_data_volume() {
     return 0
   fi
 
-  if docker volume inspect memory_palace_data >/dev/null 2>&1; then
-    echo "memory_palace_data"
+  local project_name="${compose_project_name:-${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}}"
+  local default_volume="${project_name}_data"
+  if docker volume inspect "${default_volume}" >/dev/null 2>&1; then
+    echo "${default_volume}"
     return 0
   fi
 
-  local project_slug
-  project_slug="$(
-    basename "${PROJECT_ROOT}" \
-      | tr '[:upper:]' '[:lower:]' \
-      | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
-  )"
   local legacy_candidates=(
-    "${project_slug}_nocturne_data"
-    "${project_slug}_nocturne_memory_data"
+    "memory_palace_data"
     "nocturne_data"
     "nocturne_memory_data"
   )
@@ -253,27 +254,11 @@ resolve_data_volume() {
       continue
     fi
 
-    if [[ "${candidate}" == "${project_slug}"_* ]]; then
-      echo "[compat] detected project-scoped legacy docker volume '${candidate}'; reusing it for data continuity." >&2
-      echo "${candidate}"
-      return 0
-    fi
-
-    local owner_label
-    owner_label="$(
-      docker volume inspect "${candidate}" \
-        --format '{{ index .Labels "com.docker.compose.project" }}' 2>/dev/null || true
-    )"
-    if [[ -n "${owner_label}" && "${owner_label}" == "${project_slug}" ]]; then
-      echo "[compat] detected legacy docker volume '${candidate}' owned by compose project '${owner_label}'; reusing it for data continuity." >&2
-      echo "${candidate}"
-      return 0
-    fi
-
-    echo "[compat] found legacy-like volume '${candidate}' but skipped auto-reuse (owner label mismatch). Set MEMORY_PALACE_DATA_VOLUME explicitly if this is the expected volume." >&2
+    echo "[compat] found legacy shared docker volume '${candidate}', but defaulting to isolated volume '${default_volume}'. Set MEMORY_PALACE_DATA_VOLUME=${candidate} to reuse old data intentionally." >&2
+    break
   done
 
-  echo "memory_palace_data"
+  echo "${default_volume}"
 }
 
 resolve_snapshots_volume() {
@@ -282,7 +267,29 @@ resolve_snapshots_volume() {
     echo "${explicit_volume}"
     return 0
   fi
-  echo "memory_palace_snapshots"
+
+  local project_name="${compose_project_name:-${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}}"
+  local default_volume="${project_name}_snapshots"
+  if docker volume inspect "${default_volume}" >/dev/null 2>&1; then
+    echo "${default_volume}"
+    return 0
+  fi
+
+  local legacy_candidates=(
+    "memory_palace_snapshots"
+    "nocturne_snapshots"
+  )
+  local candidate
+  for candidate in "${legacy_candidates[@]}"; do
+    if ! docker volume inspect "${candidate}" >/dev/null 2>&1; then
+      continue
+    fi
+
+    echo "[compat] found legacy shared docker volume '${candidate}', but defaulting to isolated volume '${default_volume}'. Set MEMORY_PALACE_SNAPSHOTS_VOLUME=${candidate} to reuse old snapshots intentionally." >&2
+    break
+  done
+
+  echo "${default_volume}"
 }
 
 get_env_value_from_file() {
@@ -596,6 +603,14 @@ upsert_env_value_in_file "${env_file}" "NOCTURNE_FRONTEND_PORT" "${frontend_port
 upsert_env_value_in_file "${env_file}" "NOCTURNE_BACKEND_PORT" "${backend_port}"
 upsert_env_value_in_file "${env_file}" "NOCTURNE_DATA_VOLUME" "${data_volume}"
 upsert_env_value_in_file "${env_file}" "NOCTURNE_SNAPSHOTS_VOLUME" "${snapshots_volume}"
+planned_frontend_port="$(get_env_value_from_file "${env_file}" "MEMORY_PALACE_FRONTEND_PORT")"
+planned_backend_port="$(get_env_value_from_file "${env_file}" "MEMORY_PALACE_BACKEND_PORT")"
+if [[ -z "${planned_frontend_port}" ]]; then
+  planned_frontend_port="${frontend_port}"
+fi
+if [[ -z "${planned_backend_port}" ]]; then
+  planned_backend_port="${backend_port}"
+fi
 compose_project_name="${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}"
 compose_env_file_args=()
 if [[ -n "${env_file}" ]]; then
@@ -620,8 +635,8 @@ if [[ ${no_build} -eq 1 ]]; then
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
-    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
-    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${planned_frontend_port}")"
+    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${planned_backend_port}")"
     if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then
       exit 1
     fi
@@ -639,8 +654,8 @@ else
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
-    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
-    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+    probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${planned_frontend_port}")"
+    probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${planned_backend_port}")"
     if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then
       exit 1
     fi
@@ -648,8 +663,8 @@ else
   fi
 fi
 
-reported_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${frontend_port}")"
-reported_backend_port="$(resolve_published_port_from_compose backend 8000 "${backend_port}")"
+reported_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${planned_frontend_port}")"
+reported_backend_port="$(resolve_published_port_from_compose backend 8000 "${planned_backend_port}")"
 
 echo ""
 echo "Memory Palace is starting with docker profile ${profile}."

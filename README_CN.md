@@ -452,7 +452,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
-> Docker 默认还会分别持久化两类运行期数据：`memory_palace_data` 用于数据库（容器内 `/app/data`），`memory_palace_snapshots` 用于 Review snapshots（容器内 `/app/snapshots`）。如果你执行 `docker compose down -v` 或手动删除这两个卷，这两部分都会一起清空。
+> Docker 默认还会分别持久化两类运行期数据：数据库卷会按 compose project 隔离为 `<compose-project>_data`（容器内 `/app/data`），snapshot 卷会隔离为 `<compose-project>_snapshots`（容器内 `/app/snapshots`）。如果你确实要复用旧的共享卷，请显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`。如果你执行 `docker compose down -v` 或手动删除这些卷，这两部分都会一起清空。
 
 | 服务 | 地址 |
 |---|---|

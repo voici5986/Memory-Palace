@@ -311,7 +311,7 @@ cd <project-root>
 1.  Calls the profile script to generate the Docker env file for this run from the template (per-run temporary file by default; reuses the specified path only if `MEMORY_PALACE_DOCKER_ENV_FILE` is explicitly set).
 2.  Disables runtime environment injection by default to avoid implicit template overwriting; parameters are only overridden when injection is explicitly enabled. For `profile c/d`, the injection mode additionally forces `RETRIEVAL_EMBEDDING_BACKEND=api` for local debugging; if explicit `RETRIEVAL_*` is not provided, it prioritizes reusing `ROUTER_API_BASE/ROUTER_API_KEY` as a fallback for the embedding / reranker API base+key, while also passing through the optional `INTENT_LLM_*`.
 3.  Automatically detects port conflicts; if the default port is occupied, it automatically increments to find an idle port.
-4.  Detects and injects Docker persistent volumes: the data volume defaults to `memory_palace_data` (compatible with the old `nocturne_*` volume), and the snapshot volume defaults to `memory_palace_snapshots`.
+4.  Detects and injects Docker persistent volumes: by default they are isolated per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); old volumes are reused only when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
 5.  Adds a deployment lock to concurrent deployments under the same checkout to prevent multiple `docker_one_click` instances from overwriting each other.
 6.  Uses `docker compose` to build and start the backend, SSE, and frontend containers.
 
@@ -328,7 +328,7 @@ cd <project-root>
 COMPOSE_PROJECT_NAME=<printed-compose-project-name> docker compose -f docker-compose.yml down --remove-orphans
 ```
 
-> The `down --remove-orphans` command above will not delete `memory_palace_data` or `memory_palace_snapshots`; the database and Review snapshots will only be cleared if you explicitly execute `down -v` or manually delete the corresponding volumes.
+> The `down --remove-orphans` command above will not delete the data/snapshots volumes for the current compose project; the database and Review snapshots are cleared only when you explicitly execute `down -v` or manually delete those volumes.
 
 ---
 
@@ -533,7 +533,7 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 ### Tuning Tips
 
 1.  **`RETRIEVAL_RERANKER_WEIGHT`**: Too high an emphasis will over-rely on the reranking model; suggested debugging step is `0.05`.
-2.  **Docker Data Persistence**: By default, `memory_palace_data` (mounted at `/app/data`) and `memory_palace_snapshots` (mounted at `/app/snapshots`) are used simultaneously to persist the database and review snapshots respectively (see `docker-compose.yml`).
+2.  **Docker Data Persistence**: By default, two compose-project-scoped volumes are used together (`<compose-project>_data` mounted at `/app/data` and `<compose-project>_snapshots` mounted at `/app/snapshots`) to persist the database and review snapshots respectively (see `docker-compose.yml`).
 3.  **Legacy Compatibility**: The one-click script automatically identifies legacy `NOCTURNE_*` environment variables and historical data volumes.
 4.  **Migration Lock**: `DB_MIGRATION_LOCK_FILE` (default `<db_file>.migrate.lock`) and `DB_MIGRATION_LOCK_TIMEOUT_SEC` (default `10` seconds) are used to prevent concurrent migration conflicts across multiple processes.
 
