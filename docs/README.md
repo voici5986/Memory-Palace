@@ -31,6 +31,7 @@
 | [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) | 后端、前端、MCP、Docker 的实现结构与技术栈一览 |
 | [TOOLS.md](TOOLS.md) | 9 个 MCP 工具的输入输出、返回约定与降级语义 |
 | [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md) | A/B/C/D 四档位配置模板、参数调优与部署方式 |
+| [GHCR_QUICKSTART.md](GHCR_QUICKSTART.md) | GHCR 预构建镜像的最短用户使用路径 |
 | [GHCR_ACCEPTANCE_CHECKLIST.md](GHCR_ACCEPTANCE_CHECKLIST.md) | GHCR 拉镜像后的最小用户验收清单 |
 | [skills/SKILLS_QUICKSTART.md](skills/SKILLS_QUICKSTART.md) | 一页看懂 CLI 客户端怎么触发 skills、怎么配 MCP、怎么验收 |
 | [changelog/dashboard_i18n_2026-03-09.md](changelog/dashboard_i18n_2026-03-09.md) | 仪表盘默认英文、中英切换、截图与验证摘要 |
