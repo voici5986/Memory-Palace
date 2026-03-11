@@ -8,6 +8,18 @@ on:
       - master
     tags:
       - 'v*'
+    paths:
+      - '.github/workflows/docker-publish.yml'
+      - '.dockerignore'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'deploy/docker/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.ghcr.yml'
+      - 'scripts/apply_profile.sh'
+      - 'scripts/apply_profile.ps1'
+      - 'scripts/docker_one_click.sh'
+      - 'scripts/docker_one_click.ps1'
 
 permissions:
   contents: read
@@ -62,6 +74,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -96,6 +111,7 @@ jobs:
         with:
           context: .
           file: ${{ steps.vars.outputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
