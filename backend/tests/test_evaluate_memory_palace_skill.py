@@ -33,6 +33,84 @@ def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
     assert 'export DATABASE_URL="sqlite+aiosqlite:////${DEFAULT_DB_PATH#/}"' in wrapper_text
 
 
+def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+
+    source_wrapper = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8")
+    script_path.write_text(source_wrapper, encoding="utf-8")
+    script_path.chmod(0o755)
+
+    backend_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    backend_python.chmod(0o755)
+
+    (project_root / ".env").write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Docker-internal DATABASE_URL" in result.stderr
+    assert "connect your client to the Docker /sse endpoint instead." in result.stderr
+
+
+def test_repo_local_stdio_wrapper_rejects_quoted_docker_internal_database_url(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+
+    source_wrapper = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8")
+    script_path.write_text(source_wrapper, encoding="utf-8")
+    script_path.chmod(0o755)
+
+    backend_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    backend_python.chmod(0o755)
+
+    (project_root / ".env").write_text(
+        'DATABASE_URL="sqlite+aiosqlite:////app/data/memory_palace.db"\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Docker-internal DATABASE_URL" in result.stderr
+    assert "connect your client to the Docker /sse endpoint instead." in result.stderr
+
+
 def test_check_gate_syntax_skips_when_post_check_script_is_missing(
     monkeypatch,
     tmp_path: Path,

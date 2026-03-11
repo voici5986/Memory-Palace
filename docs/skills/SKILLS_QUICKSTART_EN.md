@@ -224,6 +224,8 @@ gemini mcp add -s project memory-palace /bin/zsh -lc 'cd <repo-root> && bash scr
 > Replace `<repo-root>` with your actual repository root directory.
 >
 > This syntax reuses the `DATABASE_URL` in the current repo's `.env`. If you have already run Dashboard / HTTP API in the same repo, do not manually write a separate `backend/memory.db`, otherwise you may end up connecting the client and the dashboard to two different databases.
+>
+> Do not copy the Docker `/app/data/...` path from `.env.docker` into local `.env` either. Repo-local `stdio` MCP now refuses that configuration on purpose; use a host absolute path or keep using Docker `/sse` instead.
 
 ---
 
@@ -263,6 +265,7 @@ Note:
 - Replace `/ABS/PATH/TO/REPO` with your actual repository path.
 - Whether you use the script or the manual fallback, the resulting config ends up in `~/.codex/config.toml`.
 - This is the current product behavior of `Codex CLI`, not a missing file in this repo.
+- This command also reuses the current repo `.env` for `DATABASE_URL`; if that `.env` still points to Docker `/app/data/...`, local `stdio` MCP will refuse to start.
 - If you rewrite the fallback command for another shell or client config, do not accidentally remove `source .venv/bin/activate`. Either activate the project's `.venv` first or use the Python directly inside `.venv`. Otherwise, the MCP process might fail to start with `No module named 'sqlalchemy'`.
 
 ---

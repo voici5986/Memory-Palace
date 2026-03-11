@@ -90,6 +90,8 @@ cp .env.example .env
 > ```
 >
 > 这条 URL 的斜杠数量是有平台差异的：`macOS / Linux` 这类绝对路径通常是 `sqlite+aiosqlite:////...`，`Windows` 盘符路径通常是 `sqlite+aiosqlite:///C:/...`。如果你是手改 `.env`，不要把这两种写法混在一起。
+>
+> 还有一个很常见的误配：不要把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...` 直接抄进本地 `.env`。`/app/...` 是容器内路径，不是你宿主机上的数据库文件路径；repo-local `stdio` wrapper 会明确拒绝这种配置。本地 `stdio` 请改成宿主机绝对路径；如果你就是要复用 Docker 那边的数据和服务，请直接改连 Docker 暴露的 `/sse`。
 
 也可以使用 Profile 脚本快速生成带有默认配置的 `.env`：
 
@@ -109,6 +111,7 @@ bash scripts/apply_profile.sh macos b
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
 > 但要注意：**macOS / Windows 本地生成的 profile-b `.env` 不会自动补 `MCP_API_KEY`**。如果你接下来就要打开 Dashboard，或者直接调 `/browse` / `/review` / `/maintenance`、`/sse`、`/messages`，请再自行补 `MCP_API_KEY`，或仅在本机回环调试时设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`。只有 `docker` 平台的 profile 脚本会在 key 为空时自动生成一把本地 key。
+>
 
 #### 关键配置项说明
 
@@ -274,7 +277,8 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 它**不会**自动帮你把本机上的 `skills / MCP / IDE host` 配置一起接好。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 安装链路，保留这个 checkout，再继续看 `docs/skills/GETTING_STARTED.md`。
 - 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。这里的 `<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
-- `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用本地 `.env` / `DATABASE_URL`；如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 暴露的 `/sse`。
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用宿主机上的本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。
+- 如果你后面要切回本机 `stdio` 客户端，本地 `.env` 必须写宿主机可访问的绝对路径；如果仓库里只有 `.env.docker` 而没有本地 `.env`，或者 `.env` / 显式 `DATABASE_URL` 仍写成 `/app/...` 这类容器路径，它都会明确拒绝启动，并提示改走本机路径或 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，这条 GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
 - 如果容器还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，`127.0.0.1` 指向的是容器自己，不是你的宿主机。优先使用 `host.docker.internal`（或你的实际可达地址）。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 也能沿这条路径访问宿主机服务。
 
@@ -490,7 +494,7 @@ python mcp_server.py
 >
 > 这里的 `python mcp_server.py` 默认你还在使用 **Step 2 里创建并装好依赖的 `backend/.venv`**。如果你换了一个新终端，或者是在客户端里单独配置本地 MCP，优先直接用项目自己的 `.venv` 解释器。否则会在 MCP 进程真正启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'` 这类错误。
 >
-> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。但要把边界理解准确：它依赖本地 `bash` 和 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，它会明确拒绝回退到 `demo.db`，并提示你改走 Docker 暴露的 `/sse`。
+> 如果你是在客户端配置里接入 MCP，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。但要把边界理解准确：它依赖本地 `bash` 和 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
 
 ### 6.2 SSE 模式
 
@@ -722,6 +726,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 |---|---|
 | 启动后端时 `ModuleNotFoundError` | 最常见原因是没用 `backend/.venv`，或者没在这个环境里安装依赖。先执行 `source .venv/bin/activate && pip install -r requirements.txt`；如果是本地 stdio MCP，再优先改用 `./.venv/bin/python mcp_server.py`（Windows：`.\.venv\Scripts\python.exe mcp_server.py`） |
 | `DATABASE_URL` 报错 | 路径建议使用绝对路径，并且要带 `sqlite+aiosqlite:///` 前缀。示例：`sqlite+aiosqlite:////absolute/path/to/memory_palace.db` |
+| 本地 stdio MCP 在客户端里报 `startup failed`、`initialize response` 或类似启动中断 | 先检查 `.env` 或显式 `DATABASE_URL` 是否写成了 `/app/...` 容器路径。那是 Docker 内部路径，`scripts/run_memory_palace_mcp_stdio.sh` 会直接拒绝启动；改成宿主机可访问的绝对路径，或继续走 Docker `/sse`。 |
 | 前端访问 API 返回 `502` 或 `Network Error` | 确认后端已启动且运行在 `8000` 端口。检查 `vite.config.js` 中 proxy 目标与后端端口是否一致 |
 | 受保护接口返回 `401` | 本地手动启动：配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`；Docker：优先确认是否使用 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件 |
 | SSE `/messages` 返回 `429` 或 `413` | `429` 说明同一 SSE 会话短时间内 POST 太多；先检查客户端是否有重复重试或死循环。`413` 说明单次请求体超过 `SSE_MESSAGE_MAX_BODY_BYTES`，需要缩小 payload 或调整后端限制 |

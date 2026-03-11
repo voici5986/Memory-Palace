@@ -89,6 +89,43 @@
 
 ---
 
+## 1.2 本地 stdio MCP 一启动就断开，或错误里出现 `/app/data`
+
+**常见现象**：
+
+- 客户端里看到 `connection closed: initialize response`
+- 或启动日志里出现 `Read-only file system: '/app'`
+- 或直接报本地 `.env` 里的 `DATABASE_URL` 指向 `/app/data/...`
+
+**这通常不是 MCP 协议坏了**。更常见的原因是：你把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...` 写进了本地 `.env`。
+
+repo-local `scripts/run_memory_palace_mcp_stdio.sh` 只服务于：
+
+- 当前 checkout
+- 当前 checkout 下的本地 `.env`
+- 当前 checkout 下的本地 `backend/.venv`
+
+它不会复用 Docker 容器里的 `/app/data`。现在如果它发现本地 `.env` 仍在用容器路径，会直接拒绝启动，而不是再假装握手成功。
+
+**处理方式**：
+
+1. 打开仓库根目录 `.env`
+2. 把 `DATABASE_URL` 改成你宿主机上的绝对路径，例如：
+
+   ```dotenv
+   DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/memory_palace/demo.db
+   ```
+
+3. 或者重新生成本地 `.env`：
+
+   ```bash
+   bash scripts/apply_profile.sh macos b
+   ```
+
+4. 如果你本来就想复用 Docker 那边的服务和数据，不要再走本地 `stdio`，直接让客户端连接 Docker 暴露的 `/sse`
+
+---
+
 ## 2. `/maintenance/*`、`/review/*` 或 `/browse/*` 返回 401
 
 **常见原因**：请求没带鉴权头。注意 `/browse/node` 的读操作也受保护，而且这些接口默认就是 fail-closed；只有显式开启 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` 且请求来自 loopback 时才会放行。

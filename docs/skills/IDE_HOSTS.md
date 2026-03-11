@@ -51,6 +51,7 @@ docs/skills/memory-palace/
 - `AGENTS.md` 是 IDE hosts 的 repo-local 规则投影
 - `mcpServers.memory-palace` 是 IDE hosts 的工具接入投影
 - `docs/skills/memory-palace/` 继续是这些投影背后的 canonical source
+- 如果这个 repo-local `stdio` 入口要正常工作，本地 `.env` 里的 `DATABASE_URL` 也必须是宿主机可访问的路径；`/app/...` 这类容器路径会被 wrapper 直接拒绝
 
 ---
 

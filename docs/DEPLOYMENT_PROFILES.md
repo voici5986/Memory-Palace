@@ -293,7 +293,8 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 它**不会**自动给你安装本机上的 `skills / MCP / IDE host` 配置。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 安装链路，请继续看 `docs/skills/GETTING_STARTED.md`。
 - 如果你只想让某个客户端连 MCP，不走 repo-local 安装链路，也可以手工把支持远程 SSE 的客户端指到 `http://localhost:3000/sse`。这里的 `<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
-- `scripts/run_memory_palace_mcp_stdio.sh` 不是这条 Docker 路径的客户端入口：它依赖本地 `bash` 和 `backend/.venv`，只会复用本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 暴露的 `/sse`。
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是这条 Docker 路径的客户端入口：它依赖本地 `bash` 和 `backend/.venv`，只会复用宿主机上的本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。
+- 如果你后面要切回本机 `stdio` 客户端，本地 `.env` 必须写宿主机可访问的绝对路径；如果仓库里只有 `.env.docker` 而没有本地 `.env`，或者 `.env` / 显式 `DATABASE_URL` 仍写成 `/app/...` 这类容器路径，它都会明确拒绝启动，并提示改走本机路径或 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，这条路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
 - 如果容器里的 C / D 档位还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，这个地址只会回到容器自己，不会指向你的宿主机。优先使用 `host.docker.internal`（或你的实际可达宿主机地址）。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 现在也能沿这条路径访问宿主机服务。
 

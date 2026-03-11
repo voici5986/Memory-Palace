@@ -65,7 +65,8 @@ Treat these as one bundle:
 - the generated IDE-host snippet assumes the host can run `bash`
 - the wrapper assumes the local `backend/.venv` already exists and has the backend dependencies installed
 - the wrapper reads the local repository `.env` first to decide `DATABASE_URL`
-- if `.env` is missing while `.env.docker` exists, it refuses to fall back to `demo.db`, because the repo-local stdio wrapper does **not** reuse Docker's `/app/data` database path
+- if `.env` is missing while `.env.docker` exists, or if `.env` still points `DATABASE_URL` at Docker `/app/data/...`, it refuses to start, because the repo-local stdio wrapper does **not** reuse Docker's `/app/data` database path
+- if local `.env` or an explicit `DATABASE_URL` still points to `/app/...`, the wrapper also refuses to start, because that path only exists inside the container
 
 So if you only have the Docker / GHCR service side running and do not have a prepared local checkout runtime, do **not** use the stdio wrapper as your first IDE-host path. Point the host at the exposed `/sse` endpoint instead.
 

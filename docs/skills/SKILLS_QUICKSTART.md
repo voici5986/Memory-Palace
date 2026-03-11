@@ -224,6 +224,8 @@ gemini mcp add -s project memory-palace /bin/zsh -lc 'cd <repo-root> && bash scr
 > 把上面的 `<repo-root>` 替换成你的实际仓库根目录。
 >
 > 这条写法会复用当前仓库 `.env` 里的 `DATABASE_URL`。如果你前面已经让 Dashboard / HTTP API 跑在同一个仓库里，就不要再另外手写一条 `backend/memory.db`，否则很容易把客户端和页面接到两份不同的库上。
+>
+> 也别把 `.env.docker` 里的 `/app/data/...` 容器路径原样抄进本地 `.env`。repo-local `stdio` MCP 现在会直接拒绝这种配置；要么改成宿主机绝对路径，要么继续走 Docker `/sse`。
 
 ---
 
@@ -263,6 +265,7 @@ codex mcp add memory-palace \
 - 把上面的 `/ABS/PATH/TO/REPO` 换成你的真实仓库路径
 - 无论走脚本还是手工 fallback，最终都会写到 `~/.codex/config.toml`
 - 这是 `Codex CLI` 当前的产品行为，不是本仓库少了文件
+- 这条命令最终也会复用当前仓库 `.env` 里的 `DATABASE_URL`；如果那份 `.env` 还是 Docker 用的 `/app/data/...`，本机 `stdio` MCP 会直接拒绝启动
 - 如果你把 fallback 命令改写成别的 shell / 客户端配置，别把 `source .venv/bin/activate` 随手删掉；要么先激活项目自己的 `.venv`，要么直接改成 `.venv` 里的 Python。否则 MCP 进程可能会在启动前就因为解释器不对而报 `No module named 'sqlalchemy'`
 
 ---

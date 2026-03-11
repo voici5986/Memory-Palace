@@ -56,6 +56,7 @@
 再补一句最容易踩坑的：
 
 - 这个 wrapper 会优先复用当前仓库 `.env` 里的 `DATABASE_URL`
+- 如果那份 `.env` 还是 Docker 用的 `/app/...` 容器路径，wrapper 也会直接拒绝启动
 - 也就是说，只要你别手工乱改客户端命令，Dashboard / HTTP API / MCP 默认就是同一份数据库
 
 ## Current Local Baseline After Sync / Install

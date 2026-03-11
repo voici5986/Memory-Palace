@@ -98,7 +98,8 @@ curl -fsS http://127.0.0.1:3000/api/setup/status
 - Docker 负责跑服务
 - 客户端接入还是宿主机侧配置
 - 如果你手工把客户端接到 `http://localhost:3000/sse`，`<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`
-- `scripts/run_memory_palace_mcp_stdio.sh` 不是这条 Docker 路径的客户端入口：它依赖本地 `bash` 和 `backend/.venv`，不会复用容器里的 `/app/data`；若仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`，并提示改走 Docker 的 `/sse`
+- `scripts/run_memory_palace_mcp_stdio.sh` 不是这条 Docker 路径的客户端入口：它依赖本地 `bash` 和 `backend/.venv`，不会复用容器里的 `/app/data`
+- 如果你后面要切回本机 `stdio` 客户端，本地 `.env` 必须写宿主机可访问的绝对路径；若仓库里只有 `.env.docker` 而没有本地 `.env`，或者 `.env` / 显式 `DATABASE_URL` 仍写成 `/app/...` 这类容器路径，它都会明确拒绝启动，并提示改走本机路径或 Docker 的 `/sse`
 
 如果你还想把客户端接进当前仓库，再继续看：
 
