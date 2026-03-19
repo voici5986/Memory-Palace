@@ -53,9 +53,13 @@ fi
 
 cd "${BACKEND_DIR}"
 
-effective_database_url="${DATABASE_URL:-}"
-if [[ -z "${effective_database_url}" && -f "${ENV_FILE}" ]]; then
-  effective_database_url="$(read_env_value "${ENV_FILE}" "DATABASE_URL")"
+runtime_database_url="$(normalize_database_url "${DATABASE_URL:-}")"
+effective_database_url="${runtime_database_url}"
+if [[ -z "${runtime_database_url}" && -f "${ENV_FILE}" ]]; then
+  effective_database_url="$(normalize_database_url "$(read_env_value "${ENV_FILE}" "DATABASE_URL")")"
+  if [[ -n "${effective_database_url}" ]]; then
+    export DATABASE_URL="${effective_database_url}"
+  fi
 fi
 
 if is_docker_internal_database_url "${effective_database_url}"; then
@@ -69,7 +73,7 @@ fi
 # Reuse the repo's configured DATABASE_URL when .env exists so MCP clients and
 # the Dashboard/API keep talking to the same SQLite file. Fall back to demo.db
 # only for a minimal no-.env local boot.
-if [[ -z "${DATABASE_URL:-}" && ! -f "${ENV_FILE}" ]]; then
+if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then
   if [[ -f "${DOCKER_ENV_FILE}" ]]; then
     echo "Refusing to fall back to demo.db while ${DOCKER_ENV_FILE} exists." >&2
     echo "The repo-local stdio wrapper does not reuse Docker's /app/data database path." >&2

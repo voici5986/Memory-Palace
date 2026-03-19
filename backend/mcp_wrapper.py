@@ -82,9 +82,13 @@ def resolve_backend_python() -> Path:
 
 def build_runtime_env() -> dict[str, str]:
     runtime_env = os.environ.copy()
-    effective_database_url = runtime_env.get("DATABASE_URL", "")
+    effective_database_url = normalize_database_url(runtime_env.get("DATABASE_URL", ""))
     if not effective_database_url and ENV_FILE.is_file():
-        effective_database_url = read_env_value(ENV_FILE, "DATABASE_URL")
+        effective_database_url = normalize_database_url(
+            read_env_value(ENV_FILE, "DATABASE_URL")
+        )
+        if effective_database_url:
+            runtime_env["DATABASE_URL"] = effective_database_url
 
     if is_docker_internal_database_url(effective_database_url):
         print(
@@ -109,7 +113,9 @@ def build_runtime_env() -> dict[str, str]:
         )
         raise SystemExit(1)
 
-    has_runtime_database_url = bool(normalize_database_url(runtime_env.get("DATABASE_URL", "")))
+    has_runtime_database_url = bool(
+        normalize_database_url(runtime_env.get("DATABASE_URL", ""))
+    )
     if not has_runtime_database_url and not ENV_FILE.is_file():
         if DOCKER_ENV_FILE.is_file():
             print(

@@ -176,6 +176,7 @@ Its role is simple:
 
 - Uses the project's own `backend/.venv`.
 - Prioritizes reusing the `DATABASE_URL` in the current repository's `.env`.
+- If the host or client explicitly passes `DATABASE_URL` as an empty string, it still treats that as “not set” and keeps using the valid value from the current repository `.env`.
 - Falls back to the repo-local `demo.db` only when there is no repo `.env` at all.
 - Refuses that fallback when `.env.docker` exists without `.env`, because the repo-local stdio wrapper does **not** reuse Docker's `/app/data` database path.
 - Also refuses to start when `.env` or an explicit `DATABASE_URL` still points to `/app/...`, because that path only exists inside the container.

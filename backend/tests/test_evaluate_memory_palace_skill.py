@@ -29,7 +29,8 @@ def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
     assert 'ENV_FILE="${PROJECT_ROOT}/.env"' in wrapper_text
     assert 'DOCKER_ENV_FILE="${PROJECT_ROOT}/.env.docker"' in wrapper_text
     assert 'DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"' in wrapper_text
-    assert 'if [[ -z "${DATABASE_URL:-}" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
+    assert 'runtime_database_url="$(normalize_database_url "${DATABASE_URL:-}")"' in wrapper_text
+    assert 'if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
     assert 'if [[ -f "${DOCKER_ENV_FILE}" ]]; then' in wrapper_text
     assert "connect your client to the Docker /sse endpoint instead." in wrapper_text
     assert 'export DATABASE_URL="sqlite+aiosqlite:////${DEFAULT_DB_PATH#/}"' in wrapper_text
@@ -115,6 +116,50 @@ def test_repo_local_stdio_wrapper_rejects_quoted_docker_internal_database_url(
     assert result.returncode == 1
     assert "Docker-internal DATABASE_URL" in result.stderr
     assert "connect your client to the Docker /sse endpoint instead." in result.stderr
+
+
+def test_repo_local_stdio_wrapper_exports_repo_database_url_when_runtime_value_is_empty(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+    host_db = tmp_path / "host.db"
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+
+    source_wrapper = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "")
+    with script_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source_wrapper)
+    script_path.chmod(0o755)
+
+    backend_python.write_text(
+        "#!/usr/bin/env bash\nprintf '%s' \"$DATABASE_URL\"\n",
+        encoding="utf-8",
+    )
+    backend_python.chmod(0o755)
+
+    (project_root / ".env").write_text(
+        f"DATABASE_URL=sqlite+aiosqlite:///{host_db.as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DATABASE_URL": ""},
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == f"sqlite+aiosqlite:///{host_db.as_posix()}"
 
 
 def test_check_gate_syntax_skips_when_post_check_script_is_missing(

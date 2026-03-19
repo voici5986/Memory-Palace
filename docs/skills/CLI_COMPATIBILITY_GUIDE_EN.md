@@ -50,6 +50,7 @@ The `memory-palace` link is divided into two layers:
 One more thing to avoid pitfalls:
 
 - This wrapper prioritizes reusing the `DATABASE_URL` from the current repository's `.env`.
+- If a client passes `DATABASE_URL` as an empty string, it still treats that as “not set” and continues to use the valid value from the current repository `.env`.
 - If that `.env` still points to Docker `/app/...` container paths, the wrapper also refuses to start on purpose.
 - In other words, as long as you don't manually mess up the client commands, the Dashboard / HTTP API / MCP will default to the same database.
 

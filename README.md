@@ -501,6 +501,8 @@ python run_sse.py
 >
 > Both launchers use the repository `backend/.venv`, read the repository `.env` first, and only fall back to the repo's default SQLite path when neither `DATABASE_URL` nor `.env` is present. If `.env` is missing but `.env.docker` exists, or if a local `.env` still points `DATABASE_URL` at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, the wrapper now refuses to start on purpose because the repo-local stdio path does **not** reuse the container's `/app/data` database path. In a Docker-only setup, connect the client to `/sse` instead of assuming the wrapper will pick up container data.
 >
+> One more detail rechecked in the current validation round: if a client or IDE host passes `DATABASE_URL` as an empty string, these wrappers still treat that as “not set” and keep reusing the repository `.env` value. They do not misclassify that case as a missing repo-local configuration just because the variable name exists.
+>
 > The same rule now applies when `.env` itself is wrong: if `.env` or an explicit `DATABASE_URL` still points to `/app/...`, the wrapper refuses to start on purpose. That is a local path configuration error, not an MCP protocol failure.
 >
 > `python run_sse.py` also defaults to loopback (`127.0.0.1:8000`) unless you override `HOST` and `PORT`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.

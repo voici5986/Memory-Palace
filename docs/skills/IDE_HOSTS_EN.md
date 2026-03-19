@@ -53,6 +53,7 @@ That means:
 - `AGENTS.md` is the rule projection for IDE hosts
 - `mcpServers.memory-palace` is the tool projection for IDE hosts
 - `docs/skills/memory-palace/` remains the canonical source behind both projections
+- if a host passes `DATABASE_URL` as an empty string, the wrapper still treats that as “not set” and continues to read the current repository `.env`
 
 ### 3. Local prerequisites for the default IDE-host path
 

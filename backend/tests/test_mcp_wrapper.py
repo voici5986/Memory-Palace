@@ -71,7 +71,7 @@ def test_build_runtime_env_rejects_docker_internal_database_url(
     assert str(excinfo.value) == "1"
 
 
-def test_build_runtime_env_uses_last_database_url_from_env_file(
+def test_build_runtime_env_uses_last_database_url_from_env_file_when_runtime_value_is_missing(
     monkeypatch, tmp_path: Path
 ) -> None:
     module = _load_module()
@@ -95,7 +95,7 @@ def test_build_runtime_env_uses_last_database_url_from_env_file(
 
     runtime_env = module.build_runtime_env()
 
-    assert "DATABASE_URL" not in runtime_env
+    assert runtime_env["DATABASE_URL"] == f"sqlite+aiosqlite:///{host_db.as_posix()}"
 
 
 def test_build_runtime_env_sets_demo_db_when_no_env_exists(
