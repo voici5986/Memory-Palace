@@ -47,8 +47,9 @@ def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url(
         Path(__file__).resolve().parents[2]
         / "scripts"
         / "run_memory_palace_mcp_stdio.sh"
-    ).read_text(encoding="utf-8")
-    script_path.write_text(source_wrapper, encoding="utf-8")
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "")
+    with script_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source_wrapper)
     script_path.chmod(0o755)
 
     backend_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
@@ -60,7 +61,7 @@ def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url(
     )
 
     result = subprocess.run(
-        ["bash", str(script_path)],
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
         cwd=project_root,
         capture_output=True,
         text=True,
@@ -86,8 +87,9 @@ def test_repo_local_stdio_wrapper_rejects_quoted_docker_internal_database_url(
         Path(__file__).resolve().parents[2]
         / "scripts"
         / "run_memory_palace_mcp_stdio.sh"
-    ).read_text(encoding="utf-8")
-    script_path.write_text(source_wrapper, encoding="utf-8")
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "")
+    with script_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source_wrapper)
     script_path.chmod(0o755)
 
     backend_python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
@@ -99,7 +101,7 @@ def test_repo_local_stdio_wrapper_rejects_quoted_docker_internal_database_url(
     )
 
     result = subprocess.run(
-        ["bash", str(script_path)],
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
         cwd=project_root,
         capture_output=True,
         text=True,
@@ -638,6 +640,8 @@ def test_run_command_capture_until_output_file_returns_after_json_is_ready(
     fake_process = _FakeProcess()
     terminated: list[int] = []
 
+    monkeypatch.setattr(evaluate_memory_palace_skill.os, "name", "posix")
+
     monkeypatch.setattr(
         evaluate_memory_palace_skill.subprocess,
         "Popen",
@@ -647,6 +651,7 @@ def test_run_command_capture_until_output_file_returns_after_json_is_ready(
         evaluate_memory_palace_skill.os,
         "killpg",
         lambda pid, sig: terminated.append(pid),
+        raising=False,
     )
 
     result = evaluate_memory_palace_skill._run_command_capture_until_output_file(
@@ -685,9 +690,14 @@ def test_run_command_capture_force_kills_when_graceful_shutdown_hangs(
             self.returncode = -9
             return ("final-out", "final-err")
 
+        def kill(self):
+            self.returncode = -9
+
     fake_process = _FakeProcess()
     killed: list[tuple[int, int]] = []
     terminated: list[int] = []
+
+    monkeypatch.setattr(evaluate_memory_palace_skill.os, "name", "posix")
 
     monkeypatch.setattr(
         evaluate_memory_palace_skill.subprocess,
@@ -703,6 +713,13 @@ def test_run_command_capture_force_kills_when_graceful_shutdown_hangs(
         evaluate_memory_palace_skill.os,
         "killpg",
         lambda pid, sig: killed.append((pid, sig)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill.signal,
+        "SIGKILL",
+        9,
+        raising=False,
     )
 
     result = evaluate_memory_palace_skill.run_command_capture(
@@ -774,6 +791,41 @@ def test_extract_gemini_db_path_accepts_user_scope_absolute_wrapper(
         encoding="utf-8",
     )
     expected_db = tmp_path / "user-demo.db"
+
+    monkeypatch.setattr(evaluate_memory_palace_skill.Path, "home", lambda: home_dir)
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill,
+        "EXPECTED_DB_URI",
+        f"sqlite+aiosqlite:///{expected_db}",
+    )
+
+    resolved = evaluate_memory_palace_skill._extract_gemini_memory_palace_db_path()
+
+    assert resolved is not None
+    assert resolved.as_posix().endswith(expected_db.as_posix())
+
+
+def test_extract_gemini_db_path_accepts_python_wrapper_binding(
+    monkeypatch, tmp_path: Path
+) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+    home_dir = tmp_path / "home"
+    settings_path = home_dir / ".gemini" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "memory-palace": {
+                        "command": "python",
+                        "args": [str(evaluate_memory_palace_skill.PYTHON_WRAPPER_ABSOLUTE)],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    expected_db = tmp_path / "python-wrapper-demo.db"
 
     monkeypatch.setattr(evaluate_memory_palace_skill.Path, "home", lambda: home_dir)
     monkeypatch.setattr(

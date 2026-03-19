@@ -261,3 +261,50 @@ def test_install_target_antigravity_workspace_scope_uses_agent_workflows_dir(
     assert installed_path.read_text(encoding="utf-8") == workflow_source.read_text(
         encoding="utf-8"
     )
+
+
+def test_python_command_prefers_repo_backend_venv(monkeypatch, tmp_path: Path) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.os, "name", "nt")
+
+    assert module._python_command() == str(venv_python)
+
+
+def test_codex_server_block_uses_python_wrapper_on_windows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setattr(module.sys, "executable", r"C:\Python313\python.exe")
+
+    rendered = module._codex_server_block_text()
+
+    assert 'command = "C:\\\\Python313\\\\python.exe"' in rendered
+    assert str(project_root / "backend" / "mcp_wrapper.py").replace("\\", "\\\\") in rendered
+
+
+def test_wrapper_binding_ok_accepts_python_wrapper_paths(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    assert module._wrapper_binding_ok(
+        ["python", str(project_root / "backend" / "mcp_wrapper.py")],
+        allow_relative=False,
+    )
+    assert module._wrapper_binding_ok(
+        ["python", "backend/mcp_wrapper.py"],
+        allow_relative=True,
+    )

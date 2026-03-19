@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 
 IDE_HOSTS = ("cursor", "windsurf", "vscode", "antigravity")
-LAUNCHERS = ("bash", "python-wrapper")
+LAUNCHERS = ("auto", "bash", "python-wrapper")
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,9 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--launcher",
         choices=LAUNCHERS,
-        default="bash",
+        default="auto",
         help=(
-            "Launcher style. 'bash' uses scripts/run_memory_palace_mcp_stdio.sh. "
+            "Launcher style. 'auto' picks 'python-wrapper' on Windows and 'bash' elsewhere. "
+            "'bash' uses scripts/run_memory_palace_mcp_stdio.sh. "
             "'python-wrapper' emits backend/mcp_wrapper.py and is mainly for CRLF/stdin quirks."
         ),
     )
@@ -47,6 +50,12 @@ def python_wrapper_absolute() -> Path:
     return project_root() / "backend" / "mcp_wrapper.py"
 
 
+def backend_venv_python_absolute() -> Path:
+    if os.name == "nt":
+        return project_root() / "backend" / ".venv" / "Scripts" / "python.exe"
+    return project_root() / "backend" / ".venv" / "bin" / "python"
+
+
 def antigravity_workflow_absolute() -> Path:
     return (
         project_root()
@@ -60,12 +69,21 @@ def antigravity_workflow_absolute() -> Path:
     )
 
 
+def resolve_launcher(launcher: str) -> str:
+    if launcher == "auto":
+        return "python-wrapper" if os.name == "nt" else "bash"
+    return launcher
+
+
 def build_mcp_config(launcher: str) -> dict[str, object]:
-    if launcher == "python-wrapper":
+    resolved = resolve_launcher(launcher)
+    if resolved == "python-wrapper":
+        python_command = backend_venv_python_absolute()
+        command = str(python_command) if python_command.is_file() else (sys.executable or "python")
         return {
             "mcpServers": {
                 "memory-palace": {
-                    "command": "python",
+                    "command": command,
                     "args": [str(python_wrapper_absolute())],
                 }
             }
@@ -81,6 +99,7 @@ def build_mcp_config(launcher: str) -> dict[str, object]:
 
 
 def host_notes(host: str, launcher: str) -> list[str]:
+    resolved = resolve_launcher(launcher)
     notes = [
         "IDE hosts should project Memory Palace via repo-local AGENTS.md instead of hidden SKILL.md mirrors.",
         "Paste the rendered MCP snippet into the host's MCP/local stdio settings surface for this repository.",
@@ -99,24 +118,26 @@ def host_notes(host: str, launcher: str) -> list[str]:
             + str(antigravity_workflow_absolute())
             + "."
         )
-    if launcher == "python-wrapper":
+    if resolved == "python-wrapper":
         notes.append(
-            "The python-wrapper launcher is mainly for stdin/stdout normalization quirks; if you use a virtualenv-managed interpreter, replace 'python' with the appropriate executable."
+            "The python-wrapper launcher is mainly for native Windows shells and stdio normalization quirks; keep it aligned with the repository backend virtualenv interpreter."
         )
     return notes
 
 
 def render_payload(host: str, launcher: str) -> dict[str, object]:
+    resolved = resolve_launcher(launcher)
     payload: dict[str, object] = {
         "host": host,
         "category": "ide-host",
+        "launcher": resolved,
         "canonical_skill_source": "docs/skills/memory-palace/",
         "skill_insertion": {
             "primary_rule_surface": str(project_root() / "AGENTS.md"),
             "hidden_skill_mirrors_required": False,
         },
-        "mcp_config": build_mcp_config(launcher),
-        "notes": host_notes(host, launcher),
+        "mcp_config": build_mcp_config(resolved),
+        "notes": host_notes(host, resolved),
     }
     if host == "antigravity":
         payload["skill_insertion"] = {

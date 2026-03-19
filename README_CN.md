@@ -55,7 +55,7 @@
 - **部署更稳了**：Docker 一键脚本补了 deployment lock，运行时环境注入默认关闭，分享或正式发布前也有自检脚本兜底。
 - **高干扰检索在当前基准集里表现更稳**：对照旧版本时，`s8,d200` 与 `s100,d200` 这类更容易被干扰的场景，C/D 档位显示出更好的召回。
 - **前端语言切换更直接了**：当前前端默认英文，右上角新增中英切换按钮，浏览器会记住你的选择。
-- **公开口径更保守了**：文档只写已验证的路径；你自己的 Windows / 远程部署环境仍建议按目标环境再复核一次。
+- **公开口径更保守了**：文档现在已经补上原生 Windows 的 repo-local `python-wrapper` 路径，但你自己的远程环境 / GUI 宿主环境仍建议按目标环境再复核一次。
 - **客户端边界写清楚了**：`Claude/Codex/OpenCode/Gemini` 走文档里的 CLI 路径；`Cursor / Windsurf / VSCode-host / Antigravity` 走 `AGENTS.md + MCP 配置片段`；`Gemini live` 和 GUI 宿主验证仍保留边界说明。
 
 ---
@@ -84,7 +84,7 @@
 
 ### 📦 灵活部署
 
-四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本。当前已完成 `macOS + Docker` 主链路验证；Windows 提供脚本与等效 smoke，原生 Windows 仍待补验。
+四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本。当前最完整的大链路验证仍是 `macOS + Docker`；原生 Windows 现在已有通过 `backend/mcp_wrapper.py` 的 repo-local stdio 路径，但远程场景和 GUI 宿主组合仍建议按目标环境再复核一次。
 
 ### 📊 内置可观测性仪表盘
 
@@ -477,7 +477,12 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > 上面这条 `python mcp_server.py` 默认你还在使用刚才安装依赖的那个 `backend/.venv`。如果你换了一个新终端，或者是在 Claude Code / Codex / OpenCode 这类客户端里配置本地 MCP，优先直接指向项目自己的 `.venv`。否则很容易因为解释器不对，在启动前就报 `ModuleNotFoundError: No module named 'sqlalchemy'`。
 >
-> 如果你要把 MCP 接到客户端配置里，更推荐直接用 `scripts/run_memory_palace_mcp_stdio.sh`。但要把边界理解准确：它依赖本地 `bash` 和 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
+> 如果你要把 MCP 接到客户端配置里，先按本机 shell 边界选 launcher：
+>
+> - 原生 Windows：优先 `backend/mcp_wrapper.py`
+> - macOS / Linux / Git Bash / WSL：优先 `scripts/run_memory_palace_mcp_stdio.sh`
+>
+> 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
 >
 > 同样地，如果 `.env` 或你显式传入的 `DATABASE_URL` 仍是 `/app/...` 这类 Docker 容器路径，wrapper 现在也会直接拒绝启动。这不是 MCP 协议故障，而是本机路径配置错了；改成宿主机绝对路径，或者继续走 Docker `/sse`。
 >

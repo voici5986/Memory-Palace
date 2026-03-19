@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 BACKEND_DIR="${PROJECT_ROOT}/backend"
-VENV_PYTHON="${BACKEND_DIR}/.venv/bin/python"
+POSIX_VENV_PYTHON="${BACKEND_DIR}/.venv/bin/python"
+WINDOWS_VENV_PYTHON="${BACKEND_DIR}/.venv/Scripts/python.exe"
 ENV_FILE="${PROJECT_ROOT}/.env"
 DOCKER_ENV_FILE="${PROJECT_ROOT}/.env.docker"
 DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"
@@ -38,8 +39,15 @@ is_docker_internal_database_url() {
   [[ "${value}" == sqlite+aiosqlite:////app/* || "${value}" == sqlite+aiosqlite:///app/* ]]
 }
 
-if [[ ! -x "${VENV_PYTHON}" ]]; then
-  echo "Missing backend virtualenv python: ${VENV_PYTHON}" >&2
+VENV_PYTHON=""
+if [[ -x "${POSIX_VENV_PYTHON}" ]]; then
+  VENV_PYTHON="${POSIX_VENV_PYTHON}"
+elif [[ -x "${WINDOWS_VENV_PYTHON}" ]]; then
+  VENV_PYTHON="${WINDOWS_VENV_PYTHON}"
+fi
+
+if [[ -z "${VENV_PYTHON}" ]]; then
+  echo "Missing backend virtualenv python: ${POSIX_VENV_PYTHON} or ${WINDOWS_VENV_PYTHON}" >&2
   exit 1
 fi
 

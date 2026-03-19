@@ -33,6 +33,8 @@ CANONICAL_DIR = PROJECT_ROOT / "docs" / "skills" / "memory-palace"
 BACKEND_DIR = PROJECT_ROOT / "backend"
 WRAPPER_RELATIVE = Path("scripts/run_memory_palace_mcp_stdio.sh")
 WRAPPER_ABSOLUTE = PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh"
+PYTHON_WRAPPER_RELATIVE = Path("backend/mcp_wrapper.py")
+PYTHON_WRAPPER_ABSOLUTE = PROJECT_ROOT / "backend" / "mcp_wrapper.py"
 MIRRORS = {
     "claude": REPO_ROOT / ".claude" / "skills" / "memory-palace",
     "codex": REPO_ROOT / ".codex" / "skills" / "memory-palace",
@@ -277,6 +279,8 @@ def _command_mentions_repo_wrapper(command_parts: list[Any]) -> bool:
     candidates = {
         str(WRAPPER_ABSOLUTE).replace("\\", "/"),
         str(WRAPPER_RELATIVE).replace("\\", "/"),
+        str(PYTHON_WRAPPER_ABSOLUTE).replace("\\", "/"),
+        str(PYTHON_WRAPPER_RELATIVE).replace("\\", "/"),
     }
     return any(candidate in joined for candidate in candidates)
 
@@ -616,9 +620,10 @@ def _normalized_text(value: Any) -> str:
 def _command_mentions_wrapper(command_parts: list[str], *, allow_relative_wrapper: bool) -> bool:
     normalized_parts = [_normalized_text(part) for part in command_parts if str(part).strip()]
     joined = " ".join(normalized_parts)
-    candidates = {_normalized_text(WRAPPER_ABSOLUTE)}
+    candidates = {_normalized_text(WRAPPER_ABSOLUTE), _normalized_text(PYTHON_WRAPPER_ABSOLUTE)}
     if allow_relative_wrapper:
         candidates.add(_normalized_text(WRAPPER_RELATIVE))
+        candidates.add(_normalized_text(PYTHON_WRAPPER_RELATIVE))
     return any(candidate in joined for candidate in candidates)
 
 

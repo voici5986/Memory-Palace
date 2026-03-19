@@ -59,7 +59,7 @@ If you want the AI to guide installation step by step, start with the standalone
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
 - **Dashboard language is now easier to control**: the frontend defaults to English and adds a one-click English / Chinese toggle in the top-right corner, with the selection remembered in the browser.
-- **Public claims stay conservative**: the docs only describe verified paths, and still ask you to re-check your own Windows / remote deployment environment.
+- **Public claims stay conservative**: the docs now include a native-Windows repo-local stdio path through `backend/mcp_wrapper.py`, while still asking you to re-check your own remote / GUI-host deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` use the documented CLI path; IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` use repo-local rules plus an MCP snippet; `Gemini live` and GUI-only host validation still carry explicit caveats.
 
 ---
@@ -88,7 +88,7 @@ One protocol, many clients: the public docs focus on the most practical paths fo
 
 ### 📦 Flexible Deployment
 
-Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Docker support and one-click scripts. The main validated path today is `macOS + Docker`; Windows has scripts and equivalent smoke coverage, while native Windows is still pending.
+Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Docker support and one-click scripts. The broadest validated path today is still `macOS + Docker`; native Windows now has a repo-local stdio path through `backend/mcp_wrapper.py`, while remote and GUI-host combinations should still be re-checked in the target environment.
 
 ### 📊 Built-in Observability Dashboard
 
@@ -479,7 +479,12 @@ HOST=127.0.0.1 PORT=8010 python run_sse.py
 >
 > The plain `python mcp_server.py` form assumes you are still using the same `backend/.venv` where you ran `pip install -r requirements.txt`. If you launch MCP from a new terminal or a client config, it is safer to point to the project venv directly. Otherwise the process can fail before startup with errors like `ModuleNotFoundError: No module named 'sqlalchemy'`.
 >
-> If you are wiring MCP into a client config, prefer `scripts/run_memory_palace_mcp_stdio.sh` for a **local checkout**: it uses the repository `backend/.venv`, reads the repository `.env` first, and only falls back to the repo's default SQLite path when neither `DATABASE_URL` nor `.env` is present. If `.env` is missing but `.env.docker` exists, or if a local `.env` still points `DATABASE_URL` at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, the wrapper now refuses to start on purpose because the repo-local stdio path does **not** reuse the container's `/app/data` database path. In a Docker-only setup, connect the client to `/sse` instead of assuming the wrapper will pick up container data.
+> If you are wiring MCP into a client config, use the launcher that matches your local shell boundary:
+>
+> - native Windows: prefer `backend/mcp_wrapper.py`
+> - macOS / Linux / Git Bash / WSL: prefer `scripts/run_memory_palace_mcp_stdio.sh`
+>
+> Both launchers use the repository `backend/.venv`, read the repository `.env` first, and only fall back to the repo's default SQLite path when neither `DATABASE_URL` nor `.env` is present. If `.env` is missing but `.env.docker` exists, or if a local `.env` still points `DATABASE_URL` at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, the wrapper now refuses to start on purpose because the repo-local stdio path does **not** reuse the container's `/app/data` database path. In a Docker-only setup, connect the client to `/sse` instead of assuming the wrapper will pick up container data.
 >
 > The same rule now applies when `.env` itself is wrong: if `.env` or an explicit `DATABASE_URL` still points to `/app/...`, the wrapper refuses to start on purpose. That is a local path configuration error, not an MCP protocol failure.
 >

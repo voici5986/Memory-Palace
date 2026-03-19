@@ -43,7 +43,9 @@ It still serves:
 For IDE hosts, Memory Palace should be inserted through:
 
 - **primary entry**: repo-root `AGENTS.md`
-- **execution entry**: a local MCP config pointing to `scripts/run_memory_palace_mcp_stdio.sh`
+- **execution entry**: a local MCP config
+  - native Windows defaults to `python backend/mcp_wrapper.py`
+  - macOS / Linux defaults to `bash scripts/run_memory_palace_mcp_stdio.sh`
 - **optional compatibility layer**: workflow / wrapper for specific hosts
 
 That means:
@@ -124,19 +126,18 @@ python scripts/render_ide_host_config.py --host vscode
 python scripts/render_ide_host_config.py --host antigravity
 ```
 
-By default, this renders a repo-local MCP JSON snippet pointing to:
+By default, this renders a repo-local MCP JSON snippet:
 
-```text
-scripts/run_memory_palace_mcp_stdio.sh
-```
+- native Windows: `python + backend/mcp_wrapper.py`
+- macOS / Linux: `bash + scripts/run_memory_palace_mcp_stdio.sh`
 
 That default path assumes the same bundle above is already true:
 
-- the IDE host can launch `bash`
 - the repository-local `backend/.venv` is ready
 - the repository-local `.env` exists when you want to reuse a specific SQLite file
+- and, for the bash path, the host can launch `bash`
 
-If a host has `stdin/stdout` or CRLF quirks, switch to the wrapper form:
+On Windows the default output is already `python-wrapper`. If a host on macOS / Linux has `stdin/stdout` or CRLF quirks, switch to the wrapper form:
 
 ```bash
 python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper

@@ -13,7 +13,8 @@ RUN apk add --no-cache gettext
 COPY deploy/docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY deploy/docker/frontend-entrypoint.sh /usr/local/bin/frontend-entrypoint.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
-RUN chmod +x /usr/local/bin/frontend-entrypoint.sh
+RUN chmod +x /usr/local/bin/frontend-entrypoint.sh \
+    && sed -i 's/\r$//' /usr/local/bin/frontend-entrypoint.sh
 
 USER 101
 

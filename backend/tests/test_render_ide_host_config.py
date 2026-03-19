@@ -66,13 +66,37 @@ def test_render_payload_with_python_wrapper_uses_mcp_wrapper_path(
 ) -> None:
     module = _load_module()
     project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(module, "project_root", lambda: project_root)
 
     payload = module.render_payload("vscode", "python-wrapper")
 
-    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == "python"
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == str(venv_python)
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
         str(project_root / "backend" / "mcp_wrapper.py")
     ]
-    assert any("virtualenv-managed interpreter" in note for note in payload["notes"])
+    assert any("backend virtualenv interpreter" in note for note in payload["notes"])
+
+
+def test_render_payload_auto_uses_python_wrapper_on_windows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.os, "name", "nt")
+
+    payload = module.render_payload("cursor", "auto")
+
+    assert payload["launcher"] == "python-wrapper"
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == str(venv_python)
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
+        str(project_root / "backend" / "mcp_wrapper.py")
+    ]

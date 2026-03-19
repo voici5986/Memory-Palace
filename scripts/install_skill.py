@@ -123,12 +123,26 @@ def project_root() -> Path:
     return workspace_root()
 
 
-def repo_wrapper_relative() -> Path:
+def shell_wrapper_relative() -> Path:
     return Path("scripts/run_memory_palace_mcp_stdio.sh")
 
 
-def repo_wrapper_absolute() -> Path:
+def shell_wrapper_absolute() -> Path:
     return project_root() / "scripts" / "run_memory_palace_mcp_stdio.sh"
+
+
+def python_wrapper_relative() -> Path:
+    return Path("backend/mcp_wrapper.py")
+
+
+def python_wrapper_absolute() -> Path:
+    return project_root() / "backend" / "mcp_wrapper.py"
+
+
+def backend_venv_python_absolute() -> Path:
+    if os.name == "nt":
+        return project_root() / "backend" / ".venv" / "Scripts" / "python.exe"
+    return project_root() / "backend" / ".venv" / "bin" / "python"
 
 
 def source_dir() -> Path:
@@ -181,9 +195,12 @@ def antigravity_destination(base_dir: Path, scope: str) -> Path:
 
 
 def ensure_wrapper_script() -> None:
-    wrapper = repo_wrapper_absolute()
-    if not wrapper.is_file():
-        raise SystemExit(f"Missing MCP wrapper script: {wrapper}")
+    missing: list[str] = []
+    for wrapper in (shell_wrapper_absolute(), python_wrapper_absolute()):
+        if not wrapper.is_file():
+            missing.append(str(wrapper))
+    if missing:
+        raise SystemExit(f"Missing MCP wrapper script: {', '.join(missing)}")
 
 
 def read_json_file(path: Path) -> dict:
@@ -236,38 +253,58 @@ def _normalized(value: object) -> str:
     return str(value).replace("\\", "/")
 
 
+def _default_mcp_launcher() -> str:
+    return "python-wrapper" if os.name == "nt" else "bash"
+
+
+def _python_command() -> str:
+    preferred = backend_venv_python_absolute()
+    if preferred.is_file():
+        return str(preferred)
+    return sys.executable or "python"
+
+
+def _wrapper_candidates(*, allow_relative: bool) -> set[str]:
+    candidates = {
+        _normalized(shell_wrapper_absolute()),
+        _normalized(python_wrapper_absolute()),
+    }
+    if allow_relative:
+        candidates.add(_normalized(shell_wrapper_relative()))
+        candidates.add(_normalized(python_wrapper_relative()))
+    return candidates
+
+
 def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bool:
     normalized_parts = [_normalized(part) for part in command_parts if str(part).strip()]
     joined = " ".join(normalized_parts)
-    candidates = {_normalized(repo_wrapper_absolute())}
-    if allow_relative:
-        candidates.add(_normalized(repo_wrapper_relative()))
-    return any(candidate in joined for candidate in candidates)
+    return any(candidate in joined for candidate in _wrapper_candidates(allow_relative=allow_relative))
 
 
-def _project_claude_server_block() -> dict:
+def _command_and_args(*, relative: bool) -> tuple[str, list[str]]:
+    launcher = _default_mcp_launcher()
+    if launcher == "python-wrapper":
+        wrapper = python_wrapper_relative() if relative else python_wrapper_absolute()
+        return _python_command(), [str(wrapper)]
+    wrapper = shell_wrapper_relative() if relative else shell_wrapper_absolute()
+    return "bash", [str(wrapper)]
+
+
+def _claude_server_block(*, relative: bool) -> dict:
+    command, args = _command_and_args(relative=relative)
     return {
         "type": "stdio",
-        "command": "bash",
-        "args": [str(repo_wrapper_relative())],
-        "env": dict(UTF8_ENV),
-    }
-
-
-def _user_claude_server_block() -> dict:
-    return {
-        "type": "stdio",
-        "command": "bash",
-        "args": [str(repo_wrapper_absolute())],
+        "command": command,
+        "args": args,
         "env": dict(UTF8_ENV),
     }
 
 
 def _gemini_server_block(*, relative: bool) -> dict:
-    script_arg = str(repo_wrapper_relative() if relative else repo_wrapper_absolute())
+    command, args = _command_and_args(relative=relative)
     return {
-        "command": "bash",
-        "args": [script_arg],
+        "command": command,
+        "args": args,
         "description": "Memory Palace MCP for the current repository",
         "timeout": 20000,
         "env": dict(UTF8_ENV),
@@ -275,20 +312,22 @@ def _gemini_server_block(*, relative: bool) -> dict:
 
 
 def _opencode_server_block() -> dict:
+    command, args = _command_and_args(relative=False)
     return {
-        "command": ["bash", str(repo_wrapper_absolute())],
+        "command": [command, *args],
         "enabled": True,
         "type": "local",
     }
 
 
 def _codex_server_block_text() -> str:
-    script_arg = json.dumps(str(repo_wrapper_absolute()))
+    command, args = _command_and_args(relative=False)
+    rendered_args = ", ".join(json.dumps(str(arg)) for arg in args)
     return "\n".join(
         [
             "[mcp_servers.memory-palace]",
-            'command = "bash"',
-            f"args = [{script_arg}]",
+            f"command = {json.dumps(command)}",
+            f"args = [{rendered_args}]",
             "startup_timeout_sec = 30.0",
             "",
             "[mcp_servers.memory-palace.env]",
@@ -448,7 +487,7 @@ def install_mcp_binding(target_name: str, *, scope: str, dry_run: bool) -> None:
         if target_name == "claude":
             config_path = workspace_root() / ".mcp.json"
             payload = read_json_file(config_path)
-            payload.setdefault("mcpServers", {})["memory-palace"] = _project_claude_server_block()
+            payload.setdefault("mcpServers", {})["memory-palace"] = _claude_server_block(relative=True)
             write_json_file(config_path, payload, dry_run=dry_run)
             return
         if target_name == "gemini":
@@ -468,7 +507,7 @@ def install_mcp_binding(target_name: str, *, scope: str, dry_run: bool) -> None:
         payload = read_json_file(config_path)
         projects = payload.setdefault("projects", {})
         project_block = projects.setdefault(str(workspace_root()), {})
-        project_block.setdefault("mcpServers", {})["memory-palace"] = _user_claude_server_block()
+        project_block.setdefault("mcpServers", {})["memory-palace"] = _claude_server_block(relative=False)
         write_json_file(config_path, payload, dry_run=dry_run)
         return
 

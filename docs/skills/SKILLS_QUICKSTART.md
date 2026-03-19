@@ -68,11 +68,11 @@
 >
 > **Windows 用户先看这个前提**：
 >
-> - 当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`
-> - `install_skill.py` 生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`
-> - 所以如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**
-> - 如果你现在只有 PowerShell，先不要把下面这些 `/bin/zsh` / `bash` 示例当成“原生 Windows 直接可用”
-> - 这不是文档偷懒，而是当前代码的真实边界
+> - 原生 Windows 现在默认走 `python + backend/mcp_wrapper.py`
+> - `install_skill.py --with-mcp` 在 Windows 上会为 `Claude / Codex / Gemini / OpenCode` 生成这条 native 路径
+> - `python scripts/render_ide_host_config.py --host ...` 在 Windows 上默认也会输出 `python-wrapper`
+> - 如果你是 `Git Bash` 或 `WSL` 用户，仍然可以继续使用 `bash + scripts/run_memory_palace_mcp_stdio.sh`
+> - 所以现在要区分的是：**native Windows 用 python-wrapper，POSIX shell 边界用 bash wrapper**
 
 ---
 
@@ -228,6 +228,13 @@ gemini mcp list
 先把旧的用户级 MCP 条目删掉，再重新加项目级这一条：
 
 ```bash
+# native Windows
+gemini mcp remove memory-palace
+gemini mcp add -s project memory-palace python <repo-root>\backend\mcp_wrapper.py
+```
+
+```bash
+# macOS / Linux / Git Bash / WSL
 gemini mcp remove memory-palace
 gemini mcp add -s project memory-palace /bin/zsh -lc 'cd <repo-root> && bash scripts/run_memory_palace_mcp_stdio.sh'
 ```
@@ -267,6 +274,12 @@ codex mcp list
 如果脚本检查仍失败，或者你就是要手工排障，再用：
 
 ```bash
+# native Windows
+codex mcp add memory-palace -- python C:\ABS\PATH\TO\REPO\backend\mcp_wrapper.py
+```
+
+```bash
+# macOS / Linux / Git Bash / WSL
 codex mcp add memory-palace \
   -- /bin/zsh -lc 'cd /ABS/PATH/TO/REPO && bash scripts/run_memory_palace_mcp_stdio.sh'
 ```
@@ -301,6 +314,16 @@ opencode mcp list
 如果脚本检查仍失败，或者你就是要手工排障，再在 `OpenCode` 自己的 MCP 管理入口里新增一个本地 stdio server，核心参数就是：
 
 ```text
+# native Windows
+name: memory-palace
+type: local / stdio
+command: python
+args:
+  - <repo-root>\backend\mcp_wrapper.py
+```
+
+```text
+# macOS / Linux / Git Bash / WSL
 name: memory-palace
 type: local / stdio
 command: /bin/zsh
@@ -337,7 +360,7 @@ python scripts/render_ide_host_config.py --host vscode
 python scripts/render_ide_host_config.py --host antigravity
 ```
 
-如果宿主存在 `stdin/stdout` 或 CRLF 兼容问题，再改用：
+在 Windows 上，默认输出已经是 `python-wrapper`。如果你在 macOS / Linux 上遇到 `stdin/stdout` 或 CRLF 兼容问题，再改用：
 
 ```bash
 python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper
