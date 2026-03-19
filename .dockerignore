@@ -3,6 +3,16 @@
 .DS_Store
 **/.DS_Store
 .claude/
+.codex/
+.cursor/
+.opencode/
+.gemini/
+.agent/
+.mcp.json
+.mcp.json.bak
+.playwright-cli/
+.tmp/
+.pytest_cache/
 
 # Local env/config secrets
 .env
@@ -24,6 +34,7 @@ demo.db
 
 # Frontend local artifacts
 frontend/node_modules/
+frontend/dist/
 frontend/.venv/
 frontend/frontend.log
 frontend/.DS_Store

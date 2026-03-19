@@ -239,6 +239,24 @@ check_tracked_forbidden_paths() {
   fi
 }
 
+check_untracked_unignored_files() {
+  local -a hits=()
+  local item
+  while IFS= read -r item; do
+    [[ -n "${item}" ]] || continue
+    hits+=("${item}")
+  done < <(git ls-files --others --exclude-standard)
+
+  if [[ "${#hits[@]}" -gt 0 ]]; then
+    local path
+    for path in "${hits[@]}"; do
+      warn "发现未跟踪且未忽略的文件（上传前请确认是否需要加入 .gitignore 或移走）: ${path}"
+    done
+  else
+    pass "未发现未跟踪且未忽略的文件"
+  fi
+}
+
 collect_existing_tracked_files() {
   local file
   while IFS= read -r -d '' file; do
@@ -506,7 +524,10 @@ check_local_artifacts
 print_section "2) Git 跟踪状态检查"
 check_tracked_forbidden_paths
 
-print_section "3) 密钥模式扫描（仅扫描已跟踪文件）"
+print_section "3) 未跟踪未忽略文件检查"
+check_untracked_unignored_files
+
+print_section "4) 密钥模式扫描（仅扫描已跟踪文件）"
 scan_tracked_files \
   "secret_scan" \
   "密钥/凭证模式" \
@@ -514,20 +535,20 @@ scan_tracked_files \
 
 PERSONAL_PATH_SCAN_REGEX="$(build_personal_path_scan_regex || true)"
 if [[ -n "${PERSONAL_PATH_SCAN_REGEX}" ]]; then
-  print_section "4) 个人路径泄露扫描（仅扫描已跟踪文件）"
+  print_section "5) 个人路径泄露扫描（仅扫描已跟踪文件）"
   scan_tracked_files \
     "personal_path_scan" \
     "个人绝对路径（当前环境）" \
     "${PERSONAL_PATH_SCAN_REGEX}"
 fi
 
-print_section "5) .env.example 占位检查"
+print_section "6) .env.example 占位检查"
 check_env_example_api_keys
 
-print_section "6) 公开基线文件检查"
+print_section "7) 公开基线文件检查"
 check_required_public_files_tracked
 
-print_section "7) 公开文档引用检查"
+print_section "8) 公开文档引用检查"
 check_public_doc_local_references_tracked
 
 echo

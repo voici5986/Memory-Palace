@@ -60,9 +60,12 @@ backend/tests/benchmark/.real_profile_cache/
 scripts/save_note_*.py
 scripts/add_user_pref.py
 scripts/mcp_stdio_trace_wrapper.py
+.tmp_tracked_files.txt
 
 # Local-only docs and benchmark notes
 PUSH_CHECKLIST.md
+code_review_report.md
+security_best_practices_report.md
 docs/improvement/
 docs/evaluation_old_vs_new_*.md
 docs/changelog/current_code_improvements_vs_legacy_docs.md

@@ -23,6 +23,7 @@ def test_pre_publish_check_uses_cross_platform_python_scans_and_env_globs() -> N
     assert 'xargs -0 rg -l -n --no-messages' not in script_text
     assert "rg -n '^[A-Z0-9_]*API_KEY=.+$' .env.example" not in script_text
     assert '".pytest_cache"' in script_text
+    assert 'git ls-files --others --exclude-standard' in script_text
 
 
 def test_apply_profile_shell_accepts_crlf_windows_placeholder_lines() -> None:
@@ -115,3 +116,27 @@ def test_apply_profile_shell_accepts_linux_alias_and_maps_to_macos_profile(
     assert "<your-user>" not in database_url_line
     assert database_url_line.startswith("DATABASE_URL=sqlite+aiosqlite:////")
     assert database_url_line.endswith("demo.db")
+
+
+def test_repo_ignore_rules_cover_local_review_reports_and_local_scan_artifacts() -> None:
+    gitignore_text = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8")
+    dockerignore_text = (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+    assert "code_review_report.md" in gitignore_text
+    assert "security_best_practices_report.md" in gitignore_text
+    assert ".tmp_tracked_files.txt" in gitignore_text
+
+    for expected in (
+        ".codex/",
+        ".cursor/",
+        ".opencode/",
+        ".gemini/",
+        ".agent/",
+        ".mcp.json",
+        ".mcp.json.bak",
+        ".playwright-cli/",
+        ".tmp/",
+        ".pytest_cache/",
+        "frontend/dist/",
+    ):
+        assert expected in dockerignore_text
