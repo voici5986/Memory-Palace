@@ -111,6 +111,8 @@ def run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, tim
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
     )
 
@@ -124,6 +126,16 @@ def _bash_relative_path(path: Path, *, cwd: Path) -> str:
         return os.path.relpath(path, cwd).replace("\\", "/")
     except ValueError:
         return path.as_posix()
+
+
+def _cli_executable(name: str) -> str | None:
+    resolved = shutil.which(name)
+    if not resolved:
+        return None
+    normalized = resolved.replace("\\", "/").lower()
+    if os.name == "nt" and "/windowsapps/" in normalized:
+        return None
+    return resolved
 
 
 @dataclass
@@ -143,10 +155,14 @@ def run_command_capture(cmd: list[str], *, cwd: Path, input_text: str | None = N
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=(os.name != "nt"),
     )
     try:
         stdout, stderr = process.communicate(input=input_text, timeout=timeout)
+        stdout = stdout or ""
+        stderr = stderr or ""
         return CommandCapture(returncode=process.returncode, stdout=stdout, stderr=stderr, timed_out=False)
     except subprocess.TimeoutExpired:
         _terminate_process_tree(process)
@@ -158,6 +174,8 @@ def run_command_capture(cmd: list[str], *, cwd: Path, input_text: str | None = N
             else:  # pragma: no cover
                 process.kill()
             stdout, stderr = process.communicate()
+        stdout = stdout or ""
+        stderr = stderr or ""
         return CommandCapture(returncode=-9, stdout=stdout, stderr=stderr, timed_out=True)
 
 
@@ -196,6 +214,8 @@ def _run_command_capture_until_output_file(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=(os.name != "nt"),
     )
     pending_input = input_text
@@ -209,6 +229,8 @@ def _run_command_capture_until_output_file(
                 input=pending_input,
                 timeout=min(1.0, remaining),
             )
+            stdout = stdout or ""
+            stderr = stderr or ""
             return CommandCapture(
                 returncode=process.returncode,
                 stdout=stdout,
@@ -224,10 +246,12 @@ def _run_command_capture_until_output_file(
                         json.loads(payload)
                         _terminate_process_tree(process)
                         stdout, stderr = process.communicate(timeout=5)
+                        stdout = (exc.stdout or "") + (stdout or "")
+                        stderr = (exc.stderr or "") + (stderr or "")
                         return CommandCapture(
-                            returncode=process.returncode or 0,
-                            stdout=(exc.stdout or "") + stdout,
-                            stderr=(exc.stderr or "") + stderr,
+                            returncode=0,
+                            stdout=stdout,
+                            stderr=stderr,
                             timed_out=False,
                         )
                 except Exception:
@@ -241,6 +265,8 @@ def _run_command_capture_until_output_file(
         else:  # pragma: no cover
             process.kill()
         stdout, stderr = process.communicate()
+    stdout = stdout or ""
+    stderr = stderr or ""
     return CommandCapture(returncode=-9, stdout=stdout, stderr=stderr, timed_out=True)
 
 
@@ -261,8 +287,9 @@ def _gemini_capacity_error(text: str) -> bool:
 
 
 def run_gemini_prompt(prompt: str, *, timeout: int, model: str = GEMINI_TEST_MODEL) -> CommandCapture:
+    gemini_bin = _cli_executable("gemini") or "gemini"
     capture = run_command_capture(
-        ["gemini", "-m", model, "-p", prompt, "--output-format", "text"],
+        [gemini_bin, "-m", model, "-p", prompt, "--output-format", "text"],
         cwd=REPO_ROOT,
         timeout=timeout,
     )
@@ -270,7 +297,7 @@ def run_gemini_prompt(prompt: str, *, timeout: int, model: str = GEMINI_TEST_MOD
     merged = (capture.stdout + "\n" + capture.stderr).strip()
     if model == GEMINI_TEST_MODEL and _gemini_capacity_error(merged):
         fallback = run_command_capture(
-            ["gemini", "-m", GEMINI_FALLBACK_MODEL, "-p", prompt, "--output-format", "text"],
+            [gemini_bin, "-m", GEMINI_FALLBACK_MODEL, "-p", prompt, "--output-format", "text"],
             cwd=REPO_ROOT,
             timeout=timeout,
         )
@@ -848,10 +875,23 @@ def classify_skill_answer(text: str) -> tuple[bool, str]:
     return False, text[-1500:]
 
 
+def _coalesce_structured_text(payload: Any) -> str:
+    if isinstance(payload, dict):
+        parts = [str(value) for value in payload.values() if str(value).strip()]
+        if parts:
+            return "\n".join(parts)
+    if isinstance(payload, list):
+        parts = [str(item) for item in payload if str(item).strip()]
+        if parts:
+            return "\n".join(parts)
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def smoke_claude() -> CheckResult:
-    if shutil.which("claude") is None:
+    claude_bin = _cli_executable("claude")
+    if claude_bin is None:
         return CheckResult("SKIP", "claude CLI 未安装")
-    proc = run_command_capture(["claude", "-p"], cwd=REPO_ROOT, input_text=PROMPT, timeout=90)
+    proc = run_command_capture([claude_bin, "-p"], cwd=REPO_ROOT, input_text=PROMPT, timeout=90)
     if proc.timed_out:
         return CheckResult("FAIL", "Claude smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
     success, details = classify_skill_answer(proc.stdout)
@@ -861,7 +901,8 @@ def smoke_claude() -> CheckResult:
 
 
 def smoke_codex() -> CheckResult:
-    if shutil.which("codex") is None:
+    codex_bin = _cli_executable("codex")
+    if codex_bin is None:
         return CheckResult("SKIP", "codex CLI 未安装")
     with tempfile.TemporaryDirectory(prefix="memory-palace-codex-") as tmpdir:
         tmp = Path(tmpdir)
@@ -880,10 +921,8 @@ def smoke_codex() -> CheckResult:
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
         proc = _run_command_capture_until_output_file(
             [
-                "codex",
+                codex_bin,
                 "exec",
-                "-c",
-                "mcp_servers.playwright.startup_timeout_sec=45",
                 "--ephemeral",
                 "--color",
                 "never",
@@ -904,7 +943,7 @@ def smoke_codex() -> CheckResult:
         if proc.returncode != 0 or not output_path.is_file():
             if proc.timed_out and output_path.is_file():
                 data = json.loads(output_path.read_text(encoding="utf-8"))
-                joined = json.dumps(data, ensure_ascii=False)
+                joined = _coalesce_structured_text(data)
                 success, details = classify_skill_answer(joined)
                 if success:
                     return CheckResult("PASS", "Codex smoke 通过（结果已落盘，CLI 进程超时退出）", joined)
@@ -913,7 +952,7 @@ def smoke_codex() -> CheckResult:
                 return CheckResult("FAIL", "Codex smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
             return CheckResult("FAIL", "Codex smoke 未通过", (proc.stdout + "\n" + proc.stderr).strip())
         data = json.loads(output_path.read_text(encoding="utf-8"))
-        joined = json.dumps(data, ensure_ascii=False)
+        joined = _coalesce_structured_text(data)
         success, details = classify_skill_answer(joined)
         if success:
             return CheckResult("PASS", "Codex smoke 通过", joined)
@@ -921,11 +960,12 @@ def smoke_codex() -> CheckResult:
 
 
 def smoke_opencode() -> CheckResult:
-    if shutil.which("opencode") is None:
+    opencode_bin = _cli_executable("opencode")
+    if opencode_bin is None:
         return CheckResult("SKIP", "opencode CLI 未安装")
     proc = run_command_capture(
         [
-            "opencode",
+            opencode_bin,
             "run",
             "--dir",
             str(REPO_ROOT),
@@ -948,9 +988,10 @@ def smoke_opencode() -> CheckResult:
 
 
 def smoke_gemini() -> CheckResult:
-    if shutil.which("gemini") is None:
+    gemini_bin = _cli_executable("gemini")
+    if gemini_bin is None:
         return CheckResult("SKIP", "gemini CLI 未安装")
-    discovery = run_command_capture(["gemini", "skills", "list", "--all"], cwd=REPO_ROOT, timeout=90)
+    discovery = run_command_capture([gemini_bin, "skills", "list", "--all"], cwd=REPO_ROOT, timeout=90)
     if discovery.timed_out:
         return CheckResult("FAIL", "Gemini skills list 超时")
     discovery_text = (discovery.stdout + "\n" + discovery.stderr).strip()
@@ -975,7 +1016,7 @@ def smoke_gemini() -> CheckResult:
 def smoke_gemini_live_suite() -> CheckResult:
     if SKIP_GEMINI_LIVE:
         return CheckResult("SKIP", "Gemini live suite 被环境变量跳过")
-    if shutil.which("gemini") is None:
+    if _cli_executable("gemini") is None:
         return CheckResult("SKIP", "gemini CLI 未安装")
     db_path = _extract_gemini_memory_palace_db_path()
     if db_path is None:

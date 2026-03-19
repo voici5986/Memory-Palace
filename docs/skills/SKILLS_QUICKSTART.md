@@ -62,7 +62,7 @@
 
 > 当前公开口径：
 >
-> - `Claude / Codex / Gemini` 的 **smoke** 已有结果
+> - `Claude / Codex / Gemini` 的 **smoke** 在最近一次验证环境里都已有通过结果；其中 `Codex` 默认前提是先补好 `user-scope --with-mcp`
 > - `OpenCode` 当前更准确的说法是：repo-local skill 已就位，`mcp list` 可以确认 `memory-palace` 已连接；真实 `run` 仍取决于当前 provider 凭证
 > - `Gemini live` 还没到可以写成“完全通过”的程度；当前更准确的说法是：如果 Gemini 配置无法反推出数据库路径，它会停在 `PARTIAL`
 > - `Cursor / Windsurf / VSCode-host / Antigravity` 现在统一归到 **IDE Hosts**；它们的主路径是 `AGENTS.md + MCP snippet`，不是 hidden skill mirrors
@@ -131,7 +131,7 @@
 - 默认推荐先跑一遍统一的 `--scope user --with-mcp`
 - `Claude Code`、`Gemini CLI` 如果还想补当前仓库项目级入口，再额外执行 workspace 安装
 - `Codex CLI` 和 `OpenCode` 的 **skill** 已经就位
-- 最近验证环境里的 `Codex` MCP 已经修正完成
+- 最近验证环境里，补完 `--scope user --with-mcp` 之后，`Codex` 的 `mcp_bindings` 和 `Codex smoke` 都能通过
 - `OpenCode` 建议先手动确认一次 `mcp list`
 
 如果你接的是 IDE 宿主，请不要继续按 hidden skill mirrors 的心智往下读，直接切到：
@@ -270,6 +270,17 @@ python scripts/install_skill.py --targets codex --scope user --with-mcp --force
 
 ```bash
 codex mcp list
+```
+
+如果 `python scripts/evaluate_memory_palace_skill.py` 里还是报：
+
+- `mcp_bindings` 失败
+- 或 `Codex smoke` 失败
+
+先不要直接怀疑 skill 本身。更常见的情况是你机器上的 `~/.codex/config.toml` 还残留旧条目，或者没先补 `user-scope MCP`。优先重跑：
+
+```bash
+python scripts/install_skill.py --targets codex --scope user --with-mcp --force
 ```
 
 如果脚本检查仍失败，或者你就是要手工排障，再用：
@@ -427,6 +438,12 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 补一句体验口径：`evaluate_memory_palace_skill.py` 会串行调多个 CLI，完整跑完往往要几分钟；如果你机器上这几种客户端都装了，看到它跑一阵子没新输出，先别急着判定为卡死。
 再补一句副作用口径：这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+如果这条报告里只有 `mcp_bindings` 失败，优先先重跑一次统一的 `user-scope` 安装，再重新执行 smoke：
+
+```bash
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
+python scripts/evaluate_memory_palace_skill.py
+```
 
 对 `MCP_LIVE_E2E_REPORT.md` 也要保持同样的分享意识：它默认使用隔离临时库，不会碰你的正式库，但失败时仍可能带上本地日志、stderr 或临时目录痕迹。准备转发给别人前，先自己看一遍内容。
 

@@ -44,7 +44,7 @@ function Test-PortInUse {
     $getNetTcpConnection = Get-Command -Name 'Get-NetTCPConnection' -ErrorAction SilentlyContinue
     if ($getNetTcpConnection) {
         try {
-            $listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
+            $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
             return ($listeners.Count -gt 0)
         }
         catch {

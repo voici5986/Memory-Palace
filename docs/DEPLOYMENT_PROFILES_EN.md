@@ -409,7 +409,7 @@ bash scripts/apply_profile.sh macos b
 
 ```bash
 cd <project-root>/backend
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 # If you also plan to run backend tests afterwards

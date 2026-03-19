@@ -233,6 +233,7 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
+- 最近一次验证环境里，补完 `--scope user --with-mcp` 之后，`Codex` 的 `mcp_bindings` 和 `Codex smoke` 都能通过
 
 ### OpenCode
 
@@ -323,6 +324,12 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
 如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。
 另外，这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+如果你看到的失败项只剩 `mcp_bindings`，先不要急着怀疑仓库本身。更常见的情况是你机器上的 user-scope MCP 条目还没同步到当前 checkout；优先先重跑：
+
+```bash
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
+python scripts/evaluate_memory_palace_skill.py
+```
 
 ### 真实 MCP e2e
 

@@ -44,6 +44,8 @@
 
 > 如果你在本地调试时设置了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，并且请求是直连 loopback 地址，页面也可以不手动输入密钥就直接显示受保护数据。
 
+> **只保存 Dashboard 密钥** 会把这把 key 保存在当前浏览器里，直到你手动清除。向导里的 `Profile C/D` 预设现在按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式。
+
 > 向导里的 `.env` 写入能力只在“本地 checkout + 非 Docker 运行”时开放；如果当前页面连的是 Docker 容器，它会明确停留在说明模式，不会假装已经持久化容器 env / 代理配置。
 
 > 如果你 fresh first-run 打开时先看到英文弹窗，也不用慌。向导右上角自己就有语言切换按钮，可以直接切到中文。

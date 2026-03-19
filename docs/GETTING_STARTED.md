@@ -12,13 +12,13 @@
 
 | 依赖 | 最低版本 | 检查命令 |
 |---|---|---|
-| Python | `3.10+` | `python3 --version` |
+| Python | `3.10+` | `python --version` |
 | Node.js | `20.19+`（或 `>=22.12`） | `node --version` |
 | npm | `9+` | `npm --version` |
 | Docker（可选） | `20+` | `docker --version` |
 | Docker Compose（可选） | `2.0+` | `docker compose version` |
 
-> **提示**：macOS 用户推荐使用 [Homebrew](https://brew.sh) 安装 Python 和 Node.js。Windows 用户推荐从官网下载安装包或使用 [Scoop](https://scoop.sh)。
+> **提示**：macOS 用户推荐使用 [Homebrew](https://brew.sh) 安装 Python 和 Node.js。Windows 用户推荐从官网下载安装包或使用 [Scoop](https://scoop.sh)。如果你机器上的 Python 命令名是 `python3` 而不是 `python`，把下面命令里的 `python` 换成 `python3` 即可。
 
 ---
 
@@ -162,7 +162,7 @@ bash scripts/apply_profile.sh macos b
 
 ```bash
 cd backend
-python3 -m venv .venv
+python -m venv .venv
 
 # macOS / Linux
 source .venv/bin/activate
@@ -221,6 +221,8 @@ VITE v7.x.x  ready in xxx ms
 
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
+
+> 如果你选择“只保存 Dashboard 密钥”，这把 key 会一直保留在当前浏览器里，直到你手动清除。向导里的 `Profile C/D` 预设现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
 
 > 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要你改的是 embedding / reranker / write_guard / intent 这类后端运行参数，保存后仍然需要重启 `backend` / `sse`（Docker 路径则继续建议用 profile 脚本重启容器）。
 
@@ -379,6 +381,8 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 ```
 
 > 备份文件默认写入 `backups/`。如果你准备分享仓库或打包交付，通常不需要把它一并带上。
+>
+> 这两条备份脚本都会先读取你指定 env 文件里的 `DATABASE_URL`，自动去掉可选的 query / fragment（例如 `?mode=...`、`#...`），再对实际 SQLite 文件做一致性备份。原生 Windows 优先用 `backup_memory.ps1`；`Git Bash` / `WSL` 继续用 `backup_memory.sh` 即可。
 
 ### 4.4 哪些文件通常不需要提交
 

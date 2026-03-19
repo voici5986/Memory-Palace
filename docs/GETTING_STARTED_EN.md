@@ -12,13 +12,13 @@ This guide helps you set up the Memory Palace local development environment or D
 
 | Dependency | Minimum Version | Check Command |
 |---|---|---|
-| Python | `3.10+` | `python3 --version` |
+| Python | `3.10+` | `python --version` |
 | Node.js | `20.19+` (or `>=22.12`) | `node --version` |
 | npm | `9+` | `npm --version` |
 | Docker (Optional) | `20+` | `docker --version` |
 | Docker Compose (Optional) | `2.0+` | `docker compose version` |
 
-> **Tip**: macOS users are recommended to use [Homebrew](https://brew.sh) to install Python and Node.js. Windows users should download installers from official sites or use [Scoop](https://scoop.sh).
+> **Tip**: macOS users are recommended to use [Homebrew](https://brew.sh) to install Python and Node.js. Windows users should download installers from official sites or use [Scoop](https://scoop.sh). If your machine exposes Python as `python3` instead of `python`, replace `python` with `python3` in the commands below.
 
 ---
 
@@ -163,7 +163,7 @@ The following are the most commonly used configuration items in `.env` (for more
 
 ```bash
 cd backend
-python3 -m venv .venv
+python -m venv .venv
 
 # macOS / Linux
 source .venv/bin/activate
@@ -222,6 +222,8 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 
 > If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key in the assistant. If you only want the Dashboard to authenticate first, prefer the browser-only save path.
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
+
+> If you choose **Save dashboard key only**, that key stays in the current browser until you clear it manually. The assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
 
 > The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
@@ -380,6 +382,8 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 ```
 
 > Backup files are written to `backups/` by default. If you are preparing to share the repository or package it for delivery, you usually don't need to include them.
+>
+> Both backup scripts read `DATABASE_URL` from the selected env file, strip optional query / fragment suffixes such as `?mode=...` or `#...`, and then back up the resolved SQLite file. On native Windows, prefer `backup_memory.ps1`; on `Git Bash` / `WSL`, `backup_memory.sh` is fine.
 
 ### 4.4 Files Typically Not Needed for Submission
 

@@ -30,6 +30,29 @@ esac
 base_env="${PROJECT_ROOT}/.env.example"
 override_env="${PROJECT_ROOT}/deploy/profiles/${platform}/profile-${profile}.env"
 
+normalize_cli_path() {
+  local raw_path="${1:-}"
+  if [[ -z "${raw_path}" ]]; then
+    printf '%s\n' "${raw_path}"
+    return 0
+  fi
+
+  if [[ "${raw_path}" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "${raw_path}"
+      return 0
+    fi
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "${raw_path}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "${raw_path//\\//}"
+}
+
+target_file="$(normalize_cli_path "${target_file}")"
+
 set_env_value() {
   local file_path="$1"
   local key="$2"

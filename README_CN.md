@@ -385,7 +385,7 @@ bash scripts/apply_profile.sh macos b
 cd backend
 
 # 创建并激活虚拟环境
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate        # Windows PowerShell：.\.venv\Scripts\Activate.ps1
 
 # 安装依赖
@@ -407,6 +407,8 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 > 上面这条 `uvicorn main:app --host 127.0.0.1 ...` 是推荐的**本机开发**写法。
+>
+> 如果你机器上的 Python 命令名是 `python3` 而不是 `python`，把上面命令里的 `python` 换成 `python3` 即可。
 >
 > 如果你改为直接运行 `python main.py`，当前默认也是绑定 `127.0.0.1:8000`，不会自动放开到 `0.0.0.0`。只有在你明确需要远程访问时，才手动改成 `0.0.0.0`（或你的实际绑定地址），并补齐 `MCP_API_KEY`、防火墙、反向代理或其他网络侧保护。
 
@@ -453,6 +455,8 @@ curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.t
 > 如果本地手动启动后右上角出现 `Set API key`，这是正常现象。说明前端页面已经起来了，但受保护的数据请求（`/browse/*`、`/review/*`、`/maintenance/*`）仍然遵循 `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL` 的鉴权规则。独立的 MCP SSE 端点（`/sse`、`/messages`）也遵循同一规则。
 >
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key` 打开首启向导；你可以只把同一把 key 保存到当前浏览器，也可以在“本地 checkout + 非 Docker 运行”的场景下，把常见运行参数一起写进 `.env`。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求。
+>
+> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会一直保留在当前浏览器里，直到你手动清除。向导里的 `Profile C/D` 预设现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
 >
 > 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要涉及 embedding / reranker / write_guard / intent 这类后端侧参数，保存之后仍然需要按实际部署方式重启对应服务。
 

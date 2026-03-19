@@ -387,7 +387,7 @@ For the **docker** platform only, `apply_profile` auto-generates a local `MCP_AP
 cd backend
 
 # Create and activate virtual environment
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate        # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
@@ -409,6 +409,8 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 > The `uvicorn main:app --host 127.0.0.1 ...` command above is the recommended **local development** form.
+>
+> If your machine exposes Python as `python3` instead of `python`, replace `python` with `python3` in the commands above.
 >
 > If you instead run `python main.py`, the current default is still loopback: `127.0.0.1:8000`. If you actually want LAN / remote direct access, bind it explicitly with `uvicorn main:app --host 0.0.0.0 --port 8000` (or your own listening address) and only do that after your `MCP_API_KEY`, firewall rules, reverse proxy, and equivalent network protections are already in place.
 
@@ -455,6 +457,8 @@ Open your browser at **<http://localhost:5173>** — you should see the Memory P
 > If local manual setup shows `Set API key` in the top-right corner, that is expected. The dashboard shell is up, but protected data requests (`/browse/*`, `/review/*`, `/maintenance/*`) still follow `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL`. The separate MCP SSE endpoints (`/sse` and `/messages`) follow the same rule.
 >
 > If you set `MCP_API_KEY`, click `Set API key` to open the setup assistant, then either save the same key to the current browser or, on a local non-Docker checkout, write it into `.env` together with the other common runtime fields. If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct loopback requests (`127.0.0.1` / `::1` / `localhost`, without forwarded headers) can load those protected requests without manually entering a key.
+>
+> If you choose **Save dashboard key only**, that key stays in the current browser until you clear it manually. The setup assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
 >
 > The setup assistant stays in guidance mode when the frontend is talking to Docker containers. It does not pretend that container env / proxy changes can be persisted or hot-reloaded from the browser.
 

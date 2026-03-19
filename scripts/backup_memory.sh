@@ -66,7 +66,19 @@ fi
 resolve_python_bin() {
   local candidate=""
   local resolved=""
-  for candidate in python python3 py; do
+  local explicit_candidates=(
+    "${PROJECT_ROOT}/backend/.venv/Scripts/python.exe"
+    "${PROJECT_ROOT}/backend/.venv/bin/python"
+  )
+
+  for resolved in "${explicit_candidates[@]}"; do
+    if [[ -n "${resolved}" && -x "${resolved}" ]]; then
+      printf '%s\n' "${resolved}"
+      return 0
+    fi
+  done
+
+  for candidate in python.exe python3 python py; do
     resolved="$(command -v "${candidate}" || true)"
     if [[ -z "${resolved}" ]]; then
       continue
@@ -92,10 +104,13 @@ export MEMORY_PALACE_BACKUP_OUTPUT_DIR="${OUTPUT_DIR}"
 
 "${PYTHON_BIN}" - <<'PY'
 import os
+import re
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from shutil import which
 from urllib.parse import unquote
 
 
@@ -127,6 +142,35 @@ def read_database_url(env_path: Path) -> str:
     fail(f"DATABASE_URL is missing in {env_path}")
 
 
+def resolve_windows_host_path(raw_path: str) -> Path:
+    normalized = raw_path.replace("\\", "/")
+    if os.name == "nt":
+        return Path(normalized)
+
+    for tool in ("wslpath", "cygpath"):
+        if not which(tool):
+            continue
+        try:
+            converted = subprocess.check_output(
+                [tool, "-u", normalized],
+                text=True,
+            ).strip()
+        except Exception:
+            continue
+        if converted:
+            return Path(converted)
+
+    drive = normalized[0].lower()
+    tail = normalized[2:].lstrip("/")
+    fallback = Path(f"/mnt/{drive}") / tail
+    if fallback.exists():
+        return fallback
+    alt = Path(f"/{drive}") / tail
+    if alt.exists():
+        return alt
+    return fallback
+
+
 def resolve_sqlite_path(project_root: Path, database_url: str) -> Path:
     prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
     prefix = next((item for item in prefixes if database_url.startswith(item)), None)
@@ -137,6 +181,8 @@ def resolve_sqlite_path(project_root: Path, database_url: str) -> Path:
     raw_path = unquote(raw_path)
     if not raw_path:
         fail("DATABASE_URL does not contain a valid sqlite file path")
+    if re.match(r"^[A-Za-z]:[/\\]", raw_path):
+        return resolve_windows_host_path(raw_path)
     sqlite_path = Path(raw_path)
     if not sqlite_path.is_absolute():
         sqlite_path = project_root / sqlite_path

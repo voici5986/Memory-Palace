@@ -157,9 +157,36 @@ def test_check_gate_syntax_validates_first_existing_post_check_script(
     result = evaluate_memory_palace_skill.check_gate_syntax()
 
     assert result.status == "PASS"
-    assert captured["cmd"] == ["bash", "-n", str(gate_script)]
+    assert captured["cmd"] == [
+        "bash",
+        "-n",
+        evaluate_memory_palace_skill._bash_relative_path(gate_script, cwd=tmp_path),
+    ]
     assert captured["cwd"] == tmp_path
     assert captured["timeout"] == 30
+
+
+def test_terminate_process_tree_uses_taskkill_on_windows(monkeypatch) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+
+    class _FakeProcess:
+        pid = 123
+
+        def poll(self):
+            return None
+
+    taskkill_calls: list[list[str]] = []
+
+    monkeypatch.setattr(evaluate_memory_palace_skill.os, "name", "nt")
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill.subprocess,
+        "run",
+        lambda cmd, **kwargs: taskkill_calls.append(cmd),
+    )
+
+    evaluate_memory_palace_skill._terminate_process_tree(_FakeProcess())
+
+    assert taskkill_calls == [["taskkill", "/PID", "123", "/T", "/F"]]
 
 
 def test_classify_skill_answer_accepts_repo_visible_trigger_sample_path() -> None:
@@ -182,8 +209,10 @@ def test_smoke_codex_accepts_output_file_when_cli_times_out(
 
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/codex")
 
+    seen_cmd: list[str] = []
+
     def _fake_runner(cmd, *, cwd, output_path, input_text=None, timeout=120):
-        _ = cmd
+        seen_cmd[:] = cmd
         _ = cwd
         _ = input_text
         _ = timeout
@@ -215,6 +244,23 @@ def test_smoke_codex_accepts_output_file_when_cli_times_out(
 
     assert result.status == "PASS"
     assert result.summary == "Codex smoke 通过"
+    assert "mcp_servers.playwright.startup_timeout_sec=45" not in seen_cmd
+
+
+def test_coalesce_structured_text_prefers_joined_field_values() -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+
+    payload = {
+        "first_move": 'read_memory("system://boot")',
+        "noop_handling": "stop and inspect guard_target_uri / guard_target_id",
+        "trigger_samples_path": "docs/skills/memory-palace/references/trigger-samples.md",
+    }
+
+    combined = evaluate_memory_palace_skill._coalesce_structured_text(payload)
+
+    assert 'read_memory("system://boot")' in combined
+    assert "guard_target_uri / guard_target_id" in combined
+    assert "docs/skills/memory-palace/references/trigger-samples.md" in combined
 
 
 def test_run_gemini_prompt_falls_back_to_flash_preview_on_429(monkeypatch) -> None:

@@ -44,6 +44,8 @@ If the Dashboard shell opens but protected data does not load, the usual fix is:
 
 > If you set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local development, protected data can load automatically without entering a key, as long as the request is a direct loopback request.
 
+> **Save dashboard key only** stores the Dashboard key in the current browser until you clear it manually. The assistant's `Profile C/D` presets follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode.
+
 > The `.env` write path is only enabled when the app is running directly against a non-Docker local checkout. If the page is talking to Docker containers, the assistant stays in guidance mode instead of pretending it can persist container env / proxy changes.
 
 > If you hit the assistant first and it opens in English, that is still fine on fresh first-run: the assistant has its own language toggle in the upper right corner.

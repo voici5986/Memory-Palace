@@ -115,11 +115,11 @@ const en = {
     retrieval: {
       title: 'Retrieval profile',
       description:
-        'Choose a safe starting profile first, then fill only the fields your current local setup really needs. When your router is not ready locally, prefer direct API mode.',
+        'Choose a safe starting profile first, then fill only the fields your current local setup really needs. Profile C/D presets follow the documented router + reranker path; if your local router is not ready yet, switch to direct API mode manually for debugging.',
       presets: {
         b: 'Profile B · hash only',
-        c: 'Profile C · embedding API',
-        d: 'Profile D · embedding + reranker API',
+        c: 'Profile C · router + reranker (local/private)',
+        d: 'Profile D · router + reranker (remote)',
       },
       embeddingBackendLabel: 'Embedding backend',
       embeddingBackendHint:
@@ -201,7 +201,7 @@ const en = {
       intent: 'Intent LLM',
       restartHint: 'Restart required for full effect: {{targets}}.',
       browserOnlyHint:
-        'Saving the dashboard key to the browser only affects this browser session and does not rewrite backend runtime settings.',
+        'Saving the dashboard key to the browser keeps it in this browser until you clear it, and does not rewrite backend runtime settings.',
     },
     actions: {
       nextTitle: 'Apply changes',
@@ -215,7 +215,7 @@ const en = {
     messages: {
       statusUnavailable: 'Unable to load setup status.',
       browserOnlyRequiresKey: 'Enter an MCP API key before saving browser-only auth.',
-      browserOnlySaved: 'Dashboard key saved to this browser.',
+      browserOnlySaved: 'Dashboard key saved in this browser until cleared.',
       serverSaved: 'Saved local setup to {{target}}.',
       saveFailed: 'Failed to save setup.',
     },

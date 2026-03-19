@@ -115,11 +115,11 @@ const zhCN = {
     retrieval: {
       title: '检索配置',
       description:
-        '先选一个安全起步档位，再只填写当前本地环境真正需要的字段。如果本地 router 还没接好，优先用直连 API 模式。',
+        '先选一个安全起步档位，再只填写当前本地环境真正需要的字段。Profile C/D 预设默认走文档里的 router + reranker 路线；如果你本地 router 还没接好，再手动切到直连 API 模式排障。',
       presets: {
         b: 'Profile B · 仅 hash',
-        c: 'Profile C · embedding API',
-        d: 'Profile D · embedding + reranker API',
+        c: 'Profile C · router + reranker（本地/私有）',
+        d: 'Profile D · router + reranker（远程）',
       },
       embeddingBackendLabel: 'Embedding 后端',
       embeddingBackendHint:
@@ -201,7 +201,7 @@ const zhCN = {
       intent: '意图 LLM',
       restartHint: '完全生效前需要重启：{{targets}}。',
       browserOnlyHint:
-        '只保存浏览器密钥时，只会影响当前浏览器的 Dashboard 请求，不会改写后端运行参数。',
+        '只保存浏览器密钥时，会把 Dashboard 密钥保存在当前浏览器里，直到你手动清除；不会改写后端运行参数。',
     },
     actions: {
       nextTitle: '应用改动',
@@ -215,7 +215,7 @@ const zhCN = {
     messages: {
       statusUnavailable: '加载 setup 状态失败。',
       browserOnlyRequiresKey: '请先输入 MCP API 密钥，再执行仅浏览器保存。',
-      browserOnlySaved: 'Dashboard 密钥已保存到当前浏览器。',
+      browserOnlySaved: 'Dashboard 密钥已保存到当前浏览器，除非你手动清除。',
       serverSaved: '本地配置已写入 {{target}}。',
       saveFailed: '保存配置失败。',
     },

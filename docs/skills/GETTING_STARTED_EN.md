@@ -246,6 +246,7 @@ Conclusion:
 - The accurate statement is:
   - Skill is repo-local auto-discoverable
   - MCP still primarily relies on user-scope registration
+- In the most recent validation environment, after running `python scripts/install_skill.py --targets codex --scope user --with-mcp --force`, both `mcp_bindings` and `Codex smoke` passed
 
 ### OpenCode
 
@@ -300,6 +301,12 @@ If you are in a newly cloned GitHub repository, this file may not exist by defau
 
 This check sequentially calls multiple CLIs; if you have `claude`, `codex`, `opencode`, and `gemini` installed, it usually takes a few minutes to complete. Don't assume it's "hung" if there's no output for dozens of seconds.
 Additionally, it defaults to attempting `gemini_live`: if the current Gemini configuration can resolve a real database path, it will perform a round of `create/update/guard` verification on that database and may leave test memories like `notes://gemini_suite_*`. If you only want a normal smoke test, explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
+If the report only shows `mcp_bindings` as failed, first rerun the unified `user-scope` install and then rerun smoke:
+
+```bash
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
+python scripts/evaluate_memory_palace_skill.py
+```
 
 ### Real MCP Call Chain
 

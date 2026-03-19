@@ -205,13 +205,13 @@ export default function SetupAssistantModal({
       if (preset === 'c') {
         return {
           ...current,
-          embedding_backend: 'api',
-          reranker_enabled: false,
+          embedding_backend: 'router',
+          reranker_enabled: true,
         };
       }
       return {
         ...current,
-        embedding_backend: 'api',
+        embedding_backend: 'router',
         reranker_enabled: true,
       };
     });

@@ -60,6 +60,10 @@ def test_gate_syntax_passes_when_parent_workspace_post_check_script_exists(
     result = harness.check_gate_syntax()
 
     assert result.status == "PASS"
-    assert captured["cmd"] == ["bash", "-n", str(gate_script)]
+    assert captured["cmd"] == [
+        "bash",
+        "-n",
+        harness._bash_relative_path(gate_script, cwd=repo_root),
+    ]
     assert captured["cwd"] == repo_root
     assert captured["timeout"] == 30

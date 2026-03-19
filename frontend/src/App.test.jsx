@@ -121,6 +121,28 @@ describe('App routing', () => {
     expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
   });
 
+  it('keeps browser-only dashboard auth across remounts until it is cleared', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+
+    const firstRender = render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'stored-key'
+    );
+    await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
+
+    expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
+
+    firstRender.unmount();
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
+  });
+
   it('shows an error instead of crashing when browser storage rejects the API key write', async () => {
     const user = userEvent.setup();
     const originalStorage = window.localStorage;
@@ -263,6 +285,37 @@ describe('App routing', () => {
 
     const translatedDialog = await screen.findByRole('dialog', { name: '配置 Memory Palace' });
     expect(within(translatedDialog).getByDisplayValue('typed-key-123')).toBeInTheDocument();
+  });
+
+  it('maps setup profile presets to the documented B/C/D retrieval shapes', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const embeddingBackend = within(dialog).getByRole('combobox');
+    const rerankerToggle = within(dialog).getByRole('checkbox', {
+      name: new RegExp(`^${i18n.t('setup.retrieval.rerankerEnabledLabel')}`),
+    });
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.b') }));
+    expect(embeddingBackend).toHaveValue('hash');
+    expect(rerankerToggle).not.toBeChecked();
+    expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+    expect(embeddingBackend).toHaveValue('router');
+    expect(rerankerToggle).toBeChecked();
+    expect(within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).toBeInTheDocument();
+    expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.embeddingApiBasePlaceholder'))).not.toBeInTheDocument();
+    expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.rerankerApiBasePlaceholder'))).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.d') }));
+    expect(embeddingBackend).toHaveValue('router');
+    expect(rerankerToggle).toBeChecked();
+    expect(within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).toBeInTheDocument();
   });
 
   it('does not embed the raw api key in the routes key', () => {

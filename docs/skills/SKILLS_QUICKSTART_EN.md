@@ -62,7 +62,7 @@ In a nutshell:
 
 > Current status:
 >
-> - **Smoke tests** for `Claude / Codex / Gemini` have results.
+> - **Smoke tests** for `Claude / Codex / Gemini` all have passing results in the recent validation environment; for `Codex`, the default assumption is that `user-scope --with-mcp` has already been installed.
 > - For `OpenCode`, the more accurate public wording is: the repo-local skill is in place, and `mcp list` can confirm that `memory-palace` is connected; a real `run` still depends on the current provider credentials.
 > - `Gemini live` is not yet at a stage to be described as "fully passing"; more accurately: if the Gemini configuration cannot resolve the database path, it stops at `PARTIAL`.
 > - `Cursor / Windsurf / VSCode-host / Antigravity` are now grouped as **IDE Hosts**; their primary path is `AGENTS.md + MCP snippet`, not hidden skill mirrors.
@@ -131,7 +131,7 @@ So:
 - The default recommendation is to run one unified `--scope user --with-mcp` install first.
 - For `Claude Code` and `Gemini CLI`, add workspace install only when you also want project-level entries in the current repo.
 - The **skill** for `Codex CLI` and `OpenCode` is already in place.
-- The `Codex` MCP in the recent validation environment has been corrected.
+- In the recent validation environment, after `--scope user --with-mcp` was installed, both `mcp_bindings` and `Codex smoke` passed.
 - For `OpenCode`, it is recommended to manually confirm once with `mcp list`.
 
 If you are integrating an IDE host, do not keep reading with a hidden-mirror mental model. Jump directly to:
@@ -270,6 +270,17 @@ Then check:
 
 ```bash
 codex mcp list
+```
+
+If `python scripts/evaluate_memory_palace_skill.py` still reports:
+
+- `mcp_bindings` failed
+- or `Codex smoke` failed
+
+do not assume the skill itself is broken first. A more common cause is that `~/.codex/config.toml` still contains an old entry, or that `user-scope MCP` was never installed. First rerun:
+
+```bash
+python scripts/install_skill.py --targets codex --scope user --with-mcp --force
 ```
 
 If the scripted check still fails, or you are explicitly doing manual troubleshooting, then use:
@@ -427,6 +438,12 @@ It is recommended to treat these as review artifacts on your own machine rather 
 
 A note on the experience: `evaluate_memory_palace_skill.py` runs multiple CLIs serially; it often takes a few minutes to complete. If you see no new output for a while, don't immediately assume it's stuck.
 A note on side effects: This script also attempts `gemini_live` by default. If the current Gemini config can resolve the actual database path, it will perform a round of `create/update/guard` validation and may leave test memories like `notes://gemini_suite_*`. To only perform regular smoke tests, explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
+If the report only shows `mcp_bindings` as failed, rerun the unified `user-scope` install first and then rerun smoke:
+
+```bash
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
+python scripts/evaluate_memory_palace_skill.py
+```
 
 Maintain the same sharing awareness for `MCP_LIVE_E2E_REPORT.md`: it uses an isolated temporary database by default and won't touch your production database, but failures may still contain traces of local logs, stderr, or temporary directories. Check the content yourself before forwarding it to others.
 
