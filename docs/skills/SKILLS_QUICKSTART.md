@@ -62,7 +62,8 @@
 
 > 当前公开口径：
 >
-> - `Claude / Codex / OpenCode / Gemini` 的 **smoke** 已有结果
+> - `Claude / Codex / Gemini` 的 **smoke** 已有结果
+> - `OpenCode` 当前更准确的说法是：repo-local skill 已就位，`mcp list` 可以确认 `memory-palace` 已连接；真实 `run` 仍取决于当前 provider 凭证
 > - `Gemini live` 还没到可以写成“完全通过”的程度；当前更准确的说法是：如果 Gemini 配置无法反推出数据库路径，它会停在 `PARTIAL`
 > - `Cursor / Windsurf / VSCode-host / Antigravity` 现在统一归到 **IDE Hosts**；它们的主路径是 `AGENTS.md + MCP snippet`，不是 hidden skill mirrors
 >
@@ -173,7 +174,7 @@ claude mcp list
 
 如果你看到项目里有 `memory-palace`，基本就对了。
 
-这次真实验证里，`Claude Code` 已经能在非交互模式下直接创建测试记忆，不再卡在权限确认。
+这次真实验证里，`Claude Code` 已经能在非交互模式下直接完成真实 MCP 工具调用；如果你看到 `TOOL_OK`，说明这条链路已经通了。
 
 ---
 
@@ -300,7 +301,7 @@ codex mcp add memory-palace \
 
 - `.opencode/skills/memory-palace/`
 
-并且最近验证环境里的 smoke 已经通过，所以这条接法是可信的。
+并且最近验证环境里，至少已经确认到 repo-local skill 可见，`opencode mcp list` 也能看到 `memory-palace connected`。
 
 但如果你换一台新机器，更稳妥的默认顺序仍然是先跑：
 

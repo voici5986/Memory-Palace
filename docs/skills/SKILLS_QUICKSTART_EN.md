@@ -62,7 +62,8 @@ In a nutshell:
 
 > Current status:
 >
-> - **Smoke tests** for `Claude / Codex / OpenCode / Gemini` have results.
+> - **Smoke tests** for `Claude / Codex / Gemini` have results.
+> - For `OpenCode`, the more accurate public wording is: the repo-local skill is in place, and `mcp list` can confirm that `memory-palace` is connected; a real `run` still depends on the current provider credentials.
 > - `Gemini live` is not yet at a stage to be described as "fully passing"; more accurately: if the Gemini configuration cannot resolve the database path, it stops at `PARTIAL`.
 > - `Cursor / Windsurf / VSCode-host / Antigravity` are now grouped as **IDE Hosts**; their primary path is `AGENTS.md + MCP snippet`, not hidden skill mirrors.
 >
@@ -173,7 +174,7 @@ claude mcp list
 
 If you see `memory-palace` in the project, you're basically set.
 
-In this actual validation, `Claude Code` was already able to create test memories directly in non-interactive mode without getting stuck on permission confirmations.
+In this actual validation, `Claude Code` was already able to complete a real MCP tool call in non-interactive mode. If you get `TOOL_OK`, that path is working.
 
 ---
 
@@ -300,7 +301,7 @@ After you execute `sync/install`, `OpenCode` will usually have:
 
 - `.opencode/skills/memory-palace/`
 
-Since the smoke tests in the recent validation environment passed, this connection method is reliable.
+In the recent validation environment, this path was confirmed at least to the point where the repo-local skill was visible and `opencode mcp list` showed `memory-palace connected`.
 
 However, on a new machine, the safer default sequence is still to run:
 

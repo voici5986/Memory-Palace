@@ -8,7 +8,7 @@
 >
 > 这份长文档保留的定位是：**手工 repo-local 接通、逐步校验、以及更细的排障说明**。如果你只是想先跑通，优先看 `memory-palace-setup` 或 `SKILLS_QUICKSTART.md`。
 >
-> **先补一个边界说明**：当前仓库里的 repo-local MCP wrapper 是 `scripts/run_memory_palace_mcp_stdio.sh`，安装脚本生成的本地 MCP 启动命令也统一走 `bash` / `/bin/zsh`，并且默认依赖本地 `backend/.venv`。如果你是原生 Windows 环境，请先准备 **Git Bash** 或 **WSL**；不要把下面这些 shell 示例理解成“PowerShell 直接可用”。
+> **先补一个边界说明**：当前仓库里的 repo-local MCP 启动链路已经分成两条。原生 Windows 默认走 `backend/mcp_wrapper.py`；macOS / Linux / `Git Bash` / `WSL` 仍走 `scripts/run_memory_palace_mcp_stdio.sh`。它们都会优先复用当前仓库的本地 `.env` 和本地 `backend/.venv`。所以下面这些 shell 示例，默认更接近 POSIX 路径；如果你是原生 Windows，请优先用安装脚本生成的 MCP 配置，不要把这些 `bash` 示例硬当成“PowerShell 直接可用”。
 >
 > **再补一条很容易踩坑的边界**：这个 wrapper 只服务于“当前 checkout + 本地 `.env` + 本地 `backend/.venv`”这条 repo-local 路径，不会复用 Docker 容器里的 `/app/data`。如果仓库里只有 `.env.docker` 而没有本地 `.env`，它会明确拒绝回退到 `demo.db`；如果你把 `.env.docker` 里的 `DATABASE_URL` 原样抄进本地 `.env`，或者显式 `DATABASE_URL` 仍是 `/app/...` 这类容器路径，它也会直接拒绝启动，并提示你改成本机绝对路径或 Docker `/sse`。
 >

@@ -517,6 +517,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 也请把这个 Docker 前端端口当成可信操作员 / 管理入口。只要有人能直接访问 `http://<你的主机>:3000`，他就能使用 Dashboard 以及被代理的受保护接口，所以不要把这个端口当成“有 `MCP_API_KEY` 就等于终端用户鉴权”的公网入口；若要给受信范围之外的人访问，请先在前面加你自己的 VPN、反向代理鉴权或网络访问控制。
 >
+> Windows 复核说明（2026 年 3 月 19 日）：这条 repo-local `docker compose -f docker-compose.yml` 路径，已经在原生 Windows 上重新做过端到端验证。`http://127.0.0.1:3000/sse` 会返回 `HTTP 200`，并给出 `/messages/?session_id=...`；`Claude` 和 `Gemini` 也都已经通过这个前端代理 SSE 入口完成过真实的 `read_memory(system://boot)` 调用。
+>
 > 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
 > 当前 Docker 前端还会对 `/index.html` 返回 `Cache-Control: no-store, no-cache, must-revalidate`，尽量减少“前端已经更新，但浏览器还拿着旧入口页面”的情况。如果你刚升级完镜像仍看到明显旧页面，先确认容器已经是新版本，再手动刷新一次页面；只有在你额外接了自己的反向代理或 CDN 时，才需要继续检查这些中间层是否改写了缓存头。

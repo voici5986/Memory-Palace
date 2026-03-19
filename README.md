@@ -519,6 +519,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Treat that Docker frontend port as a trusted operator/admin surface. Anyone who can directly reach `http://<host>:3000` can use the Dashboard and its proxied protected routes, so do not expose this port to untrusted networks as if `MCP_API_KEY` were end-user auth. Add your own VPN, reverse-proxy auth, or network ACL in front of it.
 >
+> Windows check (March 19, 2026): this repo-local `docker compose -f docker-compose.yml` path was rechecked end to end on native Windows. `http://127.0.0.1:3000/sse` returned `HTTP 200`, exposed `/messages/?session_id=...`, and both `Claude` and `Gemini` completed a real `read_memory(system://boot)` call through that proxied SSE endpoint.
+>
 > The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
 > The Docker frontend also serves `/index.html` with `Cache-Control: no-store, no-cache, must-revalidate` to reduce the chance that a browser keeps an old entry page after a frontend update. If you still see an obviously old page after upgrading the image, first confirm the new container is actually running, then refresh the page once. Only continue checking cache behavior if you also put your own reverse proxy or CDN in front of it.

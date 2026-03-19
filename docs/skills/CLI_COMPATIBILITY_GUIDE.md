@@ -51,7 +51,9 @@
 所以判断“能不能直接用”，必须同时满足：
 
 - skill 能被当前 CLI 发现
-- MCP 确实指向当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`
+- MCP 确实指向当前仓库的 repo-local launcher
+  - 原生 Windows：`backend/mcp_wrapper.py`
+  - macOS / Linux / `Git Bash` / `WSL`：`scripts/run_memory_palace_mcp_stdio.sh`
 
 再补一句最容易踩坑的：
 
@@ -85,12 +87,13 @@ docs/skills/memory-palace/
 >
 > **Windows 前提说明**：
 >
-> - 当前 repo-local MCP wrapper 实际是 `scripts/run_memory_palace_mcp_stdio.sh`
-> - `install_skill.py` 为 Claude / Codex / Gemini / OpenCode 生成的本地 MCP 配置也都调用 `bash` 风格命令
-> - 所以原生 Windows 如果没有 **Git Bash** 或 **WSL**，不要直接照抄 `/bin/zsh` / `bash` 版本的示例
-> - 当前更稳妥的口径是：在 Git Bash / WSL 中接这条本地 stdio 链，或使用 Docker / `pwsh-in-docker` 做等效验证
+> - 当前 repo-local MCP 启动链路已经拆成两条
+> - 原生 Windows 默认走 `backend/mcp_wrapper.py`
+> - `install_skill.py` 现在会为 Claude / Codex / Gemini / OpenCode 在 Windows 上写入这条 native 路径
+> - `Git Bash` / `WSL` 仍然有用，但只是在你明确走 POSIX `bash` wrapper 时才是前提
+> - 所以原生 Windows 不要先照抄 `/bin/zsh` / `bash` 版本的示例；先看脚本实际生成的命令
 > - 如果你走 `pwsh-in-docker`，`docker_one_click.ps1` 当前会在 `Get-NetTCPConnection` 不可用时自动回退到 `ss`；如果目标环境两者都没有，请显式指定端口或回到目标 Windows 主机复验
-> - 这条 wrapper 还会优先复用当前仓库 `.env` 的 `DATABASE_URL`，避免你在客户端侧又另外接到第二份 SQLite 库
+> - 这些 repo-local launcher 都会优先复用当前仓库 `.env` 的 `DATABASE_URL`，避免你在客户端侧又另外接到第二份 SQLite 库
 
 ## install_skill.py 现在负责什么
 
@@ -252,7 +255,9 @@ python scripts/install_skill.py \
 统一口径：
 
 - **技能投影入口**：repo-root `AGENTS.md`
-- **执行入口**：本地 MCP 配置，指向当前仓库的 `scripts/run_memory_palace_mcp_stdio.sh`
+- **执行入口**：本地 MCP 配置，指向当前仓库的 repo-local launcher
+  - 原生 Windows 默认指向 `backend/mcp_wrapper.py`
+  - POSIX shell 路径默认指向 `scripts/run_memory_palace_mcp_stdio.sh`
 - **宿主差异**：只在必要时补一层兼容包装，而不是为每个 IDE 维护一整套 live smoke
 
 其中：
