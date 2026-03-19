@@ -66,7 +66,10 @@ def test_render_payload_with_python_wrapper_uses_mcp_wrapper_path(
 ) -> None:
     module = _load_module()
     project_root = tmp_path / "Memory-Palace"
-    venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    if module.os.name == "nt":
+        venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = project_root / "backend" / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("", encoding="utf-8")
 

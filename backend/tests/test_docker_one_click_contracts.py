@@ -136,6 +136,20 @@ def test_pull_based_ghcr_release_artifacts_exist() -> None:
     assert "ghcr.io/${{ github.repository_owner }}/memory-palace-${{ matrix.service }}" in workflow
 
 
+def test_docker_publish_workflow_uses_repo_backend_venv_for_validation() -> None:
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "python -m venv backend/.venv" in workflow
+    assert "backend/.venv/bin/python -m pip install --upgrade pip" in workflow
+    assert (
+        "backend/.venv/bin/python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt"
+        in workflow
+    )
+    assert "cd backend && .venv/bin/python -m pytest tests -q" in workflow
+
+
 def test_compose_volume_defaults_are_project_scoped() -> None:
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     ghcr_compose_text = (PROJECT_ROOT / "docker-compose.ghcr.yml").read_text(
