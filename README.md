@@ -70,6 +70,8 @@ If you want the AI to guide installation step by step, start with the standalone
 
 Every memory write passes through a strict pipeline: **Write Guard pre-check → Snapshot creation → Async index rebuild**. Core Write Guard actions are `ADD`, `UPDATE`, `NOOP`, and `DELETE`; `BYPASS` is an upper-layer marker for metadata-only update flows. Each step is logged and traceable.
 
+The same rule now applies to Dashboard tree writes as well: `POST /browse/node`, `PUT /browse/node`, and `DELETE /browse/node` also create Review snapshots before modifying data, so the Review page can see and roll them back under the current database scope.
+
 ### 🔍 Unified Retrieval Engine
 
 Three retrieval modes — `keyword`, `semantic`, and `hybrid` — with automatic degradation. When external embedding services are unavailable, the system gracefully falls back to keyword search and reports `degrade_reasons` when degradation occurs.
@@ -180,7 +182,7 @@ If you want a page-by-page walkthrough of the Dashboard, see [Dashboard User Gui
 
 1. **Write Guard** — Every `create_memory` / `update_memory` call first passes through the Write Guard (`sqlite_client.py`). In rule-based mode, the guard evaluates in this order: **semantic matching → keyword matching → optional LLM**, and outputs core actions `ADD`, `UPDATE`, `NOOP`, or `DELETE`; `BYPASS` is marked by upper-layer flow for metadata-only updates. When `WRITE_GUARD_LLM_ENABLED=true`, an optional LLM participates via an OpenAI-compatible chat API.
 
-2. **Snapshot** — Before any modification, the system creates a snapshot of the current memory state via `_snapshot_memory_content()` and `_snapshot_path_meta()` in `mcp_server.py`. This enables full diff comparison and one-click rollback in the Review dashboard.
+2. **Snapshot** — Before any modification, the system creates snapshots for the current memory state. The MCP tool path uses the snapshot helpers in `mcp_server.py`, and Dashboard `/browse/node` writes follow the same path/content snapshot semantics under a database-scoped dashboard session. This enables full diff comparison and one-click rollback in the Review dashboard.
 
 3. **Write Lane** — Writes enter a serialized queue (`runtime_state.py` → `WriteLanes`) with configurable concurrency (`RUNTIME_WRITE_GLOBAL_CONCURRENCY`). This prevents race conditions on the single SQLite file.
 
@@ -605,7 +607,9 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
 > If you use `docker_one_click.sh/.ps1` for `profile c/d`, unresolved placeholder model IDs are treated the same as placeholder endpoint/key values: the script stops before `docker compose` until you replace them with real values.
 >
-> If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, forwards explicit `RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*` and optional `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*` values, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and falls back to `ROUTER_RERANKER_MODEL` when `RETRIEVAL_RERANKER_MODEL` is still missing.
+> If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, forwards explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*`, and optional `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*` values, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and falls back to `ROUTER_RERANKER_MODEL` when `RETRIEVAL_RERANKER_MODEL` is still missing.
+>
+> For local Docker builds, the one-click path now also uses stable checkout-scoped image names. In practice this means `--no-build` can reuse images built earlier in the same checkout even if you change `COMPOSE_PROJECT_NAME`; the only time you still need `--build` is the first run or after deleting those local images.
 >
 > Advanced switch guidance:
 > - `INTENT_LLM_ENABLED`: experimental; keep `false` unless you are validating a stable chat model and want better intent classification on ambiguous queries

@@ -15,6 +15,7 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     for literal in (
         "ROUTER_CHAT_MODEL",
         "ROUTER_RERANKER_MODEL",
+        "RETRIEVAL_EMBEDDING_DIM",
         "RETRIEVAL_RERANKER_ENABLED",
         "INTENT_LLM_ENABLED",
         "INTENT_LLM_API_BASE",
@@ -126,6 +127,27 @@ def test_compose_waits_for_healthy_sse_service() -> None:
     assert "os.getenv('MCP_API_KEY')" in sse_block
     assert 'host.docker.internal:host-gateway' in sse_block
     assert "sse:\n        condition: service_healthy" in frontend_block
+
+
+def test_local_compose_uses_stable_image_names_for_no_build_reuse() -> None:
+    compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "image: ${MEMORY_PALACE_BACKEND_IMAGE:-memory-palace-backend:latest}" in compose_text
+    assert "image: ${MEMORY_PALACE_FRONTEND_IMAGE:-memory-palace-frontend:latest}" in compose_text
+    assert 'backend_image="${MEMORY_PALACE_BACKEND_IMAGE:-${local_image_namespace}-backend:latest}"' in shell_text
+    assert 'frontend_image="${MEMORY_PALACE_FRONTEND_IMAGE:-${local_image_namespace}-frontend:latest}"' in shell_text
+    assert 'export MEMORY_PALACE_BACKEND_IMAGE="${backend_image}"' in shell_text
+    assert 'export MEMORY_PALACE_FRONTEND_IMAGE="${frontend_image}"' in shell_text
+    assert "$backendImage = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_BACKEND_IMAGE')" in ps1_text
+    assert "$frontendImage = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_FRONTEND_IMAGE')" in ps1_text
+    assert '$env:MEMORY_PALACE_BACKEND_IMAGE = $backendImage' in ps1_text
+    assert '$env:MEMORY_PALACE_FRONTEND_IMAGE = $frontendImage' in ps1_text
 
 
 def test_pull_based_ghcr_release_artifacts_exist() -> None:

@@ -316,13 +316,15 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。
+> 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当前注入链路会一起带上显式的 `RETRIEVAL_EMBEDDING_*`（包括 `RETRIEVAL_EMBEDDING_DIM`）、`RETRIEVAL_RERANKER_*` 和可选的 `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。
 >
 > 但要注意：`--runtime-env-mode` / `--runtime-env-file` **不是** `docker_one_click.sh/.ps1` 的参数。如果你把这两个参数直接传给一键脚本，命令会报 `Unknown argument`。公开仓用户做 `profile c/d` 本地联调时，继续使用上面这条显式注入命令即可；如果你还要做更严格的发布复验，请回到你实际部署时会使用的 `.env` / router 配置，再单独跑那条验证路径。
 
 > `docker_one_click.sh/.ps1` 默认会为**每次运行**生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定文件，而不是固定共享 `.env.docker`。
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
+>
+> 当前本地 build 路径还会使用按 checkout 固定的本地镜像名。所以只要这个 checkout 里已经成功 build 过一次，即使你换了 `COMPOSE_PROJECT_NAME`，后续再跑 `--no-build` 也能继续复用这些镜像；只有第一次启动或你手动删掉本地镜像时，才需要重新 `--build`。
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
 >
@@ -341,7 +343,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 脚本会自动执行以下步骤：
 >
 > 1. 调用 Profile 脚本生成本次运行使用的 Docker env 文件（默认临时文件；若显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 则复用指定路径）
-> 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段
+> 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段，以及 `RETRIEVAL_EMBEDDING_DIM` 这类显式检索参数
 > 3. 检测端口占用并自动寻找可用端口
 > 4. 解析并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，Review snapshots `<compose-project>_snapshots`）；只有显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` 时才复用旧卷
 > 5. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖

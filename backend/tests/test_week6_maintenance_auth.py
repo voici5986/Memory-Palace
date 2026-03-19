@@ -73,6 +73,20 @@ def test_maintenance_auth_rejects_insecure_local_override_when_host_is_not_loopb
     assert detail.get("reason") == "insecure_local_override_requires_loopback"
 
 
+def test_maintenance_auth_allows_ipv6_loopback_host_header_for_insecure_local_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
+    with _build_client(monkeypatch, client=("::1", 50000)) as client:
+        response = client.post(
+            "/maintenance/vitality/decay",
+            headers={"Host": "[::1]:8000"},
+        )
+    assert response.status_code == 200
+    assert response.json().get("ok") is True
+
+
 @pytest.mark.parametrize(
     "forwarded_headers",
     [

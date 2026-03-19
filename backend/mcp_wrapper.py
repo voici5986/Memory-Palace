@@ -35,14 +35,15 @@ POSIX_VENV_PYTHON = BACKEND_DIR / ".venv" / "bin" / "python"
 def read_env_value(file_path: Path, key: str) -> str:
     if not file_path.is_file():
         return ""
+    latest_value = ""
     for raw_line in file_path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
-        current_key, value = line.split("=", 1)
+        current_key, parsed_value = line.split("=", 1)
         if current_key.strip() == key:
-            return value
-    return ""
+            latest_value = parsed_value
+    return latest_value
 
 
 def normalize_database_url(value: str | None) -> str:
@@ -65,7 +66,12 @@ def sqlite_database_url(path: Path) -> str:
 
 
 def resolve_backend_python() -> Path:
-    for candidate in (WINDOWS_VENV_PYTHON, POSIX_VENV_PYTHON):
+    candidates = (
+        (WINDOWS_VENV_PYTHON, POSIX_VENV_PYTHON)
+        if os.name == "nt"
+        else (POSIX_VENV_PYTHON, WINDOWS_VENV_PYTHON)
+    )
+    for candidate in candidates:
         if candidate.is_file():
             return candidate
     raise SystemExit(

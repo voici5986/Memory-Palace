@@ -81,6 +81,7 @@ backend/
 - 记忆树浏览
 - 新建 / 更新 / 删除记忆
 - 返回结果里会带上当前节点、子节点、面包屑、gist 等前端直接要用的数据
+- 当前这组写接口也会先写 Review snapshot；在 Review 里看到的 session 名会带当前数据库作用域（例如 `dashboard-<scope>`），避免不同 SQLite 目标混到一起
 
 ### 审查与回滚（`/review`）
 
@@ -256,7 +257,7 @@ frontend/src/
 1. `create_memory` / `update_memory` 进入 **write lane**（串行化写操作）。
 2. 写前执行 **write_guard** 判定（核心决策：`ADD` / `UPDATE` / `NOOP` / `DELETE`；`BYPASS` 为上层 metadata-only 更新时的流程标记）。
    - write_guard 支持三级判定链：语义匹配 → 关键词匹配 → LLM 决策（可选）。
-3. 生成 **snapshot** 与版本变更（按 `path` 和 `memory` 两维度分别记录）。
+3. 生成 **snapshot** 与版本变更（按 `path` 和 `memory` 两维度分别记录；MCP 工具写入和 Dashboard `/browse/node` 写入都遵循这套语义）。
 4. 入队 **索引任务**（队列满会返回 `index_dropped` / `queue_full`）。
 
 ### 检索路径

@@ -399,6 +399,7 @@ apply_profile_runtime_overrides() {
     "RETRIEVAL_EMBEDDING_BACKEND"
     "RETRIEVAL_EMBEDDING_API_BASE"
     "RETRIEVAL_EMBEDDING_API_KEY"
+    "RETRIEVAL_EMBEDDING_DIM"
     "RETRIEVAL_EMBEDDING_MODEL"
     "RETRIEVAL_RERANKER_ENABLED"
     "RETRIEVAL_RERANKER_API_BASE"
@@ -683,6 +684,11 @@ if [[ -z "${planned_backend_port}" ]]; then
   planned_backend_port="${backend_port}"
 fi
 compose_project_name="${COMPOSE_PROJECT_NAME:-$(default_compose_project_name)}"
+local_image_namespace="${MEMORY_PALACE_LOCAL_IMAGE_NAMESPACE:-$(default_compose_project_name)}"
+backend_image="${MEMORY_PALACE_BACKEND_IMAGE:-${local_image_namespace}-backend:latest}"
+frontend_image="${MEMORY_PALACE_FRONTEND_IMAGE:-${local_image_namespace}-frontend:latest}"
+export MEMORY_PALACE_BACKEND_IMAGE="${backend_image}"
+export MEMORY_PALACE_FRONTEND_IMAGE="${frontend_image}"
 compose_env_file_args=()
 if [[ -n "${env_file}" ]]; then
   compose_env_file_args=(--env-file "${env_file}")

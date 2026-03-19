@@ -115,6 +115,20 @@ def test_sse_auth_rejects_insecure_local_override_when_host_is_not_loopback(monk
     assert payload.get("reason") == "insecure_local_override_requires_loopback"
 
 
+def test_sse_auth_allows_ipv6_loopback_host_header_for_insecure_local_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", "true")
+    with _build_client(client=("::1", 50000)) as client:
+        response = client.get(
+            "/ping",
+            headers={"Host": "[::1]:8000"},
+        )
+    assert response.status_code == 200
+    assert response.json().get("ok") is True
+
+
 def test_sse_auth_rejects_when_api_key_missing(monkeypatch) -> None:
     monkeypatch.setenv("MCP_API_KEY", "week6-sse-secret")
     with _build_client() as client:

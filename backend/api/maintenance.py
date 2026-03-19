@@ -69,8 +69,14 @@ def _is_loopback_hostname(value: Optional[str]) -> bool:
     hostname = str(value).strip().lower()
     if not hostname:
         return False
-    if hostname.startswith("[") and hostname.endswith("]"):
-        hostname = hostname[1:-1]
+    if hostname.startswith("["):
+        closing = hostname.find("]")
+        if closing != -1:
+            suffix = hostname[closing + 1 :]
+            if not suffix or (
+                suffix.startswith(":") and suffix[1:].isdigit()
+            ):
+                hostname = hostname[1:closing]
     if ":" in hostname and hostname.count(":") == 1 and hostname.rsplit(":", 1)[1].isdigit():
         hostname = hostname.rsplit(":", 1)[0]
     if hostname in _LOOPBACK_CLIENT_HOSTS:

@@ -32,6 +32,24 @@ def test_resolve_backend_python_accepts_windows_virtualenv_layout(
     assert module.resolve_backend_python() == windows_python
 
 
+def test_resolve_backend_python_prefers_posix_layout_on_non_windows_when_both_exist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    windows_python = tmp_path / "backend" / ".venv" / "Scripts" / "python.exe"
+    posix_python = tmp_path / "backend" / ".venv" / "bin" / "python"
+    windows_python.parent.mkdir(parents=True, exist_ok=True)
+    posix_python.parent.mkdir(parents=True, exist_ok=True)
+    windows_python.write_text("", encoding="utf-8")
+    posix_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "WINDOWS_VENV_PYTHON", windows_python)
+    monkeypatch.setattr(module, "POSIX_VENV_PYTHON", posix_python)
+    monkeypatch.setattr(module.os, "name", "posix", raising=False)
+
+    assert module.resolve_backend_python() == posix_python
+
+
 def test_build_runtime_env_rejects_docker_internal_database_url(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -51,6 +69,33 @@ def test_build_runtime_env_rejects_docker_internal_database_url(
         module.build_runtime_env()
 
     assert str(excinfo.value) == "1"
+
+
+def test_build_runtime_env_uses_last_database_url_from_env_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    host_db = tmp_path / "host.db"
+    env_file.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////app/data/stale.db",
+                f"DATABASE_URL=sqlite+aiosqlite:///{host_db.as_posix()}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    runtime_env = module.build_runtime_env()
+
+    assert "DATABASE_URL" not in runtime_env
 
 
 def test_build_runtime_env_sets_demo_db_when_no_env_exists(

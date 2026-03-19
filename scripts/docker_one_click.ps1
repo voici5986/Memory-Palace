@@ -305,6 +305,7 @@ function Apply-ProfileRuntimeOverrides {
         'RETRIEVAL_EMBEDDING_BACKEND',
         'RETRIEVAL_EMBEDDING_API_BASE',
         'RETRIEVAL_EMBEDDING_API_KEY',
+        'RETRIEVAL_EMBEDDING_DIM',
         'RETRIEVAL_EMBEDDING_MODEL',
         'RETRIEVAL_RERANKER_ENABLED',
         'RETRIEVAL_RERANKER_API_BASE',
@@ -790,6 +791,20 @@ try {
     if ([string]::IsNullOrWhiteSpace($composeProjectName)) {
         $composeProjectName = Get-DefaultComposeProjectName
     }
+    $localImageNamespace = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_LOCAL_IMAGE_NAMESPACE')
+    if ([string]::IsNullOrWhiteSpace($localImageNamespace)) {
+        $localImageNamespace = Get-DefaultComposeProjectName
+    }
+    $backendImage = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_BACKEND_IMAGE')
+    if ([string]::IsNullOrWhiteSpace($backendImage)) {
+        $backendImage = "$localImageNamespace-backend:latest"
+    }
+    $frontendImage = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_FRONTEND_IMAGE')
+    if ([string]::IsNullOrWhiteSpace($frontendImage)) {
+        $frontendImage = "$localImageNamespace-frontend:latest"
+    }
+    $env:MEMORY_PALACE_BACKEND_IMAGE = $backendImage
+    $env:MEMORY_PALACE_FRONTEND_IMAGE = $frontendImage
 
     if (-not $NoAutoPort) {
         $frontendReservation = Resolve-FreePort -StartPort $FrontendPort

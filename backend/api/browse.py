@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any
 from db import get_sqlite_client
+from db.snapshot import _resolve_current_database_scope, get_snapshot_manager
 from db.sqlite_client import Path as PathModel
 from runtime_state import runtime_state
 from .maintenance import require_maintenance_api_key
@@ -140,6 +141,156 @@ async def _run_write_lane(operation: str, task):
         session_id=_DASHBOARD_WRITE_SESSION_ID,
         operation=operation,
         task=task,
+    )
+
+
+def _make_uri(domain: str, path: str) -> str:
+    return f"{domain}://{path.strip('/')}" if path else f"{domain}://"
+
+
+def _parse_uri(uri: str) -> tuple[str, str]:
+    domain, _, remainder = str(uri).partition("://")
+    return domain.strip().lower(), remainder.strip().strip("/")
+
+
+def _snapshot_session_id() -> str:
+    scope = _resolve_current_database_scope()
+    fingerprint = str(scope.get("database_fingerprint") or "").strip()
+    if not fingerprint:
+        return _DASHBOARD_WRITE_SESSION_ID
+    return f"{_DASHBOARD_WRITE_SESSION_ID}-{fingerprint[:12]}"
+
+
+async def _snapshot_memory_content(client: Any, uri: str) -> bool:
+    manager = get_snapshot_manager()
+    session_id = _snapshot_session_id()
+    domain, path = _parse_uri(uri)
+    memory = await client.get_memory_by_path(path, domain, reinforce_access=False)
+    if not memory:
+        return False
+
+    resource_id = f"memory:{memory['id']}"
+    if manager.has_snapshot(session_id, resource_id):
+        return False
+    if manager.find_memory_snapshot_by_uri(session_id, uri):
+        return False
+
+    all_paths: list[str] = []
+    get_memory_by_id = getattr(client, "get_memory_by_id", None)
+    if callable(get_memory_by_id):
+        memory_full = await get_memory_by_id(memory["id"])
+        if isinstance(memory_full, dict):
+            raw_paths = memory_full.get("paths") or []
+            if isinstance(raw_paths, list):
+                all_paths = [str(item) for item in raw_paths if str(item).strip()]
+
+    return manager.create_snapshot(
+        session_id=session_id,
+        resource_id=resource_id,
+        resource_type="memory",
+        snapshot_data={
+            "operation_type": "modify_content",
+            "memory_id": memory["id"],
+            "uri": uri,
+            "domain": domain,
+            "path": path,
+            "all_paths": all_paths,
+        },
+    )
+
+
+async def _snapshot_path_meta(client: Any, uri: str) -> bool:
+    manager = get_snapshot_manager()
+    session_id = _snapshot_session_id()
+    if manager.has_snapshot(session_id, uri):
+        return False
+
+    domain, path = _parse_uri(uri)
+    memory = await client.get_memory_by_path(path, domain, reinforce_access=False)
+    if not memory:
+        return False
+
+    return manager.create_snapshot(
+        session_id=session_id,
+        resource_id=uri,
+        resource_type="path",
+        snapshot_data={
+            "operation_type": "modify_meta",
+            "domain": domain,
+            "path": path,
+            "uri": uri,
+            "memory_id": memory["id"],
+            "priority": memory.get("priority"),
+            "disclosure": memory.get("disclosure"),
+        },
+    )
+
+
+def _snapshot_path_create(
+    uri: str,
+    memory_id: int,
+    *,
+    operation_type: str = "create",
+    target_uri: str | None = None,
+) -> bool:
+    manager = get_snapshot_manager()
+    session_id = _snapshot_session_id()
+    domain, path = _parse_uri(uri)
+    snapshot_data = {
+        "operation_type": operation_type,
+        "domain": domain,
+        "path": path,
+        "uri": uri,
+        "memory_id": memory_id,
+    }
+    if target_uri:
+        snapshot_data["target_uri"] = target_uri
+    return manager.create_snapshot(
+        session_id=session_id,
+        resource_id=uri,
+        resource_type="path",
+        snapshot_data=snapshot_data,
+    )
+
+
+async def _snapshot_path_delete(client: Any, uri: str) -> bool:
+    manager = get_snapshot_manager()
+    session_id = _snapshot_session_id()
+    existing = manager.get_snapshot(session_id, uri)
+    if existing:
+        existing_op = existing.get("data", {}).get("operation_type")
+        if existing_op in ("create", "create_alias"):
+            content_snap_id = manager.find_memory_snapshot_by_uri(session_id, uri)
+            if content_snap_id:
+                manager.delete_snapshot(session_id, content_snap_id)
+            manager.delete_snapshot(session_id, uri)
+            return False
+
+    domain, path = _parse_uri(uri)
+    memory = await client.get_memory_by_path(path, domain, reinforce_access=False)
+    if not memory:
+        return False
+
+    priority = memory.get("priority")
+    disclosure = memory.get("disclosure")
+    if existing and existing.get("data", {}).get("operation_type") == "modify_meta":
+        priority = existing["data"].get("priority", priority)
+        disclosure = existing["data"].get("disclosure", disclosure)
+
+    return manager.create_snapshot(
+        session_id=session_id,
+        resource_id=uri,
+        resource_type="path",
+        snapshot_data={
+            "operation_type": "delete",
+            "domain": domain,
+            "path": path,
+            "uri": uri,
+            "memory_id": memory["id"],
+            "priority": priority,
+            "disclosure": disclosure,
+        },
+        force=True,
     )
 
 
@@ -298,6 +449,8 @@ async def create_node(
             disclosure=body.disclosure,
             domain=domain,
         )
+        created_uri = str(result.get("uri") or _make_uri(domain, result["path"]))
+        _snapshot_path_create(created_uri, int(result["id"]), operation_type="create")
         return {
             "success": True,
             "created": True,
@@ -396,6 +549,12 @@ async def update_node(
                 **_guard_fields(guard_decision),
             }
 
+        full_uri = _make_uri(domain, path)
+        if body.content is not None:
+            await _snapshot_memory_content(client, full_uri)
+        if body.priority is not None or body.disclosure is not None:
+            await _snapshot_path_meta(client, full_uri)
+
         result = await client.update_memory(
             path=path,
             domain=domain,
@@ -430,8 +589,10 @@ async def delete_node(
     """
     client = get_sqlite_client()
     domain = _ensure_writable_domain_or_422(domain, operation="delete_node")
+    full_uri = _make_uri(domain, path)
 
     async def _write_task():
+        await _snapshot_path_delete(client, full_uri)
         return await client.remove_path(path=path, domain=domain)
 
     try:

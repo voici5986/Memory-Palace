@@ -343,6 +343,8 @@ cd <project-root>
 > - 可选的 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*`
 >
 > 当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底；当 `RETRIEVAL_RERANKER_MODEL` 没显式提供时，也会优先复用 `ROUTER_RERANKER_MODEL`。
+>
+> 本地 build 路径现在还会使用按 checkout 固定的本地镜像名。这样做的好处很直接：只要这个 checkout 里已经成功 build 过一次，后续即使切换 `COMPOSE_PROJECT_NAME`，`--no-build` 也还是能复用之前的本地镜像；只有第一次启动或手动删掉本地镜像时，才需要重新 build。
 
 ### 部署完成后的访问地址
 
@@ -356,7 +358,7 @@ cd <project-root>
 ### 一键脚本做了什么
 
 1. 调用 profile 脚本从模板生成本次运行使用的 Docker env 文件（默认是 per-run 临时文件；仅当显式设置 `MEMORY_PALACE_DOCKER_ENV_FILE` 时才复用指定路径）
-2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调；若显式 `RETRIEVAL_*` 未提供，则优先复用 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源，并同步透传可选的 `INTENT_LLM_*`。
+2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调；若显式 `RETRIEVAL_*` 未提供，则优先复用 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源，并同步透传显式的 `RETRIEVAL_EMBEDDING_DIM` 与可选的 `INTENT_LLM_*`。
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
 4. 检测并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，snapshot `<compose-project>_snapshots`）；如需复用旧卷，必须显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`
 5. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖

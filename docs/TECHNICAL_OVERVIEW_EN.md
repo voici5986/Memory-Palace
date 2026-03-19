@@ -81,6 +81,7 @@ This is the most "business-like" group of interfaces:
 - Memory tree browsing
 - Create / Update / Delete memories
 - Returns results including the current node, child nodes, breadcrumbs, gist, and other data for direct frontend use
+- The write endpoints in this group now also create Review snapshots first; in Review, the visible session name carries the current database scope (for example `dashboard-<scope>`) so different SQLite targets do not get mixed together
 
 ### Review and Rollback (`/review`)
 
@@ -256,7 +257,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 1. `create_memory` / `update_memory` enters the **write lane** (serialized write operations).
 2. Executes **write_guard** determination before writing (core decisions: `ADD` / `UPDATE` / `NOOP` / `DELETE`; `BYPASS` is a process marker for upper-layer metadata-only updates).
    - write_guard supports a three-level determination chain: semantic matching → keyword matching → LLM decision (optional).
-3. Generates **snapshot** and version changes (recorded separately by `path` and `memory` dimensions).
+3. Generates **snapshot** and version changes (recorded separately by `path` and `memory` dimensions; both MCP writes and Dashboard `/browse/node` writes follow the same semantics).
 4. Enqueues **index task** (returns `index_dropped` / `queue_full` if queue is full).
 
 ### Retrieval Path

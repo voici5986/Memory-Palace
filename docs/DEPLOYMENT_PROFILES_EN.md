@@ -347,6 +347,8 @@ cd <project-root>
 > - optional `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and `INTENT_LLM_*`
 >
 > When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it prioritizes `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as the fallback source for embedding / reranker API base+key. When `RETRIEVAL_RERANKER_MODEL` is not explicitly provided, it also falls back to `ROUTER_RERANKER_MODEL`.
+>
+> The local build path now also uses checkout-scoped stable image names. The practical effect is simple: once this checkout has completed one successful build, `--no-build` can keep reusing those local images even if you change `COMPOSE_PROJECT_NAME`; you only need to build again on the first run or after deleting the local images.
 
 ### Access Addresses After Deployment
 
@@ -360,7 +362,7 @@ cd <project-root>
 ### What the One-Click Script Does
 
 1.  Calls the profile script to generate the Docker env file for this run from the template (per-run temporary file by default; reuses the specified path only if `MEMORY_PALACE_DOCKER_ENV_FILE` is explicitly set).
-2.  Disables runtime environment injection by default to avoid implicit template overwriting; parameters are only overridden when injection is explicitly enabled. For `profile c/d`, the injection mode additionally forces `RETRIEVAL_EMBEDDING_BACKEND=api` for local debugging; if explicit `RETRIEVAL_*` is not provided, it prioritizes reusing `ROUTER_API_BASE/ROUTER_API_KEY` as a fallback for the embedding / reranker API base+key, while also passing through the optional `INTENT_LLM_*`.
+2.  Disables runtime environment injection by default to avoid implicit template overwriting; parameters are only overridden when injection is explicitly enabled. For `profile c/d`, the injection mode additionally forces `RETRIEVAL_EMBEDDING_BACKEND=api` for local debugging; if explicit `RETRIEVAL_*` is not provided, it prioritizes reusing `ROUTER_API_BASE/ROUTER_API_KEY` as a fallback for the embedding / reranker API base+key, while also passing through explicit retrieval parameters such as `RETRIEVAL_EMBEDDING_DIM` and the optional `INTENT_LLM_*`.
 3.  Automatically detects port conflicts; if the default port is occupied, it automatically increments to find an idle port.
 4.  Detects and injects Docker persistent volumes: by default they are isolated per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); old volumes are reused only when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
 5.  Adds a deployment lock to concurrent deployments under the same checkout to prevent multiple `docker_one_click` instances from overwriting each other.

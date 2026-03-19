@@ -44,6 +44,10 @@ class _FakeBrowseClient:
         _ = reinforce_access
         return dict(self.memory)
 
+    async def get_memory_by_id(self, memory_id: int) -> Dict[str, Any]:
+        _ = memory_id
+        return {"id": self.memory["id"], "paths": ["core://agent/new_note"]}
+
     async def update_memory(self, **_: Any) -> Dict[str, Any]:
         self.update_called = True
         return {
@@ -89,11 +93,68 @@ class _FakeBrowseClientWithLaneHeadRefresh(_FakeBrowseClient):
         }
 
 
+class _FakeSnapshotManager:
+    def __init__(self) -> None:
+        self.snapshots: dict[str, dict[str, dict[str, Any]]] = {}
+        self.created: list[dict[str, Any]] = []
+        self.deleted: list[tuple[str, str]] = []
+
+    def has_snapshot(self, session_id: str, resource_id: str) -> bool:
+        return resource_id in self.snapshots.get(session_id, {})
+
+    def find_memory_snapshot_by_uri(self, session_id: str, uri: str) -> Optional[str]:
+        for resource_id, snapshot in self.snapshots.get(session_id, {}).items():
+            if (
+                snapshot.get("resource_type") == "memory"
+                and snapshot.get("data", {}).get("uri") == uri
+            ):
+                return resource_id
+        return None
+
+    def create_snapshot(
+        self,
+        *,
+        session_id: str,
+        resource_id: str,
+        resource_type: str,
+        snapshot_data: dict[str, Any],
+        force: bool = False,
+    ) -> bool:
+        if not force and self.has_snapshot(session_id, resource_id):
+            return False
+        self.snapshots.setdefault(session_id, {})[resource_id] = {
+            "resource_type": resource_type,
+            "data": dict(snapshot_data),
+        }
+        self.created.append(
+            {
+                "session_id": session_id,
+                "resource_id": resource_id,
+                "resource_type": resource_type,
+                "data": dict(snapshot_data),
+                "force": force,
+            }
+        )
+        return True
+
+    def get_snapshot(self, session_id: str, resource_id: str) -> Optional[dict[str, Any]]:
+        return self.snapshots.get(session_id, {}).get(resource_id)
+
+    def delete_snapshot(self, session_id: str, resource_id: str) -> bool:
+        bucket = self.snapshots.get(session_id, {})
+        if resource_id not in bucket:
+            return False
+        del bucket[resource_id]
+        self.deleted.append((session_id, resource_id))
+        return True
+
+
 @pytest.mark.asyncio
 async def test_browse_write_endpoints_run_through_write_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_client = _FakeBrowseClient()
+    fake_snapshot_manager = _FakeSnapshotManager()
     lane_calls: list[dict[str, Any]] = []
 
     async def _run_write(*, session_id: Optional[str], operation: str, task):
@@ -105,6 +166,14 @@ async def test_browse_write_endpoints_run_through_write_lane(
             fake_client.in_lane = False
 
     monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(
+        browse_api, "get_snapshot_manager", lambda: fake_snapshot_manager
+    )
+    monkeypatch.setattr(
+        browse_api,
+        "_resolve_current_database_scope",
+        lambda: {"database_fingerprint": "123456789abcdeadbeef"},
+    )
     monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
     monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
 
@@ -139,6 +208,22 @@ async def test_browse_write_endpoints_run_through_write_lane(
         {"session_id": "dashboard", "operation": "browse.update_node"},
         {"session_id": "dashboard", "operation": "browse.delete_node"},
     ]
+    assert [
+        (
+            item["session_id"],
+            item["resource_id"],
+            item["resource_type"],
+            item["data"].get("operation_type"),
+        )
+        for item in fake_snapshot_manager.created
+    ] == [
+        ("dashboard-123456789abc", "core://agent/new_note", "path", "create"),
+        ("dashboard-123456789abc", "memory:7", "memory", "modify_content"),
+    ]
+    assert fake_snapshot_manager.deleted == [
+        ("dashboard-123456789abc", "memory:7"),
+        ("dashboard-123456789abc", "core://agent/new_note"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -146,6 +231,7 @@ async def test_browse_update_node_uses_lane_fresh_head_for_write_guard_matching(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_client = _FakeBrowseClientWithLaneHeadRefresh()
+    fake_snapshot_manager = _FakeSnapshotManager()
 
     async def _run_write(*, session_id: Optional[str], operation: str, task):
         _ = session_id
@@ -157,6 +243,14 @@ async def test_browse_update_node_uses_lane_fresh_head_for_write_guard_matching(
             fake_client.in_lane = False
 
     monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(
+        browse_api, "get_snapshot_manager", lambda: fake_snapshot_manager
+    )
+    monkeypatch.setattr(
+        browse_api,
+        "_resolve_current_database_scope",
+        lambda: {"database_fingerprint": "123456789abcdeadbeef"},
+    )
     monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
     monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
 
@@ -170,3 +264,97 @@ async def test_browse_update_node_uses_lane_fresh_head_for_write_guard_matching(
     assert update_payload["updated"] is True
     assert fake_client.update_called is True
     assert fake_client.guard_calls_in_lane == [True]
+    assert [
+        (
+            item["resource_id"],
+            item["resource_type"],
+            item["data"].get("operation_type"),
+        )
+        for item in fake_snapshot_manager.created
+    ] == [("memory:19", "memory", "modify_content")]
+
+
+@pytest.mark.asyncio
+async def test_browse_metadata_update_creates_path_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeBrowseClient()
+    fake_snapshot_manager = _FakeSnapshotManager()
+
+    async def _run_write(*, session_id: Optional[str], operation: str, task):
+        _ = session_id
+        _ = operation
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
+
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(
+        browse_api, "get_snapshot_manager", lambda: fake_snapshot_manager
+    )
+    monkeypatch.setattr(
+        browse_api,
+        "_resolve_current_database_scope",
+        lambda: {"database_fingerprint": "123456789abcdeadbeef"},
+    )
+    monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
+    monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
+
+    update_payload = await browse_api.update_node(
+        path="agent/new_note",
+        domain="core",
+        body=browse_api.NodeUpdate(priority=9),
+    )
+
+    assert update_payload["success"] is True
+    assert [
+        (
+            item["resource_id"],
+            item["resource_type"],
+            item["data"].get("operation_type"),
+        )
+        for item in fake_snapshot_manager.created
+    ] == [("core://agent/new_note", "path", "modify_meta")]
+
+
+@pytest.mark.asyncio
+async def test_browse_delete_existing_node_creates_delete_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeBrowseClient()
+    fake_snapshot_manager = _FakeSnapshotManager()
+
+    async def _run_write(*, session_id: Optional[str], operation: str, task):
+        _ = session_id
+        _ = operation
+        fake_client.in_lane = True
+        try:
+            return await task()
+        finally:
+            fake_client.in_lane = False
+
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(
+        browse_api, "get_snapshot_manager", lambda: fake_snapshot_manager
+    )
+    monkeypatch.setattr(
+        browse_api,
+        "_resolve_current_database_scope",
+        lambda: {"database_fingerprint": "123456789abcdeadbeef"},
+    )
+    monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
+    monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
+
+    delete_payload = await browse_api.delete_node(path="agent/new_note", domain="core")
+
+    assert delete_payload["success"] is True
+    assert [
+        (
+            item["resource_id"],
+            item["resource_type"],
+            item["data"].get("operation_type"),
+        )
+        for item in fake_snapshot_manager.created
+    ] == [("core://agent/new_note", "path", "delete")]

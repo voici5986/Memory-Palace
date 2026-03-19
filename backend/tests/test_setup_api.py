@@ -63,6 +63,28 @@ def test_setup_status_rejects_loopback_peer_when_host_header_is_not_loopback(
     assert detail["reason"] == "local_loopback_or_api_key_required"
 
 
+def test_setup_status_allows_ipv6_loopback_without_api_key(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("MCP_API_KEY=\n", encoding="utf-8")
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client(client=("::1", 50000)) as client:
+        response = client.get(
+            "/setup/status",
+            headers={"Host": "[::1]:8000"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["apply_supported"] is True
+
+
 def test_setup_status_accepts_authenticated_remote_request(monkeypatch, tmp_path: Path) -> None:
     env_example = tmp_path / ".env.example"
     env_example.write_text("MCP_API_KEY=\n", encoding="utf-8")
@@ -270,3 +292,30 @@ def test_setup_config_rejects_loopback_peer_when_host_header_is_not_loopback(
     assert detail["error"] == "setup_access_denied"
     assert detail["reason"] == "local_loopback_or_api_key_required"
     assert not target_env.exists()
+
+
+def test_setup_config_allows_ipv6_loopback_write_without_api_key(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\n", encoding="utf-8")
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client(client=("::1", 50000)) as client:
+        response = client.post(
+            "/setup/config",
+            headers={"Host": "[::1]:8000"},
+            json={
+                "dashboard_api_key": "ipv6-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "hash",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "MCP_API_KEY=ipv6-secret" in target_env.read_text(encoding="utf-8")

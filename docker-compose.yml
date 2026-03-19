@@ -1,5 +1,6 @@
 services:
   backend:
+    image: ${MEMORY_PALACE_BACKEND_IMAGE:-memory-palace-backend:latest}
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.backend
@@ -23,6 +24,7 @@ services:
     restart: unless-stopped
 
   sse:
+    image: ${MEMORY_PALACE_BACKEND_IMAGE:-memory-palace-backend:latest}
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.backend
@@ -47,6 +49,7 @@ services:
     restart: unless-stopped
 
   frontend:
+    image: ${MEMORY_PALACE_FRONTEND_IMAGE:-memory-palace-frontend:latest}
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.frontend

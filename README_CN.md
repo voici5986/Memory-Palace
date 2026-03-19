@@ -66,6 +66,8 @@
 
 每一次记忆写入都经过严格流水线：**Write Guard 预检 → 快照记录 → 异步索引重建**。Write Guard 核心动作为 `ADD`、`UPDATE`、`NOOP`、`DELETE`；`BYPASS` 作为上层 metadata-only 更新场景的流程标记，整体链路每一步均可追溯。
 
+现在 Dashboard 树形编辑也遵循同一条规则：`POST /browse/node`、`PUT /browse/node`、`DELETE /browse/node` 在真正改数据前也会先写 Review snapshot，所以 Review 页面里能看到并回滚这些修改。
+
 ### 🔍 统一检索引擎
 
 三种检索模式——`keyword`（关键词）、`semantic`（语义）、`hybrid`（混合）——支持自动降级。当外部 Embedding 服务不可用时，系统自动回退到关键词搜索，并在发生降级时于响应中报告 `degrade_reasons`。
@@ -176,7 +178,7 @@
 
 1. **Write Guard（写入守卫）** — 每次 `create_memory` / `update_memory` 调用都先经过 Write Guard（`sqlite_client.py`）。在规则模式下，守卫以 **语义匹配 → 关键词匹配 → LLM（可选）** 的顺序判定核心动作 `ADD`、`UPDATE`、`NOOP`、`DELETE`；`BYPASS` 由上层流程在 metadata-only 更新场景标注。当设置 `WRITE_GUARD_LLM_ENABLED=true` 时，可选 LLM 通过 OpenAI 兼容 API 参与决策。
 
-2. **Snapshot（快照）** — 在任何修改前，系统通过 `mcp_server.py` 中的 `_snapshot_memory_content()` 和 `_snapshot_path_meta()` 创建当前记忆状态的快照。这使得审查仪表盘中的差异对比和一键回滚成为可能。
+2. **Snapshot（快照）** — 在任何修改前，系统都会先记录当前记忆状态的快照。MCP 工具链路使用 `mcp_server.py` 中的快照 helper；Dashboard 的 `/browse/node` 写入也遵循同样的 path/content 快照语义，并按当前数据库作用域写入到 dashboard 专属 session。这样 Review 仪表盘里的差异对比和一键回滚才能正常工作。
 
 3. **Write Lane（写入车道）** — 写入进入序列化队列（`runtime_state.py` → `WriteLanes`），可配置并发度（`RUNTIME_WRITE_GLOBAL_CONCURRENCY`）。这防止了单 SQLite 文件上的竞态条件。
 
@@ -635,7 +637,9 @@ COMPACT_GIST_LLM_MODEL=your-chat-model-id
 
 > 上面这些模型名只是占位示例，不是项目硬依赖。Memory Palace 不绑定某个固定 provider 或模型家族；请直接填写你自己的 OpenAI-compatible 服务里实际可用的 embedding / reranker / chat model id。如需调整 Intent LLM、CORS、自定义 MMR、sqlite-vec rollout 或运行时审计上限，请直接参考 `.env.example`；README 只保留最常用主配置。
 >
-> 如果你在本地用 `--allow-runtime-env-injection` 调试 `profile c/d`，脚本会把这次运行切到显式 API 模式；它现在也会一起透传显式的 `RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*` 和可选的 `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没填时，会把 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源；如果 `RETRIEVAL_RERANKER_MODEL` 还没显式填写，也会优先回退到 `ROUTER_RERANKER_MODEL`。
+> 如果你在本地用 `--allow-runtime-env-injection` 调试 `profile c/d`，脚本会把这次运行切到显式 API 模式；它现在会一起透传显式的 `RETRIEVAL_EMBEDDING_*`（包括 `RETRIEVAL_EMBEDDING_DIM`）、`RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*`，以及可选的 `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没填时，会把 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源；如果 `RETRIEVAL_RERANKER_MODEL` 还没显式填写，也会优先回退到 `ROUTER_RERANKER_MODEL`。
+>
+> 对本地 Docker build 路径来说，一键脚本现在还会使用按 checkout 固定的本地镜像名。实际效果就是：只要这个 checkout 里之前已经 build 过一次，即使你换了 `COMPOSE_PROJECT_NAME`，`--no-build` 也还能继续复用这些本地镜像；只有第一次启动或你手动删掉本地镜像时，才需要重新走 `--build`。
 
 档位模板位于：`deploy/profiles/{macos,windows,docker}/profile-{a,b,c,d}.env`
 
