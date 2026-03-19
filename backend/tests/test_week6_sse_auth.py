@@ -17,6 +17,9 @@ from run_sse import apply_mcp_api_key_middleware, create_sse_app
 from starlette.requests import Request
 
 
+_WINDOWS_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+
 def _build_client(*, client=("testclient", 50000)) -> TestClient:
     app = FastAPI()
 
@@ -26,6 +29,30 @@ def _build_client(*, client=("testclient", 50000)) -> TestClient:
 
     wrapped_app = apply_mcp_api_key_middleware(app)
     return TestClient(wrapped_app, client=client)
+
+
+def _spawn_run_sse_subprocess(*, backend_dir: Path, env: dict[str, str]) -> subprocess.Popen[str]:
+    kwargs: dict[str, object] = {
+        "cwd": str(backend_dir),
+        "env": env,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = _WINDOWS_NEW_PROCESS_GROUP
+    return subprocess.Popen([sys.executable, "run_sse.py"], **kwargs)
+
+
+def _request_graceful_shutdown(process: subprocess.Popen[str]) -> None:
+    if os.name == "nt":
+        ctrl_break = getattr(signal, "CTRL_BREAK_EVENT", None)
+        if ctrl_break is not None:
+            process.send_signal(ctrl_break)
+            return
+        process.terminate()
+    else:
+        process.send_signal(signal.SIGINT)
 
 
 def test_sse_auth_rejects_when_api_key_not_configured_by_default(monkeypatch) -> None:
@@ -187,17 +214,7 @@ def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'streaming_disconnect.db'}"
     env["HOST"] = "127.0.0.1"
     env["PORT"] = str(port)
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     try:
         deadline = time.time() + 10
@@ -259,17 +276,7 @@ def test_sse_auth_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'streaming_shutdown.db'}"
     env["HOST"] = "127.0.0.1"
     env["PORT"] = str(port)
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     client = None
     try:
@@ -307,7 +314,7 @@ def test_sse_auth_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
         assert "200 OK" in received
         assert "event: endpoint" in received
 
-        server.send_signal(signal.SIGINT)
+        _request_graceful_shutdown(server)
         if client is not None:
             client.close()
             client = None
@@ -338,17 +345,7 @@ def test_sse_auth_rejects_when_posting_to_closed_message_stream(tmp_path) -> Non
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'closed_message_stream.db'}"
     env["HOST"] = "127.0.0.1"
     env["PORT"] = str(port)
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     try:
         deadline = time.time() + 10
@@ -432,17 +429,7 @@ def test_sse_messages_rate_limit_returns_429(tmp_path) -> None:
     env["PORT"] = str(port)
     env["SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS"] = "60"
     env["SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS"] = "10"
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     try:
         deadline = time.time() + 10
@@ -534,17 +521,7 @@ def test_sse_messages_reject_oversized_body_with_413(tmp_path) -> None:
     env["HOST"] = "127.0.0.1"
     env["PORT"] = str(port)
     env["SSE_MESSAGE_MAX_BODY_BYTES"] = "1024"
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     sse_socket = None
     try:
@@ -702,17 +679,7 @@ def test_sse_malformed_message_returns_400_without_internal_error_event(tmp_path
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'malformed_message.db'}"
     env["HOST"] = "127.0.0.1"
     env["PORT"] = str(port)
-    server = subprocess.Popen(
-        [
-            sys.executable,
-            "run_sse.py",
-        ],
-        cwd=str(backend_dir),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
 
     sse_socket = None
     try:

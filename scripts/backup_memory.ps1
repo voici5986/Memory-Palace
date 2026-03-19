@@ -53,12 +53,25 @@ function Read-DatabaseUrlFromEnvFile {
 function Resolve-SqlitePathFromDatabaseUrl {
     param([string]$DatabaseUrl)
 
-    $prefix = 'sqlite+aiosqlite:///'
-    if (-not $DatabaseUrl.StartsWith($prefix)) {
-        throw "DATABASE_URL must start with '$prefix'"
+    $prefixes = @(
+        'sqlite+aiosqlite:///',
+        'sqlite:///'
+    )
+    $matchedPrefix = $prefixes | Where-Object { $DatabaseUrl.StartsWith($_) } | Select-Object -First 1
+    if (-not $matchedPrefix) {
+        throw "DATABASE_URL must start with 'sqlite+aiosqlite:///' or 'sqlite:///'"
     }
 
-    $rawPath = $DatabaseUrl.Substring($prefix.Length)
+    $rawPath = $DatabaseUrl.Substring($matchedPrefix.Length)
+    $queryIndex = $rawPath.IndexOf('?')
+    if ($queryIndex -ge 0) {
+        $rawPath = $rawPath.Substring(0, $queryIndex)
+    }
+    $fragmentIndex = $rawPath.IndexOf('#')
+    if ($fragmentIndex -ge 0) {
+        $rawPath = $rawPath.Substring(0, $fragmentIndex)
+    }
+    $rawPath = [System.Uri]::UnescapeDataString($rawPath.Trim())
     if ([string]::IsNullOrWhiteSpace($rawPath)) {
         throw "DATABASE_URL does not contain a valid sqlite file path"
     }
@@ -118,7 +131,7 @@ with sqlite3.connect(source) as source_conn:
 
 & $pythonCmd.Source -c $backupScript
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Backup failed for $sqlitePath: sqlite backup command returned non-zero exit code."
+    Write-Error "Backup failed for ${sqlitePath}: sqlite backup command returned non-zero exit code."
     exit 1
 }
 

@@ -7,6 +7,27 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 OUTPUT_DIR="${PROJECT_ROOT}/backups"
 
+normalize_cli_path() {
+  local raw_path="${1:-}"
+  if [[ -z "${raw_path}" ]]; then
+    printf '%s\n' "${raw_path}"
+    return 0
+  fi
+
+  if [[ "${raw_path}" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "${raw_path}"
+      return 0
+    fi
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "${raw_path}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "${raw_path//\\//}"
+}
+
 usage() {
   cat <<'EOF'
 Usage: bash scripts/backup_memory.sh [--env-file <path>] [--output-dir <path>]
@@ -18,11 +39,11 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env-file)
-      ENV_FILE="${2:-}"
+      ENV_FILE="$(normalize_cli_path "${2:-}")"
       shift 2
       ;;
     --output-dir)
-      OUTPUT_DIR="${2:-}"
+      OUTPUT_DIR="$(normalize_cli_path "${2:-}")"
       shift 2
       ;;
     -h|--help)
@@ -42,7 +63,24 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-PYTHON_BIN="$(command -v python3 || command -v python || true)"
+resolve_python_bin() {
+  local candidate=""
+  local resolved=""
+  for candidate in python python3 py; do
+    resolved="$(command -v "${candidate}" || true)"
+    if [[ -z "${resolved}" ]]; then
+      continue
+    fi
+    if [[ "${resolved}" == *"/WindowsApps/"* ]]; then
+      continue
+    fi
+    printf '%s\n' "${resolved}"
+    return 0
+  done
+  return 1
+}
+
+PYTHON_BIN="$(resolve_python_bin || true)"
 if [[ -z "${PYTHON_BIN}" ]]; then
   echo "Python is required for consistent SQLite backup but was not found in PATH." >&2
   exit 1
@@ -58,6 +96,7 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 
 def fail(message: str) -> None:
@@ -89,10 +128,13 @@ def read_database_url(env_path: Path) -> str:
 
 
 def resolve_sqlite_path(project_root: Path, database_url: str) -> Path:
-    prefix = "sqlite+aiosqlite:///"
-    if not database_url.startswith(prefix):
-        fail(f"DATABASE_URL must start with '{prefix}'")
+    prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
+    prefix = next((item for item in prefixes if database_url.startswith(item)), None)
+    if prefix is None:
+        fail("DATABASE_URL must start with 'sqlite+aiosqlite:///' or 'sqlite:///'")
     raw_path = database_url[len(prefix):].strip()
+    raw_path = raw_path.split("?", 1)[0].split("#", 1)[0].strip()
+    raw_path = unquote(raw_path)
     if not raw_path:
         fail("DATABASE_URL does not contain a valid sqlite file path")
     sqlite_path = Path(raw_path)

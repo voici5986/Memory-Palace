@@ -76,6 +76,30 @@ def test_check_gate_syntax_accepts_parent_workspace_gate(monkeypatch, tmp_path):
     assert "语法通过" in result.summary
 
 
+def test_check_sync_script_uses_current_python_interpreter(monkeypatch):
+    module = _load_skill_eval_module()
+    recorded = {}
+
+    def fake_run_command(cmd, *, cwd, input_text=None, timeout=120):
+        recorded["cmd"] = cmd
+        recorded["cwd"] = cwd
+
+        class _Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+
+    result = module.check_sync_script()
+
+    assert result.status == "PASS"
+    assert recorded["cmd"][0] == sys.executable
+    assert recorded["cmd"][1:] == ["-B", str(module.PROJECT_ROOT / "scripts" / "sync_memory_palace_skill.py"), "--check"]
+
+
 def test_install_skill_reports_invalid_json_with_actionable_message(tmp_path):
     module = _load_install_skill_module()
     broken = tmp_path / "settings.json"

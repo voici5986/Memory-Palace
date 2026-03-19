@@ -115,6 +115,17 @@ def run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, tim
     )
 
 
+def _python_command() -> str:
+    return sys.executable or "python"
+
+
+def _bash_relative_path(path: Path, *, cwd: Path) -> str:
+    try:
+        return os.path.relpath(path, cwd).replace("\\", "/")
+    except ValueError:
+        return path.as_posix()
+
+
 @dataclass
 class CommandCapture:
     returncode: int
@@ -157,7 +168,15 @@ def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
         if os.name != "nt":
             os.killpg(process.pid, signal.SIGTERM)
         else:  # pragma: no cover
-            process.terminate()
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except FileNotFoundError:
+                process.terminate()
     except ProcessLookupError:
         return
 
@@ -589,7 +608,7 @@ def check_mirrors() -> CheckResult:
 
 def check_sync_script() -> CheckResult:
     script = PROJECT_ROOT / "scripts" / "sync_memory_palace_skill.py"
-    proc = run_command(["python3", "-B", str(script), "--check"], cwd=REPO_ROOT, timeout=60)
+    proc = run_command([_python_command(), "-B", str(script), "--check"], cwd=REPO_ROOT, timeout=60)
     if proc.returncode != 0:
         return CheckResult("FAIL", "sync script --check 失败", (proc.stdout + "\n" + proc.stderr).strip())
     return CheckResult("PASS", proc.stdout.strip() or "sync script --check passed")
@@ -607,7 +626,18 @@ def check_gate_syntax() -> CheckResult:
             "run_post_change_checks.sh 在当前仓库布局中缺失，跳过该项",
             "missing: " + ", ".join(str(path) for path in gate_candidates),
         )
-    proc = run_command(["bash", "-n", str(gate_script)], cwd=REPO_ROOT, timeout=30)
+    bash_bin = shutil.which("bash")
+    if not bash_bin:
+        return CheckResult(
+            "SKIP",
+            "当前环境未找到 bash，跳过 run_post_change_checks.sh 语法检查",
+            f"missing bash for: {gate_script}",
+        )
+    proc = run_command(
+        ["bash", "-n", _bash_relative_path(gate_script, cwd=REPO_ROOT)],
+        cwd=REPO_ROOT,
+        timeout=30,
+    )
     if proc.returncode != 0:
         return CheckResult("FAIL", "run_post_change_checks.sh 语法失败", proc.stderr.strip())
     return CheckResult("PASS", "run_post_change_checks.sh 语法通过")

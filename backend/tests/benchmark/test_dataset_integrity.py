@@ -23,6 +23,7 @@ REQUIRED_ROW_FIELDS = {
     "source_dataset",
     "split",
 }
+_RAW_TEXT_FILES_WITH_LF_MANIFEST_SIZE = {".jsonl", ".tsv"}
 
 
 def _count_jsonl(path: Path) -> int:
@@ -41,6 +42,11 @@ def _iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
 
 def _parse_utc_iso(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _normalized_lf_size(path: Path) -> int:
+    text = path.read_text(encoding="utf-8")
+    return len(text.replace("\r\n", "\n").encode("utf-8"))
 
 
 def _assert_row_contract(row: Dict[str, Any], dataset: str) -> None:
@@ -95,7 +101,15 @@ def test_dataset_integrity_skeleton_manifest_files_parse_when_present() -> None:
             assert len(str(item.get("sha256", ""))) == 64
             raw_path = project_root / str(item["path"])
             assert raw_path.exists()
-            assert int(item["size_bytes"]) == raw_path.stat().st_size
+            expected_size = int(item["size_bytes"])
+            actual_size = raw_path.stat().st_size
+            if (
+                actual_size != expected_size
+                and raw_path.suffix.lower() in _RAW_TEXT_FILES_WITH_LF_MANIFEST_SIZE
+            ):
+                assert _normalized_lf_size(raw_path) == expected_size
+            else:
+                assert actual_size == expected_size
 
         assert "processed_files" in payload
         full_path = project_root / str(payload["processed_files"]["full"])

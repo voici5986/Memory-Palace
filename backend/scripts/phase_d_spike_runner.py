@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import gc
+from contextlib import closing
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -337,7 +340,7 @@ def run_sqlite_vec_probe(sqlite_vec_extension_path: Optional[str]) -> Dict[str, 
 def _init_write_probe_db(db_path: Path, journal_mode: str, timeout_sec: float) -> str:
     timeout = max(0.001, float(timeout_sec))
     busy_timeout_ms = max(1, int(timeout * 1000))
-    with sqlite3.connect(str(db_path), timeout=timeout) as connection:
+    with closing(sqlite3.connect(str(db_path), timeout=timeout)) as connection:
         effective_mode = str(
             connection.execute(f"PRAGMA journal_mode={journal_mode.upper()}").fetchone()[0]
         ).lower()
@@ -487,13 +490,37 @@ def _write_probe_worker(
     }
 
 
+def _remove_tree_with_retry(
+    path: Path,
+    *,
+    attempts: int = 20,
+    delay_sec: float = 0.05,
+) -> None:
+    last_error: PermissionError | None = None
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_error = exc
+            gc.collect()
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(delay_sec * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+
+
 def _run_journal_mode_probe(
     journal_mode: str,
     workers: int,
     tx_per_worker: int,
     timeout_sec: float,
 ) -> Dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix=f"phase-d-{journal_mode}-") as tmp_dir:
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"phase-d-{journal_mode}-"))
+    try:
         db_path = Path(tmp_dir) / f"write_probe_{journal_mode}.db"
         effective_mode = _init_write_probe_db(
             db_path=db_path, journal_mode=journal_mode, timeout_sec=timeout_sec
@@ -518,10 +545,12 @@ def _run_journal_mode_probe(
         planned_tx = int(workers) * int(tx_per_worker)
         throughput = successful_tx / elapsed_sec
 
-        with sqlite3.connect(str(db_path)) as connection:
+        with closing(sqlite3.connect(str(db_path))) as connection:
             persisted_rows = int(
                 connection.execute("SELECT COUNT(*) FROM write_probe").fetchone()[0]
             )
+    finally:
+        _remove_tree_with_retry(tmp_dir)
 
     return {
         "status": "ok" if failed_tx == 0 else "ok_with_failures",
