@@ -150,3 +150,17 @@ def test_build_runtime_env_treats_empty_database_url_as_missing_when_no_env_exis
     runtime_env = module.build_runtime_env()
 
     assert runtime_env["DATABASE_URL"] == f"sqlite+aiosqlite:///{demo_db.as_posix()}"
+
+
+def test_read_env_value_parses_quoted_value_with_inline_comment(tmp_path: Path) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'DATABASE_URL="sqlite+aiosqlite:////tmp/memory_palace.db" # local db\n',
+        encoding="utf-8",
+    )
+
+    assert (
+        module.read_env_value(env_file, "DATABASE_URL")
+        == "sqlite+aiosqlite:////tmp/memory_palace.db"
+    )

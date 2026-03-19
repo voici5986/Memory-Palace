@@ -81,6 +81,16 @@ When the limit is hit:
 - the affected session must wait for the window to drain before posting again
 - if the body exceeds `SSE_MESSAGE_MAX_BODY_BYTES`, the server returns `413` before JSON parsing
 
+If this SSE path is running **behind a trusted proxy** (for example the repository-shipped Docker frontend proxy, or your own private reverse proxy), the current rate-limit key now prefers:
+
+- the first valid IP in `X-Forwarded-For`
+- otherwise `X-Real-IP`
+- and only falls back to the direct peer address when the request is not coming through a trusted proxy
+
+In plain language, on the default Docker proxy path, `/messages` burst limiting no longer treats every client as the same frontend-container address.
+
+The `/sse` stream also sends heartbeat pings by default (currently every 15 seconds). The goal is simple: make long-lived streams less likely to look silently stuck when they pass through proxies.
+
 This limit is mainly there to catch **misconfigured clients or single-session bursts**. It is not a substitute for public-edge protection such as VPN, reverse-proxy rate limiting, or network ACLs.
 
 ### Default Behavior When No Key is Provided
@@ -106,6 +116,7 @@ The above authentication logic is covered in the following test files in the cur
 - `backend/tests/test_week6_sse_auth.py` — SSE authentication scenarios
 - `backend/tests/test_week6_sse_auth.py::test_sse_messages_rate_limit_returns_429` — `/messages` rate limit and `Retry-After` behavior
 - `backend/tests/test_week6_sse_auth.py::test_sse_messages_reject_oversized_body_with_413` — `/messages` request-body size ceiling
+- `backend/tests/test_week6_sse_auth.py::test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy` — trusted-proxy path prefers the real client IP
 - `backend/tests/test_sensitive_api_auth.py` — Review and Browse read/write authentication
 - `backend/tests/test_review_rollback.py` — Review operation authentication test
 

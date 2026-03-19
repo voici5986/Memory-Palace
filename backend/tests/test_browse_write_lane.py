@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 import pytest
+from pydantic import ValidationError
 
 from api import browse as browse_api
 
@@ -224,6 +225,16 @@ async def test_browse_write_endpoints_run_through_write_lane(
         ("dashboard-123456789abc", "memory:7"),
         ("dashboard-123456789abc", "core://agent/new_note"),
     ]
+
+
+def test_browse_node_models_reject_oversized_content() -> None:
+    oversized_content = "x" * (browse_api._BROWSE_CONTENT_MAX_CHARS + 1)
+
+    with pytest.raises(ValidationError):
+        browse_api.NodeCreate(content=oversized_content, domain="core")
+
+    with pytest.raises(ValidationError):
+        browse_api.NodeUpdate(content=oversized_content)
 
 
 @pytest.mark.asyncio

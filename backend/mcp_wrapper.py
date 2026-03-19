@@ -22,6 +22,8 @@ import threading
 from pathlib import Path
 from typing import List, Tuple
 
+from dotenv import dotenv_values
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = PROJECT_ROOT / "backend"
@@ -36,15 +38,11 @@ DOCKER_INTERNAL_SQLITE_PREFIXES = ("/app/", "/data/")
 def read_env_value(file_path: Path, key: str) -> str:
     if not file_path.is_file():
         return ""
-    latest_value = ""
-    for raw_line in file_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        current_key, parsed_value = line.split("=", 1)
-        if current_key.strip() == key:
-            latest_value = parsed_value
-    return latest_value
+    parsed = dotenv_values(file_path)
+    value = parsed.get(key)
+    if value is None:
+        return ""
+    return str(value)
 
 
 def normalize_database_url(value: str | None) -> str:

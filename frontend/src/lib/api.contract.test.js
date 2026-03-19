@@ -386,4 +386,21 @@ describe('api contract regression', () => {
       value: originalStorage,
     });
   });
+
+  it('supports overriding the API base URL via VITE_API_BASE_URL', async () => {
+    vi.resetModules();
+    mockCreate.mockClear();
+    vi.stubEnv('VITE_API_BASE_URL', '/memory-palace/api');
+
+    await import('./api');
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: '/memory-palace/api',
+        timeout: 15000,
+      })
+    );
+
+    vi.unstubAllEnvs();
+  });
 });

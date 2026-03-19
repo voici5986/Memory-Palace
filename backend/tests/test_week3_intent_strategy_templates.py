@@ -71,6 +71,29 @@ async def test_search_advanced_without_intent_profile_uses_default_strategy(
 
 
 @pytest.mark.asyncio
+async def test_search_advanced_caps_extreme_candidate_limit(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week3-intent-candidate-cap.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    payload = await client.search_advanced(
+        query="index rebuild diagnostics",
+        mode="hybrid",
+        max_results=100,
+        candidate_multiplier=50,
+        filters={},
+    )
+
+    await client.close()
+
+    metadata = payload.get("metadata", {})
+    assert metadata.get("candidate_multiplier_applied") == 50
+    assert metadata.get("candidate_limit_applied") == 1000
+
+
+@pytest.mark.asyncio
 async def test_search_advanced_empty_query_handles_none_candidate_multiplier(
     tmp_path: Path,
 ) -> None:

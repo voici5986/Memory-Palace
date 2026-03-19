@@ -5,7 +5,7 @@ import asyncio
 import uvicorn
 from collections import deque
 from contextlib import asynccontextmanager
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from typing import Deque, Dict, Optional
 from urllib.parse import quote
 from uuid import UUID, uuid4
@@ -27,9 +27,15 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 # Ensure we can import from backend dir
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from mcp_server import mcp, startup as mcp_startup
+from db import close_sqlite_client
+from mcp_server import (
+    drain_pending_flush_summaries,
+    mcp,
+    startup as mcp_startup,
+)
 from mcp.server.sse import SseServerTransport
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
+from runtime_state import runtime_state
 
 _MCP_API_KEY_ENV = "MCP_API_KEY"
 _MCP_API_KEY_HEADER = "X-MCP-API-Key"
@@ -49,6 +55,12 @@ _FORWARDED_HEADER_NAMES = {
 }
 _SSE_HTTP_PATHS = {"/sse", "/sse/", "/messages", "/messages/", "/sse/messages", "/sse/messages/"}
 _PUBLIC_HTTP_PATHS = {"/health", "/health/"}
+_TRUSTED_PROXY_IPV4_NETWORKS = (
+    ip_network("10.0.0.0/8"),
+    ip_network("172.16.0.0/12"),
+    ip_network("192.168.0.0/16"),
+)
+_TRUSTED_PROXY_IPV6_NETWORKS = (ip_network("fc00::/7"),)
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -84,13 +96,70 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return token if token else None
 
 
-def _is_loopback_scope(scope: Scope) -> bool:
+def _extract_scope_client_host(scope: Scope) -> str:
     client = scope.get("client")
     host = ""
     if isinstance(client, tuple) and client:
         host = str(client[0] or "").strip().lower()
     elif client is not None:
         host = str(getattr(client, "host", "") or "").strip().lower()
+    return host
+
+
+def _is_trusted_proxy_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in _LOOPBACK_CLIENT_HOSTS:
+        return True
+    try:
+        address = ip_address(normalized)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    if address.version == 4:
+        return any(address in network for network in _TRUSTED_PROXY_IPV4_NETWORKS)
+    return any(address in network for network in _TRUSTED_PROXY_IPV6_NETWORKS)
+
+
+def _extract_forwarded_client_host(scope: Scope) -> Optional[str]:
+    headers = Headers(raw=list(scope.get("headers") or []))
+    forwarded_for = headers.get("x-forwarded-for")
+    if isinstance(forwarded_for, str) and forwarded_for.strip():
+        for item in forwarded_for.split(","):
+            candidate = str(item or "").strip().lower()
+            if not candidate:
+                continue
+            try:
+                ip_address(candidate)
+                return candidate
+            except ValueError:
+                continue
+
+    real_ip = headers.get("x-real-ip")
+    if isinstance(real_ip, str):
+        candidate = real_ip.strip().lower()
+        if candidate:
+            try:
+                ip_address(candidate)
+                return candidate
+            except ValueError:
+                return None
+    return None
+
+
+def _resolve_rate_limit_client_host(scope: Scope) -> str:
+    direct_host = _extract_scope_client_host(scope)
+    if _is_trusted_proxy_host(direct_host):
+        forwarded_host = _extract_forwarded_client_host(scope)
+        if forwarded_host:
+            return forwarded_host
+    return direct_host or "unknown"
+
+
+def _is_loopback_scope(scope: Scope) -> bool:
+    host = _extract_scope_client_host(scope)
     if host not in _LOOPBACK_CLIENT_HOSTS:
         return False
 
@@ -205,6 +274,9 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
         self._message_rate_limit_max_keys = _env_int(
             "SSE_MESSAGE_RATE_LIMIT_MAX_KEYS", 1024, minimum=1
         )
+        self._heartbeat_ping_seconds = _env_int(
+            "SSE_HEARTBEAT_PING_SECONDS", 15, minimum=5
+        )
         self._message_max_body_bytes = _env_int(
             "SSE_MESSAGE_MAX_BODY_BYTES", 1024 * 1024, minimum=1024
         )
@@ -214,14 +286,7 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
 
     @staticmethod
     def _session_rate_limit_key(scope: Scope, session_id: UUID) -> str:
-        client = scope.get("client")
-        host = ""
-        if isinstance(client, tuple) and client:
-            host = str(client[0] or "").strip().lower()
-        elif client is not None:
-            host = str(getattr(client, "host", "") or "").strip().lower()
-        if not host:
-            host = "unknown"
+        host = _resolve_rate_limit_client_host(scope)
         return f"{host}:{session_id.hex}"
 
     async def _check_message_rate_limit(
@@ -318,6 +383,7 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
                     await EventSourceResponse(
                         content=sse_stream_reader,
                         data_sender_callable=sse_writer,
+                        ping=self._heartbeat_ping_seconds,
                     )(scope, receive, send)
                 finally:
                     self._read_stream_writers.pop(session_id, None)
@@ -489,7 +555,16 @@ def create_sse_app() -> ASGIApp:
         Mount(mcp.settings.message_path, app=transport.handle_post_message),
         *mcp._custom_starlette_routes,
     ]
-    app = Starlette(debug=mcp.settings.debug, routes=routes)
+    @asynccontextmanager
+    async def lifespan(_app: Starlette):
+        yield
+        try:
+            await drain_pending_flush_summaries(reason="runtime.shutdown")
+        finally:
+            await runtime_state.shutdown()
+            await close_sqlite_client()
+
+    app = Starlette(debug=mcp.settings.debug, routes=routes, lifespan=lifespan)
     return apply_mcp_api_key_middleware(app)
 
 

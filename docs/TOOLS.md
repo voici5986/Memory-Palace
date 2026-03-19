@@ -307,6 +307,8 @@ search_memory(
 )
 ```
 
+> 📌 `candidate_multiplier` 只是第一轮扩候选池的提示值，不是无限放大开关。当前实现仍有硬上限，返回 metadata 里会带 `candidate_limit_applied` 告诉你这次实际用了多大的候选池。
+
 **检索模式：**
 
 | 模式 | 说明 |
@@ -385,6 +387,7 @@ compact_context(
 
 - 按当前验证链路，repo-local stdio 和 Docker `/sse` 都能把 `llm_gist` 真正落到持久化结果里
 - 如果远程 chat 路径超时或不可用，`compact_context` 会继续按后续 fallback 降级，不会假装 LLM 已经成功
+- 正常的 backend / SSE / repo-local stdio 退出路径上，系统现在还会对 pending auto-flush summary 做一次 best-effort drain；如果写入被 write_guard 拦住，或退出前这一步失败，它会跳过而不是强行写脏数据
 
 **响应字段：**
 

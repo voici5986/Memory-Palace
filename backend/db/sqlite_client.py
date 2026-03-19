@@ -498,6 +498,7 @@ class SQLiteClient:
         self._sqlite_vec_knn_ready = False
         self._sqlite_vec_knn_dim = max(16, int(self._embedding_dim))
         self._vector_engine_effective = "legacy"
+        self._search_candidate_limit_hard_cap = 1000
 
     @staticmethod
     def _env_int(name: str, default: int) -> int:
@@ -4975,7 +4976,12 @@ class SQLiteClient:
             parsed_max_results = 8
         max_results = max(1, parsed_max_results)
         candidate_multiplier = applied_candidate_multiplier
-        candidate_limit = max_results * candidate_multiplier
+        requested_candidate_limit = max_results * candidate_multiplier
+        candidate_limit = min(
+            requested_candidate_limit,
+            self._search_candidate_limit_hard_cap,
+        )
+        strategy_metadata["candidate_limit_applied"] = candidate_limit
         filters = filters or {}
 
         async with self.session() as session:

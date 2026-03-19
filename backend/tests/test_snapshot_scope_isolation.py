@@ -2,6 +2,7 @@ import json
 import threading
 from pathlib import Path
 
+import db.snapshot as snapshot_module
 from db.snapshot import SnapshotManager
 
 
@@ -170,3 +171,52 @@ def test_snapshot_manager_serializes_same_session_manifest_updates(
         )
     )
     assert set(manifest["resources"]) == {"notes://alpha", "notes://beta"}
+
+
+def test_snapshot_manager_windows_pid_check_uses_win32_api(
+    monkeypatch,
+) -> None:
+    class _FakeKernel32:
+        def __init__(self) -> None:
+            self.closed_handles: list[int] = []
+
+        def OpenProcess(self, access: int, inherit: bool, pid: int) -> int:
+            assert access == 0x1000
+            assert inherit is False
+            assert pid == 4242
+            return 99
+
+        def GetExitCodeProcess(self, handle: int, exit_code_ptr) -> int:
+            assert handle == 99
+            exit_code_ptr._obj.value = 259
+            return 1
+
+        def CloseHandle(self, handle: int) -> int:
+            self.closed_handles.append(handle)
+            return 1
+
+    fake_kernel32 = _FakeKernel32()
+    monkeypatch.setattr(snapshot_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        snapshot_module.ctypes,
+        "WinDLL",
+        lambda *_args, **_kwargs: fake_kernel32,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        snapshot_module.ctypes,
+        "get_last_error",
+        lambda: 0,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        snapshot_module.os,
+        "kill",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("os.kill should not be used on Windows")
+        ),
+        raising=False,
+    )
+
+    assert SnapshotManager._pid_is_alive(4242) is True
+    assert fake_kernel32.closed_handles == [99]

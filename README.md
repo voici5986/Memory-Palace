@@ -74,9 +74,13 @@ The same rule now applies to Dashboard tree writes as well: `POST /browse/node`,
 
 Within the same `session_id`, snapshot writes are now serialized as well, and both `manifest.json` and individual snapshot JSON files are written through atomic replace. In plain terms: if multiple local processes share one repo checkout and touch the same Review session, the snapshot ledger is much less likely to lose entries or leave behind half-written JSON files.
 
+Normal backend, SSE, and repo-local stdio shutdown paths now also do a **best-effort drain** for pending `compact_context` / auto-flush summaries. In plain language: before the process exits cleanly, the system tries once to persist any pending flush summary; if that step fails, it skips it instead of forcing a risky last-minute write.
+
 ### 🔍 Unified Retrieval Engine
 
 Three retrieval modes — `keyword`, `semantic`, and `hybrid` — with automatic degradation. When external embedding services are unavailable, the system gracefully falls back to keyword search and reports `degrade_reasons` when degradation occurs.
+
+`candidate_multiplier` is still only a first-round expansion hint, not an unlimited pool-size switch. The current implementation keeps a hard cap on the effective candidate pool and exposes the applied value as `candidate_limit_applied` in metadata.
 
 ### 🧠 Intent-Aware Search
 
@@ -93,6 +97,8 @@ One protocol, many clients: the public docs focus on the most practical paths fo
 ### 📦 Flexible Deployment
 
 Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Docker support and one-click scripts. The broadest validated path today is still `macOS + Docker`; native Windows now has a repo-local stdio path through `backend/mcp_wrapper.py`, while remote and GUI-host combinations should still be re-checked in the target environment.
+
+On the repository-shipped Docker / GHCR compose paths, when `backend` and `sse` share the same SQLite data volume, compose now forces WAL by default to reduce `database is locked` style write contention.
 
 ### 📊 Built-in Observability Dashboard
 

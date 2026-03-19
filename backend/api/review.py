@@ -570,9 +570,7 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
 
         # Rollback of create = delete the memory/path and any later descendants.
         # Descendants must be removed first to avoid leaving dangling child paths.
-        descendants_deleted = 0
-        orphan_memories_deleted = 0
-        descendant_memory_ids: List[int] = []
+        descendant_targets: List[Tuple[str, str, Optional[int]]] = []
 
         if path:
             # Descendants may be created under any alias path that points to the same
@@ -631,79 +629,71 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
                     or (child_domain, child_path) in root_aliases
                 ):
                     continue
-                try:
-                    async def _write_task_remove_child(
-                        _child_path: str = child_path,
-                        _child_domain: str = child_domain,
-                    ) -> Any:
-                        return await client.remove_path(_child_path, _child_domain)
-
-                    await _run_write_lane(
-                        "rollback.remove_path",
-                        _write_task_remove_child,
-                        session_id=lane_session_id,
-                    )
-                    descendants_deleted += 1
-                except ValueError:
-                    # Path already removed by concurrent/manual operations.
-                    continue
-
                 child_memory_id = item.get("memory_id")
+                parsed_memory_id: Optional[int] = None
                 try:
-                    parsed_memory_id = int(child_memory_id)
+                    parsed_candidate = int(child_memory_id)
+                    if parsed_candidate > 0:
+                        parsed_memory_id = parsed_candidate
                 except (TypeError, ValueError):
-                    continue
-                if parsed_memory_id > 0:
-                    descendant_memory_ids.append(parsed_memory_id)
+                    parsed_memory_id = None
+                descendant_targets.append((child_domain, child_path, parsed_memory_id))
 
-        current = await client.get_memory_by_path(
-            path, domain, reinforce_access=False
+        descendant_memory_ids = list(
+            dict.fromkeys(
+                memory_id
+                for _, _, memory_id in descendant_targets
+                if isinstance(memory_id, int) and memory_id > 0
+            )
         )
 
-        # Best-effort cleanup of memories orphaned by descendant path deletion.
-        # require_orphan=True ensures we only delete in safe conditions.
-        parent_memory_id = current.get("id") if current else None
-        for memory_id in list(dict.fromkeys(descendant_memory_ids)):
-            if parent_memory_id is not None and memory_id == parent_memory_id:
-                continue
-            try:
-                async def _write_task_delete_orphan(
-                    _memory_id: int = memory_id,
-                ) -> Any:
-                    return await client.permanently_delete_memory(
-                        _memory_id,
+        async def _write_task_delete_create_tree() -> Dict[str, Any]:
+            descendants_deleted = 0
+            orphan_memories_deleted = 0
+
+            for child_domain, child_path, _memory_id in descendant_targets:
+                try:
+                    await client.remove_path(child_path, child_domain)
+                    descendants_deleted += 1
+                except ValueError:
+                    continue
+
+            current = await client.get_memory_by_path(
+                path, domain, reinforce_access=False
+            )
+            parent_memory_id = current.get("id") if current else None
+            for memory_id in descendant_memory_ids:
+                if parent_memory_id is not None and memory_id == parent_memory_id:
+                    continue
+                try:
+                    await client.permanently_delete_memory(
+                        memory_id,
                         require_orphan=True,
                     )
+                    orphan_memories_deleted += 1
+                except (ValueError, PermissionError, RuntimeError):
+                    continue
 
-                await _run_write_lane(
-                    "rollback.delete_orphan_memory",
-                    _write_task_delete_orphan,
-                    session_id=lane_session_id,
-                )
-                orphan_memories_deleted += 1
-            except (ValueError, PermissionError, RuntimeError):
-                continue
+            if not current:
+                return {
+                    "deleted": True,
+                    "descendants_deleted": descendants_deleted,
+                    "orphan_memories_deleted": orphan_memories_deleted,
+                }
 
-        if not current:
+            await client.permanently_delete_memory(current["id"])
             return {
                 "deleted": True,
                 "descendants_deleted": descendants_deleted,
                 "orphan_memories_deleted": orphan_memories_deleted,
             }
-        try:
-            async def _write_task_delete_current() -> Any:
-                return await client.permanently_delete_memory(current["id"])
 
-            await _run_write_lane(
-                "rollback.delete_memory",
-                _write_task_delete_current,
+        try:
+            return await _run_write_lane(
+                "rollback.delete_create_tree",
+                _write_task_delete_create_tree,
                 session_id=lane_session_id,
             )
-            return {
-                "deleted": True,
-                "descendants_deleted": descendants_deleted,
-                "orphan_memories_deleted": orphan_memories_deleted,
-            }
         except (ValueError, PermissionError, RuntimeError) as e:
             raise HTTPException(status_code=409, detail=f"Cannot delete '{uri}': {e}")
     

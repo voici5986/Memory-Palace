@@ -156,6 +156,42 @@ def test_sse_auth_accepts_bearer_token(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json().get("ok") is True
 
+
+def test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy() -> None:
+    session_id = uuid4()
+    key = run_sse.MemoryPalaceSseServerTransport._session_rate_limit_key(
+        {
+            "type": "http",
+            "path": "/messages",
+            "client": ("172.18.0.10", 50000),
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.8, 172.18.0.10"),
+                (b"x-real-ip", b"198.51.100.8"),
+            ],
+        },
+        session_id,
+    )
+
+    assert key == f"198.51.100.8:{session_id.hex}"
+
+
+def test_sse_rate_limit_ignores_forwarded_client_ip_from_untrusted_peer() -> None:
+    session_id = uuid4()
+    key = run_sse.MemoryPalaceSseServerTransport._session_rate_limit_key(
+        {
+            "type": "http",
+            "path": "/messages",
+            "client": ("198.51.100.99", 50000),
+            "headers": [
+                (b"x-forwarded-for", b"203.0.113.8"),
+                (b"x-real-ip", b"203.0.113.8"),
+            ],
+        },
+        session_id,
+    )
+
+    assert key == f"198.51.100.99:{session_id.hex}"
+
 @pytest.mark.anyio
 async def test_read_request_body_with_limit_rejects_stream_without_content_length() -> None:
     messages = [

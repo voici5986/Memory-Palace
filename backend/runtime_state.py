@@ -478,6 +478,20 @@ class SessionFlushTracker:
             self._events.pop(sid, None)
             self._session_last_seen.pop(sid, None)
 
+    async def pending_session_ids(self) -> List[str]:
+        async with self._guard:
+            pending = [
+                sid
+                for sid, queue in self._events.items()
+                if queue
+            ]
+            pending.sort(
+                key=lambda sid: self._session_last_seen.get(
+                    sid, (float("-inf"), -1)
+                )
+            )
+            return pending
+
     async def summary(self) -> Dict[str, Any]:
         """Return pending flush workload stats for SM-Lite observability."""
         async with self._guard:

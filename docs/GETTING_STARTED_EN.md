@@ -240,6 +240,8 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 > ```
 >
 > With that in place, `/sse`, `/messages`, and `/sse/messages` are also proxied to the local SSE process, so you do not need to hand-wire CORS just for local debugging.
+>
+> If you are doing a **non-root-path deployment** (for example the frontend lives under `/memory-palace/` and the backend API is exposed as `/memory-palace/api`), the frontend build can also set `VITE_API_BASE_URL`. By default it still uses `/api`, which remains the better fit for local Vite proxying and the repository-shipped Docker path.
 
 <p align="center">
   <img src="images/setup-assistant-en.png" width="900" alt="Memory Palace first-run setup assistant (English mode)" />
@@ -570,6 +572,11 @@ In plain language:
 - each stdio MCP client is usually a separate Python process
 - different processes do not share the same in-process write lock
 - WAL plus a larger `busy_timeout` reduces `database is locked` failures when several clients write at the same time
+
+One more note about the current default path:
+
+- if you use the repository-shipped Docker / GHCR compose path, compose already forces the journal mode to `wal` when `backend` and `sse` share the same SQLite data volume
+- the `.env` block above is mainly for **repo-local stdio / manually started multi-process local paths**
 
 ### 6.3 Client Configuration Examples
 

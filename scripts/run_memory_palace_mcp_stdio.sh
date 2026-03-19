@@ -17,7 +17,15 @@ read_env_value() {
   if [[ ! -f "${file_path}" ]]; then
     return 0
   fi
-  awk -F= -v target="${key}" '$1 == target { print substr($0, index($0, "=") + 1) }' "${file_path}" | tail -n 1
+  "${VENV_PYTHON}" - "${file_path}" "${key}" <<'PY'
+from dotenv import dotenv_values
+import sys
+
+file_path, key = sys.argv[1], sys.argv[2]
+value = dotenv_values(file_path).get(key)
+if value is not None:
+    print(value, end="")
+PY
 }
 
 normalize_database_url() {

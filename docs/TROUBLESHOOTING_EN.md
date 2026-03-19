@@ -107,6 +107,14 @@ The repo-local `scripts/run_memory_palace_mcp_stdio.sh` path only serves:
 
 It does not reuse Docker container `/app/data`, and it also treats `/data/...`-style container sqlite paths as the same local misconfiguration. If it detects that the local `.env` still uses a container path, it now refuses to start explicitly instead of pretending the handshake can continue.
 
+One small boundary that is easy to misread: the repo-local shell wrapper and native-Windows `backend/mcp_wrapper.py` now use the same `.env` parsing rules. So a value like this is fine by itself:
+
+```dotenv
+DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
+```
+
+The real problem is still only whether that path points into the container.
+
 **How to fix it**:
 
 1. Open the repository-root `.env`

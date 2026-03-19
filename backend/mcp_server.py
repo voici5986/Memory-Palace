@@ -1460,8 +1460,10 @@ async def _flush_session_summary_to_memory(
     reason: str,
     force: bool,
     max_lines: int,
+    session_id_override: Optional[str] = None,
+    defer_index_override: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    session_id = get_session_id()
+    session_id = str(session_id_override or "").strip() or get_session_id()
     should_flush = force or await runtime_state.flush_tracker.should_flush(
         session_id=session_id
     )
@@ -1565,7 +1567,10 @@ async def _flush_session_summary_to_memory(
             if isinstance(degrade_reasons, list) and degrade_reasons:
                 payload["degrade_reasons"] = list(dict.fromkeys(degrade_reasons))
         return payload
-    defer_index = await _should_defer_index_on_write()
+    if defer_index_override is None:
+        defer_index = await _should_defer_index_on_write()
+    else:
+        defer_index = bool(defer_index_override)
     result = await client.create_memory(
         parent_path=parent_path,
         content=content,
@@ -1667,6 +1672,90 @@ async def _maybe_auto_flush(client: Any, *, reason: str) -> Optional[Dict[str, A
         )
     finally:
         _AUTO_FLUSH_IN_PROGRESS.discard(session_id)
+
+
+async def drain_pending_flush_summaries(
+    *,
+    reason: str = "runtime.shutdown",
+    max_lines: Optional[int] = None,
+) -> Dict[str, Any]:
+    if not AUTO_FLUSH_ENABLED:
+        return {
+            "attempted": 0,
+            "flushed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "results": [],
+            "disabled": True,
+        }
+
+    session_ids = await runtime_state.flush_tracker.pending_session_ids()
+    if not session_ids:
+        return {
+            "attempted": 0,
+            "flushed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "results": [],
+            "disabled": False,
+        }
+
+    client = get_sqlite_client()
+    results: List[Dict[str, Any]] = []
+    flushed = 0
+    skipped = 0
+    failed = 0
+    summary_lines = AUTO_FLUSH_SUMMARY_LINES if max_lines is None else max(1, int(max_lines))
+
+    for session_id in session_ids:
+        if session_id in _AUTO_FLUSH_IN_PROGRESS:
+            skipped += 1
+            results.append(
+                {
+                    "session_id": session_id,
+                    "flushed": False,
+                    "reason": "already_in_progress",
+                }
+            )
+            continue
+
+        _AUTO_FLUSH_IN_PROGRESS.add(session_id)
+        try:
+            payload = await _flush_session_summary_to_memory(
+                client=client,
+                source="auto_flush",
+                reason=reason,
+                force=True,
+                max_lines=summary_lines,
+                session_id_override=session_id,
+                defer_index_override=False,
+            )
+            results.append({"session_id": session_id, **payload})
+            if payload.get("flushed"):
+                flushed += 1
+            else:
+                skipped += 1
+        except Exception as exc:
+            failed += 1
+            results.append(
+                {
+                    "session_id": session_id,
+                    "flushed": False,
+                    "reason": "exception",
+                    "error": type(exc).__name__,
+                }
+            )
+        finally:
+            _AUTO_FLUSH_IN_PROGRESS.discard(session_id)
+
+    return {
+        "attempted": len(session_ids),
+        "flushed": flushed,
+        "skipped": skipped,
+        "failed": failed,
+        "results": results,
+        "disabled": False,
+    }
 
 
 async def _run_write_lane(operation: str, fn):
@@ -4701,4 +4790,10 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(startup())
-    mcp.run()
+    try:
+        mcp.run()
+    finally:
+        try:
+            asyncio.run(drain_pending_flush_summaries(reason="runtime.shutdown"))
+        except Exception:
+            pass

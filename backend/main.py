@@ -207,6 +207,12 @@ async def lifespan(app: FastAPI):
     
     # 关闭时
     print("Closing database connections...")
+    try:
+        from mcp_server import drain_pending_flush_summaries
+
+        await drain_pending_flush_summaries(reason="runtime.shutdown")
+    except Exception as exc:
+        print(f"Best-effort flush drain skipped: {type(exc).__name__}")
     await runtime_state.shutdown()
     await close_sqlite_client()
 

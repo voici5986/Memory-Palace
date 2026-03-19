@@ -107,6 +107,14 @@ repo-local `scripts/run_memory_palace_mcp_stdio.sh` 只服务于：
 
 它不会复用 Docker 容器里的 `/app/data`，也不会把 `/data/...` 这类容器内 sqlite 路径当成本机路径。现在如果它发现本地 `.env` 仍在用容器路径，会直接拒绝启动，而不是再假装握手成功。
 
+补一条容易误会的小边界：现在 repo-local `bash` wrapper 和原生 Windows 的 `backend/mcp_wrapper.py` 都已经统一用同一套 `.env` 解析逻辑了。也就是说，像下面这种写法本身不是问题：
+
+```dotenv
+DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
+```
+
+真正的问题仍然只是：它是不是容器内路径。
+
 **处理方式**：
 
 1. 打开仓库根目录 `.env`

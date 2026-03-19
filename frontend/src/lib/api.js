@@ -1,8 +1,15 @@
 import axios from 'axios';
 import i18n from '../i18n';
 
+const resolveApiBaseURL = () => {
+  const configured = import.meta.env?.VITE_API_BASE_URL;
+  return typeof configured === 'string' && configured.trim()
+    ? configured.trim()
+    : '/api';
+};
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: resolveApiBaseURL(),
   timeout: 15000,
 });
 

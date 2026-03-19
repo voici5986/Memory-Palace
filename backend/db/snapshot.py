@@ -25,6 +25,7 @@ import shutil
 import stat
 import tempfile
 import time
+import ctypes
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -219,6 +220,23 @@ class SnapshotManager:
     def _pid_is_alive(pid: int) -> bool:
         if pid <= 0:
             return False
+        if os.name == "nt":
+            process_query_limited_information = 0x1000
+            error_access_denied = 5
+            still_active = 259
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = kernel32.OpenProcess(
+                process_query_limited_information, False, pid
+            )
+            if not handle:
+                return ctypes.get_last_error() == error_access_denied
+            try:
+                exit_code = ctypes.c_ulong()
+                if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+                    return True
+                return int(exit_code.value) == still_active
+            finally:
+                kernel32.CloseHandle(handle)
         try:
             os.kill(pid, 0)
         except PermissionError:

@@ -239,6 +239,8 @@ VITE v7.x.x  ready in xxx ms
 > ```
 >
 > 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起代理到本机 SSE 进程；不需要再手动改 CORS。
+>
+> 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。
 
 <p align="center">
   <img src="images/setup-assistant-zh.png" width="900" alt="Memory Palace 首启配置向导（中文模式）" />
@@ -567,6 +569,11 @@ RUNTIME_WRITE_BUSY_TIMEOUT_MS=5000
 - 每个 stdio MCP 客户端通常都是独立 Python 进程
 - 不同进程不会共享同一把进程内写锁，只能靠 SQLite 文件锁协调
 - 打开 WAL 并适当增大 `busy_timeout`，能明显降低多客户端同时写入时的 `database is locked`
+
+补一句当前默认口径：
+
+- 如果你走的是仓库自带的 Docker / GHCR compose 路径，`backend` 和 `sse` 共享同一份 SQLite 数据卷时，compose 已经默认把 journal mode 强制改成 `wal`
+- 上面这组 `.env` 主要还是给 **repo-local stdio / 本地手动多进程** 这类路径准备的
 
 ### 6.3 客户端配置示例
 

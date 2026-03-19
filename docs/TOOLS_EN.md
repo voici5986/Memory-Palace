@@ -307,6 +307,8 @@ search_memory(
 )
 ```
 
+> 📌 `candidate_multiplier` is only a first-round expansion hint, not an unlimited pool-size switch. The current implementation still keeps a hard cap, and the metadata now reports the effective value as `candidate_limit_applied`.
+
 **Retrieval Modes:**
 
 | Mode | Description |
@@ -385,6 +387,7 @@ compact_context(
 
 - In the current verified path, both repo-local stdio and Docker `/sse` can persist `llm_gist` end-to-end
 - If the remote chat path times out or is unavailable, `compact_context` degrades to the next fallback instead of pretending the LLM step succeeded
+- Normal backend / SSE / repo-local stdio shutdown paths now also do one best-effort drain for pending auto-flush summaries; if write_guard blocks that write, or the drain fails during shutdown, the system skips it instead of forcing a dirty last-minute write
 
 **Response Fields:**
 

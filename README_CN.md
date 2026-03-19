@@ -70,9 +70,13 @@
 
 现在同一个 `session_id` 下的快照写入也会做串行化，`manifest.json` 和单个快照 JSON 文件都会通过原子替换方式落盘。用人话说就是：如果多个本地进程共用同一个仓库 checkout，并且刚好写到同一个 Review session，这条快照记录链更不容易丢条目，也不容易留下半写入的 JSON 文件。
 
+正常的 backend、SSE、repo-local stdio 退出路径上，`compact_context` / auto-flush 这类 pending summary 现在还会做一次 **best-effort drain**。说人话就是：如果进程准备正常退出，系统会先尽量把还没落盘的 flush summary 补写成记忆；如果这一步失败，就跳过，不会为了“硬写进去”再冒额外风险。
+
 ### 🔍 统一检索引擎
 
 三种检索模式——`keyword`（关键词）、`semantic`（语义）、`hybrid`（混合）——支持自动降级。当外部 Embedding 服务不可用时，系统自动回退到关键词搜索，并在发生降级时于响应中报告 `degrade_reasons`。
+
+`candidate_multiplier` 现在仍然只是“第一轮扩候选池”的提示值，不是无限放大开关。当前实现会继续保留硬上限，并在 metadata 里返回实际生效的 `candidate_limit_applied`。
 
 ### 🧠 意图感知搜索
 
@@ -89,6 +93,8 @@
 ### 📦 灵活部署
 
 四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本。当前最完整的大链路验证仍是 `macOS + Docker`；原生 Windows 现在已有通过 `backend/mcp_wrapper.py` 的 repo-local stdio 路径，但远程场景和 GUI 宿主组合仍建议按目标环境再复核一次。
+
+如果你走的是仓库自带的 Docker / GHCR compose 路径，`backend` 和 `sse` 共享同一份 SQLite 数据卷时，compose 现在会默认强制打开 WAL，减少 `database is locked` 这类并发写冲突。
 
 ### 📊 内置可观测性仪表盘
 

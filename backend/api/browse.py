@@ -7,7 +7,7 @@ hierarchical browser. Every path is just a node with content and children.
 
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 from db import get_sqlite_client
 from db.snapshot import _resolve_current_database_scope, get_snapshot_manager
@@ -28,10 +28,14 @@ _VALID_DOMAINS = list(
         + sorted(_READ_ONLY_DOMAINS)
     )
 )
+_BROWSE_CONTENT_MAX_CHARS = max(
+    1,
+    int(os.getenv("BROWSE_CONTENT_MAX_CHARS", str(1024 * 1024)) or (1024 * 1024)),
+)
 
 
 class NodeUpdate(BaseModel):
-    content: str | None = None
+    content: str | None = Field(default=None, max_length=_BROWSE_CONTENT_MAX_CHARS)
     priority: int | None = None
     disclosure: str | None = None
 
@@ -39,7 +43,7 @@ class NodeUpdate(BaseModel):
 class NodeCreate(BaseModel):
     parent_path: str = ""
     title: str | None = None
-    content: str
+    content: str = Field(max_length=_BROWSE_CONTENT_MAX_CHARS)
     priority: int = 0
     disclosure: str | None = None
     domain: str = "core"

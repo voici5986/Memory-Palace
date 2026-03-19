@@ -74,6 +74,62 @@ async def test_rollback_path_create_cascades_descendants_and_cleans_orphans(
 
 
 @pytest.mark.asyncio
+async def test_rollback_path_create_uses_single_write_lane_for_tree_delete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-create-single-lane.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    root = await client.create_memory(
+        parent_path="",
+        content="root content",
+        priority=1,
+        title="parent",
+        domain="core",
+    )
+    await client.create_memory(
+        parent_path="parent",
+        content="child content",
+        priority=1,
+        title="child",
+        domain="core",
+    )
+    await client.create_memory(
+        parent_path="parent/child",
+        content="grandchild content",
+        priority=1,
+        title="grand",
+        domain="core",
+    )
+
+    lane_calls: list[tuple[str, str | None]] = []
+
+    async def _inline_run_write_lane(operation: str, task, *, session_id=None):
+        lane_calls.append((operation, session_id))
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _inline_run_write_lane)
+
+    payload = await review_api._rollback_path(
+        {
+            "operation_type": "create",
+            "domain": "core",
+            "path": "parent",
+            "uri": "core://parent",
+            "memory_id": root["id"],
+        },
+        lane_session_id="review-single-lane",
+    )
+
+    assert payload["deleted"] is True
+    assert lane_calls == [("rollback.delete_create_tree", "review-single-lane")]
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_rollback_path_create_cascades_descendants_under_alias_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

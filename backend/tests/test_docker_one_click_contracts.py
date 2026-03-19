@@ -121,11 +121,15 @@ def test_compose_waits_for_healthy_sse_service() -> None:
     assert "healthcheck:" in backend_block
     assert "http://127.0.0.1:8000/health" in backend_block
     assert 'host.docker.internal:host-gateway' in backend_block
+    assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in backend_block
+    assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in backend_block
     assert "healthcheck:" in sse_block
     assert "http://127.0.0.1:8000/health" in sse_block
     assert "X-MCP-API-Key" in sse_block
     assert "os.getenv('MCP_API_KEY')" in sse_block
     assert 'host.docker.internal:host-gateway' in sse_block
+    assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in sse_block
+    assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in sse_block
     assert "sse:\n        condition: service_healthy" in frontend_block
 
 

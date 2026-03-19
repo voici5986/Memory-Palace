@@ -81,6 +81,16 @@ Authorization: Bearer <MCP_API_KEY>
 - 当前 session 的后续请求需要等窗口释放
 - 超过 `SSE_MESSAGE_MAX_BODY_BYTES` 时会在 JSON 解析前直接返回 `413`
 
+如果这条 SSE 链路跑在**受信代理后面**（例如仓库自带的 Docker 前端代理，或你自己控制的私有反向代理），当前限流 key 会优先读取：
+
+- `X-Forwarded-For` 里的第一个合法 IP
+- 取不到时再看 `X-Real-IP`
+- 只有不在受信代理后面时，才直接按当前连接对端地址分桶
+
+这意味着在 Docker 默认代理路径下，`/messages` 的 burst limit 不再把所有客户端都算成同一个前端容器地址。
+
+另外，`/sse` 流默认还会发心跳（当前默认 15 秒），主要目的是让长连接在代理链路上更稳定，不至于看起来像“静默挂住”。
+
 这层限流主要用于拦截**误配置客户端或单 session 突发刷写**；它不是公网暴露场景下的完整 DDoS 防护，也不能替代外层的 VPN、反向代理限流或网络访问控制。
 
 ### 无 Key 时的默认行为
@@ -106,6 +116,7 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_week6_sse_auth.py` — SSE 鉴权场景
 - `backend/tests/test_week6_sse_auth.py::test_sse_messages_rate_limit_returns_429` — `/messages` 限流与 `Retry-After` 行为
 - `backend/tests/test_week6_sse_auth.py::test_sse_messages_reject_oversized_body_with_413` — `/messages` 请求体大小上限
+- `backend/tests/test_week6_sse_auth.py::test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy` — 受信代理下优先使用真实客户端 IP
 - `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 读写鉴权
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 

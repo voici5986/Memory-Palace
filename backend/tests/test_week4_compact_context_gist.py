@@ -34,10 +34,14 @@ class _FakeFlushTracker:
         _ = session_id
         self.marked = True
 
+    async def pending_session_ids(self) -> List[str]:
+        return ["default"]
+
 
 class _FakeCompactClient:
     def __init__(self) -> None:
         self.created_payload: Dict[str, Any] = {}
+        self.created_payloads: List[Dict[str, Any]] = []
         self.gist_payload: Dict[str, Any] = {}
         self.memory_id = 41
 
@@ -46,6 +50,7 @@ class _FakeCompactClient:
 
     async def create_memory(self, **kwargs: Any) -> Dict[str, Any]:
         self.created_payload = dict(kwargs)
+        self.created_payloads.append(dict(kwargs))
         return {
             "id": self.memory_id,
             "domain": kwargs.get("domain", "notes"),
@@ -208,6 +213,61 @@ async def test_compact_context_falls_back_with_degrade_reasons_when_llm_errors(
     assert payload["gist_method"] == "extractive_bullets"
     assert "degrade_reasons" in payload
     assert "compact_gist_llm_exception:RuntimeError" in payload["degrade_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_drain_pending_flush_summaries_flushes_each_pending_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DrainableFlushTracker(_FakeFlushTracker):
+        def __init__(self, summaries: Dict[str, str]) -> None:
+            super().__init__("")
+            self.summaries = dict(summaries)
+            self.marked_sessions: List[str] = []
+
+        async def should_flush(self, *, session_id: Optional[str]) -> bool:
+            return bool(session_id and session_id in self.summaries)
+
+        async def build_summary(
+            self, *, session_id: Optional[str], limit: int = 12
+        ) -> str:
+            _ = limit
+            return self.summaries.get(str(session_id or ""), "")
+
+        async def mark_flushed(self, *, session_id: Optional[str]) -> None:
+            sid = str(session_id or "")
+            self.marked_sessions.append(sid)
+            self.summaries.pop(sid, None)
+
+        async def pending_session_ids(self) -> List[str]:
+            return list(self.summaries.keys())
+
+    fake_client = _FakeCompactClient()
+    fake_tracker = _DrainableFlushTracker(
+        {
+            "session-a": "Session compaction notes:\n- a1\n- a2",
+            "session-b": "Session compaction notes:\n- b1\n- b2",
+        }
+    )
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", fake_tracker)
+    monkeypatch.setattr(mcp_server.runtime_state.promotion_tracker, "record_event", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _false_async)
+    monkeypatch.setattr(mcp_server, "AUTO_FLUSH_ENABLED", True)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    payload = await mcp_server.drain_pending_flush_summaries(reason="runtime.shutdown")
+
+    assert payload["attempted"] == 2
+    assert payload["flushed"] == 2
+    assert payload["failed"] == 0
+    assert fake_tracker.marked_sessions == ["session-a", "session-b"]
+    assert len(fake_client.created_payloads) == 2
+    created_contents = [item["content"] for item in fake_client.created_payloads]
+    assert any("- session_id: session-a" in item for item in created_contents)
+    assert any("- session_id: session-b" in item for item in created_contents)
 
 
 @pytest.mark.asyncio
