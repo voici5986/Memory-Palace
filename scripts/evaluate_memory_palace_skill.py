@@ -31,6 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PROJECT_ROOT
 CANONICAL_DIR = PROJECT_ROOT / "docs" / "skills" / "memory-palace"
 BACKEND_DIR = PROJECT_ROOT / "backend"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md"
 WRAPPER_RELATIVE = Path("scripts/run_memory_palace_mcp_stdio.sh")
 WRAPPER_ABSOLUTE = PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh"
 PYTHON_WRAPPER_RELATIVE = Path("backend/mcp_wrapper.py")
@@ -102,6 +103,16 @@ class CheckResult:
     status: str
     summary: str
     details: str = ""
+
+
+def _resolve_report_path(env_name: str, default_path: Path) -> Path:
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return default_path
+    path = Path(raw_value).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
 
 
 def run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
@@ -650,8 +661,7 @@ def check_gate_syntax() -> CheckResult:
     if gate_script is None:
         return CheckResult(
             "SKIP",
-            "run_post_change_checks.sh 在当前仓库布局中缺失，跳过该项",
-            "missing: " + ", ".join(str(path) for path in gate_candidates),
+            "run_post_change_checks.sh 不属于公开仓校验范围，跳过该项",
         )
     bash_bin = shutil.which("bash")
     if not bash_bin:
@@ -1209,7 +1219,14 @@ def _antigravity_installed_workflow() -> Path | None:
 
 def smoke_antigravity() -> CheckResult:
     if not ANTIGRAVITY_BIN.is_file():
-        return CheckResult("FAIL", "Antigravity IDE Host 兼容检查失败：app-bundled CLI 缺失")
+        return CheckResult(
+            "MANUAL",
+            "Antigravity IDE Host 待目标宿主手工补验：当前机器未发现 app-bundled CLI",
+            (
+                "Use `python scripts/render_ide_host_config.py --host antigravity --launcher python-wrapper` "
+                "to verify the repo-local projection path, then re-check on a machine with Antigravity installed."
+            ),
+        )
     installed_workflow = _antigravity_installed_workflow()
     if installed_workflow is not None:
         if not ANTIGRAVITY_WORKFLOW_SOURCE.is_file():
@@ -1283,7 +1300,7 @@ def generate_markdown(results: dict[str, CheckResult]) -> str:
 
 
 def main() -> int:
-    report_path = PROJECT_ROOT / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md"
+    report_path = _resolve_report_path("MEMORY_PALACE_SKILL_REPORT_PATH", DEFAULT_REPORT_PATH)
     checks = [
         ("structure", check_structure),
         ("description_contract", check_description_contract),
@@ -1311,6 +1328,7 @@ def main() -> int:
             flush=True,
         )
     markdown = generate_markdown(results)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(markdown + "\n", encoding="utf-8")
     print(report_path)
     return 0

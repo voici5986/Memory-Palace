@@ -9,7 +9,6 @@ import ReviewPage from './features/review/ReviewPage';
 import MemoryBrowser from './features/memory/MemoryBrowser';
 import MaintenancePage from './features/maintenance/MaintenancePage';
 import ObservabilityPage from './features/observability/ObservabilityPage';
-import AgentationLite from './components/AgentationLite';
 import FluidBackground from './components/FluidBackground';
 import SetupAssistantModal, {
   SETUP_ASSISTANT_DISMISSED_STORAGE_KEY,
@@ -188,8 +187,6 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
             </Routes>
         </div>
       </div>
-
-      {import.meta.env.DEV && <AgentationLite />}
     </div>
   );
 }

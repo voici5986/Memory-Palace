@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS 平台还会自动检测并填充 `DATABASE_URL`。
+> apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
@@ -152,6 +152,8 @@ bash scripts/apply_profile.sh macos b
 > - `CORS_ALLOW_ORIGINS=`：本地开发留空；要开放给浏览器跨域访问时再写明确域名
 >
 > 上面这些模型名只是占位示例，不是项目硬依赖。Memory Palace 不绑定某个固定 provider 或模型家族；请直接改成你自己的 OpenAI-compatible 服务里实际可用的 embedding / reranker / chat model id。
+>
+> 如果你后面要用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，这些示例 model id 也会被当成未解析占位符；在换成真实值之前，脚本会直接在 `docker compose` 前 fail-closed。
 >
 > 如果你接下来就要在本地打开 Dashboard，或者直接用 `curl` 调 `/browse` / `/review` / `/maintenance`，建议在 `.env` 里再补一项鉴权配置（二选一）：
 >
@@ -217,9 +219,9 @@ VITE v7.x.x  ready in xxx ms
 
 - `docs/DASHBOARD_GUIDE_CN.md`
 
-> 如果你在本地手动启动时看到右上角的 `Set API key`，这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。第 5 节会继续说明本地验证方式。
+> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。第 5 节会继续说明本地验证方式。
 
-> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `Set API key`，在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
+> 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
 > 如果你选择“只保存 Dashboard 密钥”，这把 key 会一直保留在当前浏览器里，直到你手动清除。向导里的 `Profile C/D` 预设现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
@@ -314,7 +316,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
 >
-> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `Set API key`，因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
+> 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
 >
 > 当前 Docker Compose 还会额外等 **backend 和 SSE 各自的 `/health`** 都通过，才把 frontend 视为 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
@@ -388,9 +390,10 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 
 当前仓库已经把以下典型本地产物放入 `<repo-root>/.gitignore`：
 
+- 环境与密钥文件：`.env`、`.env.*`（保留 `.env.example`）
 - 运行期数据库：`*.db`、`*.sqlite`、`*.sqlite3`
 - 数据库锁文件：`*.init.lock`、`*.migrate.lock`
-- 本地工具配置：`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`
+- 本地工具配置：`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`、`.playwright-cli/`
 - 本地缓存与临时目录：`.tmp/`、`backend/.pytest_cache/`
 - 前端本地产物：`frontend/node_modules/`、`frontend/dist/`
 - 日志与快照：`*.log`、`snapshots/`、`backups/`
@@ -414,7 +417,8 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-脚本会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。
+脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。
+如果你在并行 review 或 CI 里想隔离输出，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。
 如果你是刚 clone 下来的 GitHub 仓库，暂时看不到这两份文件也正常；它们是运行脚本后才生成的本地产物。
 
 ---

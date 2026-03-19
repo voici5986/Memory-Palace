@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` files are input templates for the scripts, not the final `.env` files we recommend you copy directly. For the user path, keep using `apply_profile.sh/.ps1`; it is the safer path because it also fills paths automatically and deduplicates repeated keys.
 
-> The `apply_profile` script copies `.env.example` to `.env` (or your specified target file) and then appends the override configuration for the corresponding Profile. On macOS, it also automatically detects and fills in `DATABASE_URL`.
+> The `apply_profile` script copies `.env.example` to `.env` (or your specified target file) and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >
@@ -153,6 +153,8 @@ The following are the most commonly used configuration items in `.env` (for more
 > - `CORS_ALLOW_ORIGINS=`: Leave empty for local dev; specify domains only when opening to browser cross-domain access.
 >
 > The model names above are just placeholder examples, not hard project dependencies. Memory Palace is not bound to a specific provider or model family; please change them to actual available embedding / reranker / chat model IDs from your own OpenAI-compatible services.
+>
+> If you later run `docker_one_click.sh/.ps1` for `profile c/d`, those placeholder model IDs are also treated as unresolved placeholders. The script will fail-closed before `docker compose` until you replace them with real values.
 >
 > If you are about to open the Dashboard locally, or directly use `curl` to call `/browse` / `/review` / `/maintenance`, it is suggested to add one of the following auth configurations to `.env`:
 >
@@ -389,9 +391,10 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 
 The repository has already placed typical local artifacts into `<repo-root>/.gitignore`:
 
+- Environment and secret files: `.env`, `.env.*` (keep `.env.example`)
 - Runtime databases: `*.db`, `*.sqlite`, `*.sqlite3`
 - Database lock files: `*.init.lock`, `*.migrate.lock`
-- Local tool configurations: `.mcp.json`, `.mcp.json.bak`, `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, `.gemini/`, `.agent/`
+- Local tool configurations: `.mcp.json`, `.mcp.json.bak`, `.claude/`, `.codex/`, `.cursor/`, `.opencode/`, `.gemini/`, `.agent/`, `.playwright-cli/`
 - Local cache and temporary directories: `.tmp/`, `backend/.pytest_cache/`
 - Frontend local artifacts: `frontend/node_modules/`, `frontend/dist/`
 - Logs and snapshots: `*.log`, `snapshots/`, `backups/`
@@ -415,7 +418,8 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-The scripts will generate summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents.
+The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents.
+If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first.
 If you just cloned the GitHub repository, it is normal if you don't see these two files yet; they are local artifacts generated after running the scripts.
 
 ---

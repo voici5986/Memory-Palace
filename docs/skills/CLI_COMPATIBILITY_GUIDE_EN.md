@@ -210,8 +210,8 @@ python scripts/install_skill.py \
 
 Conclusion:
 
-- **Run the workspace installation once, then open the current repository to use it directly.**
-- If you want to take it to other repositories, add `--scope user --with-mcp`.
+- **The more stable default is still to start with `--scope user --with-mcp`.**
+- If you also want a project-level entry in this repository, add a workspace install afterward.
 
 ### Gemini CLI
 
@@ -226,8 +226,8 @@ Conclusion:
 
 Conclusion:
 
-- **After running the workspace installation, the workspace entry point is ready.**
-- If you want to be more stable or plan to reuse it across repositories, it's still recommended to add `--scope user --with-mcp`.
+- **The more stable default is still to start with `--scope user --with-mcp`.**
+- If you also want a workspace entry in this repository, add a workspace install afterward.
 - If you see `Policy file warning in memory-palace-overrides.toml`, rerun the same `--scope user --with-mcp --force` install first.
 - When documenting for others, it's suggested to state: "smoke has passed, but `gemini_live` has not yet fully passed."
 
@@ -334,7 +334,9 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 
 If this file is temporarily missing from a newly cloned GitHub repository, it is normal; it is a local verification summary generated after running.
 If you plan to forward it to others, read the content yourself first; these local reports might include paths on your machine, client configuration paths, or other environment traces.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
 Additionally, this script defaults to attempting `gemini_live`. If the Gemini configuration can infer the real database path, it will perform a round of `create/update/guard` verification on that database and might leave `notes://gemini_suite_*` test memories; if you only want to do a normal smoke test, you can explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
+If the current machine simply does not have the `Antigravity` host runtime, treat that item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 If the only remaining failed item is `mcp_bindings`, do not assume the repository is broken first. A more common cause is that your local user-scope MCP entries have not yet been synchronized to the current checkout. Rerun:
 
 ```bash
@@ -356,6 +358,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 These two reports are mainly used for supplemental verification and are not intended as primary entry documentation. They are local products that "appear only after running" by default, so it's normal if they aren't in the public GitHub repository.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first and write the e2e report to another local path.
 `MCP_LIVE_E2E_REPORT.md` defaults to using an isolated temporary database and won't touch your official database; however, upon failure, it might still include stderr, logs, or temporary directory paths in the report, so it's also recommended to review the content yourself before forwarding.
 
 ## Positive / Negative Prompts

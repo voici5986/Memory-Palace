@@ -90,7 +90,7 @@ python scripts/sync_memory_palace_skill.py --check
 
 ---
 
-## 3. 第二步：打通当前仓库的 workspace 直连
+## 3. 第二步：先走更稳的 user-scope，再按需补 workspace 入口
 
 `install_skill.py` 现在除了装 skill，还支持：
 
@@ -106,6 +106,18 @@ python scripts/sync_memory_palace_skill.py --check
 - 如果目标 JSON 本身已经坏掉，脚本会直接报出具体文件路径和行列号，不再吐一整屏 Python traceback
 
 ### 推荐命令
+
+新机器上更稳的默认方案，还是先从 `user-scope` 开始：
+
+```bash
+python scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope user \
+  --with-mcp \
+  --force
+```
+
+如果你还想让**当前仓库**额外落一个项目级入口，再补一次 workspace 安装：
 
 ```bash
 python scripts/install_skill.py \
@@ -216,7 +228,8 @@ python scripts/install_skill.py \
 
 结论：
 
-- **打开当前仓库即可直接用**
+- **更稳的默认方案还是先跑 `--scope user --with-mcp`**
+- 如果你还想给当前仓库补一个项目级入口，再额外执行 workspace 安装
 
 ### Gemini CLI
 
@@ -226,8 +239,8 @@ python scripts/install_skill.py \
 
 结论：
 
-- **workspace 入口已经就位**
-- 如果你想更稳，或者准备跨仓复用，再补一次 `--scope user --with-mcp`
+- **更稳的默认方案仍是先跑 `--scope user --with-mcp`**
+- 如果你还想给当前仓库补一个 workspace 入口，再额外执行 workspace 安装
 - 如果你看到 `Policy file warning in memory-palace-overrides.toml`，优先重跑一遍 `--scope user --with-mcp --force`
 - 写给别人看时仍建议保守：smoke 已通过，但 `gemini_live` 还没有到“完全通过”的程度
 
@@ -294,6 +307,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 如果你是刚 clone 下来的 GitHub 仓库，这个文件默认可能还不存在；先跑完命令再看，属于正常现象。它属于本地验证产物，分享前建议自己检查是否包含本机路径、客户端配置路径或其他环境痕迹。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
+如果当前机器根本没有 `Antigravity` 宿主 runtime，就把 `antigravity` 那一项看成“目标宿主上的手工补验还没做”，不要先理解成仓库主链路失败。
 
 这条检查会串行调用多种 CLI；如果你的机器上已经装了 `claude`、`codex`、`opencode`、`gemini`，完整跑完通常要几分钟，不建议看到几十秒无输出就直接当成“挂死”。
 另外它默认还会尝试 `gemini_live`：如果当前 Gemini 配置能反推出真实数据库路径，会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
@@ -318,6 +333,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把 e2e 报告改写到别的本地路径。
 它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。

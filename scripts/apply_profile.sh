@@ -150,13 +150,13 @@ cp "${base_env}" "${target_file}"
 } >> "${target_file}"
 
 if [[ "${platform}" == "macos" ]]; then
-  if grep -Eq '^DATABASE_URL=sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db$' "${target_file}"; then
+  if grep -Eq $'^DATABASE_URL=sqlite\\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\\.db\r?$' "${target_file}"; then
     db_path="${PROJECT_ROOT}/demo.db"
     set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"
     echo "[auto-fill] DATABASE_URL set to ${db_path}"
   fi
 elif [[ "${platform}" == "windows" ]]; then
-  if grep -Eq '^DATABASE_URL=sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db$' "${target_file}"; then
+  if grep -Eq $'^DATABASE_URL=sqlite\\+aiosqlite:///C:/memory_palace/agent_memory\\.db\r?$' "${target_file}"; then
     if db_path="$(resolve_windows_db_path)"; then
       set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:///${db_path}"
       echo "[auto-fill] DATABASE_URL set to ${db_path}"

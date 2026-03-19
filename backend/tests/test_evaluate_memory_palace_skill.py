@@ -123,9 +123,8 @@ def test_check_gate_syntax_skips_when_post_check_script_is_missing(
     result = evaluate_memory_palace_skill.check_gate_syntax()
 
     assert result.status == "SKIP"
-    assert "缺失" in result.summary
-    assert str(tmp_path / "new" / "run_post_change_checks.sh") in result.details
-    assert str(tmp_path.parent / "new" / "run_post_change_checks.sh") in result.details
+    assert "公开仓校验范围" in result.summary
+    assert result.details == ""
 
 
 def test_check_gate_syntax_validates_first_existing_post_check_script(
@@ -938,6 +937,32 @@ def test_smoke_antigravity_requires_rule_and_reference_anchors(
     assert "AGENTS.md" in result.details
     assert "GEMINI.md" in result.details
     assert "trigger-samples.md" in result.details
+
+
+def test_smoke_antigravity_without_runtime_returns_manual(monkeypatch, tmp_path: Path) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+    missing_bin = tmp_path / "missing-antigravity"
+
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ANTIGRAVITY_BIN", missing_bin)
+
+    result = evaluate_memory_palace_skill.smoke_antigravity()
+
+    assert result.status == "MANUAL"
+    assert "待目标宿主手工补验" in result.summary
+    assert "python-wrapper" in result.details
+
+
+def test_resolve_report_path_supports_relative_override(monkeypatch, tmp_path: Path) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+    monkeypatch.setenv("MEMORY_PALACE_SKILL_REPORT_PATH", "tmp/skill-report.md")
+    monkeypatch.setattr(evaluate_memory_palace_skill, "PROJECT_ROOT", tmp_path)
+
+    resolved = evaluate_memory_palace_skill._resolve_report_path(
+        "MEMORY_PALACE_SKILL_REPORT_PATH",
+        tmp_path / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md",
+    )
+
+    assert resolved == tmp_path / "tmp" / "skill-report.md"
 
 
 def test_smoke_antigravity_accepts_agents_and_gemini_rule_hints(

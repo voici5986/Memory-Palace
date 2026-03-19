@@ -190,7 +190,7 @@ frontend/src/
 │   ├── maintenance/MaintenancePage.jsx        # vitality 清理与维护任务
 │   └── observability/ObservabilityPage.jsx    # 检索统计与任务可观测
 ├── components/
-│   ├── AgentationLite.jsx                     # 轻量化 Agent 集成组件
+│   ├── AgentationLite.jsx                     # 轻量化 Agent 集成组件（当前不挂载到主界面）
 │   ├── DiffViewer.jsx                         # Diff 可视化
 │   ├── FluidBackground.jsx                    # 流体动画背景
 │   ├── GlassCard.jsx                          # 毛玻璃卡片
@@ -218,7 +218,7 @@ frontend/src/
 - 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
-- 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `Set API key`，因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
+- 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
 
 ---
 

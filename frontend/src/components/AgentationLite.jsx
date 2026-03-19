@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Crosshair, MessageSquarePlus, Send, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 
-const AGENTATION_HTTP = 'http://127.0.0.1:4747';
+const AGENTATION_HTTP = import.meta.env.VITE_AGENTATION_HTTP || 'http://127.0.0.1:4747';
 const SESSION_KEY = 'agentation_session_memory_palace';
 
 function buildElementPath(element) {

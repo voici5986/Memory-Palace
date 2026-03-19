@@ -44,10 +44,6 @@ vi.mock('./features/observability/ObservabilityPage', () => ({
   default: () => <div>observability-page</div>,
 }));
 
-vi.mock('./components/AgentationLite', () => ({
-  default: () => null,
-}));
-
 describe('App routing', () => {
   beforeEach(async () => {
     memoryMountCounter.current = 0;
@@ -285,6 +281,25 @@ describe('App routing', () => {
 
     const translatedDialog = await screen.findByRole('dialog', { name: '配置 Memory Palace' });
     expect(within(translatedDialog).getByDisplayValue('typed-key-123')).toBeInTheDocument();
+  });
+
+  it('relocalizes setup assistant status errors when switching language', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+    setupApi.getSetupStatus.mockRejectedValueOnce({
+      message: 'Request failed with status code 500',
+    });
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    expect(await within(dialog).findByText('Request failed with status code 500')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByTestId('setup-language-toggle'));
+
+    const translatedDialog = await screen.findByRole('dialog', { name: '配置 Memory Palace' });
+    expect(await within(translatedDialog).findByText('请求失败（状态码 500）')).toBeInTheDocument();
   });
 
   it('maps setup profile presets to the documented B/C/D retrieval shapes', async () => {

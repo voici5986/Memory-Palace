@@ -414,6 +414,10 @@ const en = {
       prepareKeep: 'Prepare Keep ({{count}})',
       prepareDelete: 'Prepare Delete ({{count}})',
       confirmAction: 'Confirm {{action}}',
+      actionLabels: {
+        delete: 'Delete',
+        keep: 'Keep',
+      },
       reviewFallback: 'Review',
       discardReview: 'Discard Review',
       selectionSummary: 'selected: {{selected}}, deletable selected: {{deletable}}',

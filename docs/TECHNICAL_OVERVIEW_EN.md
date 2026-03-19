@@ -190,7 +190,7 @@ frontend/src/
 │   ├── maintenance/MaintenancePage.jsx        # vitality cleanup and maintenance tasks
 │   └── observability/ObservabilityPage.jsx    # retrieval stats and task observability
 ├── components/
-│   ├── AgentationLite.jsx                     # Lightweight Agent integration component
+│   ├── AgentationLite.jsx                     # Lightweight Agent integration helper (currently not mounted in the main dashboard shell)
 │   ├── DiffViewer.jsx                         # Diff visualization
 │   ├── FluidBackground.jsx                    # Fluid animation background
 │   ├── GlassCard.jsx                          # Glassmorphism card

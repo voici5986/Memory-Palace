@@ -53,7 +53,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 
 - 页面能打开
 - 右上角能看到语言切换按钮
-- 页面可能显示 `Set API key`，这不一定是错误
+- 页面可能显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），这不一定是错误
 
 ### 3.2 后端健康检查正常
 
@@ -118,7 +118,7 @@ curl -i http://127.0.0.1:3000/sse
 手工检查：
 
 - Memory / Review / Maintenance 页面不应全部报空白错误
-- 如果页面只是继续显示 `Set API key`，但数据本身能正常加载，这通常是因为代理层持有 key，而浏览器本身不知道那把 key
+- 如果页面只是继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），但数据本身能正常加载，这通常是因为代理层持有 key，而浏览器本身不知道那把 key
 
 ---
 

@@ -71,6 +71,24 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     )
 
 
+def test_profile_external_settings_gate_checks_required_model_ids() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for literal in (
+        "your-embedding-model-id",
+        "your-reranker-model-id",
+        "RETRIEVAL_EMBEDDING_MODEL",
+        "RETRIEVAL_RERANKER_MODEL",
+    ):
+        assert literal in shell_text
+        assert literal in ps1_text
+
+
 def test_compose_waits_for_healthy_sse_service() -> None:
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     backend_block = compose_text.split("\n  backend:\n", 1)[1].split("\n  sse:\n", 1)[0]

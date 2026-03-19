@@ -10,12 +10,12 @@
 
 > 📌 当前版本还有一种很常见的“看起来像坏了，其实是正常门控”的情况：
 >
-> - 页面右上角出现 `Set API key`
+> - 页面右上角出现 `设置 API 密钥`（英文模式下会显示 `Set API key`）
 > - `Memory / Review / Maintenance / Observability` 里出现空态、等待提示或 `401`
 >
 > 这通常不是前端挂了，而是**你还没给受保护接口授权**。
 >
-> 如果你用的是 **Docker 一键部署**，按推荐路径启动时，受保护请求通常已经能直接使用；但页面右上角**仍可能继续显示** `Set API key`，因为浏览器并不知道代理层自动转发的那把 key。优先先看受保护数据是不是也一起 `401` 或空态；只有这些请求也失败时，才需要继续检查 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件、代理配置或手工改动。
+> 如果你用的是 **Docker 一键部署**，按推荐路径启动时，受保护请求通常已经能直接使用；但页面右上角**仍可能继续显示** `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器并不知道代理层自动转发的那把 key。优先先看受保护数据是不是也一起 `401` 或空态；只有这些请求也失败时，才需要继续检查 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件、代理配置或手工改动。
 
 **排查步骤**：
 
@@ -147,7 +147,7 @@ repo-local `scripts/run_memory_palace_mcp_stdio.sh` 只服务于：
   ```
 
 - **前端**：注入 `window.__MEMORY_PALACE_RUNTIME__`（详见 [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) 第 4 节）
-- **前端页面**：也可以直接点右上角的 `Set API key` / `Update API key`
+- **前端页面**：也可以直接点右上角的 `设置 API 密钥` / `更新 API 密钥`（英文模式下分别显示 `Set API key` / `Update API key`）
   - 当前版本会先打开首启配置向导
   - 如果你只是想先让 Dashboard 通过鉴权，优先使用“只保存 Dashboard 密钥”
   - `.env` 写入只建议在本地 checkout + 非 Docker 运行时使用

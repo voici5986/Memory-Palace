@@ -26,8 +26,8 @@ def test_gate_syntax_skips_when_post_check_script_is_absent(monkeypatch, tmp_pat
     result = harness.check_gate_syntax()
 
     assert result.status == "SKIP"
-    assert "缺失" in result.summary
-    assert "run_post_change_checks.sh" in result.details
+    assert "公开仓校验范围" in result.summary
+    assert result.details == ""
 
 
 def test_gate_syntax_passes_when_parent_workspace_post_check_script_exists(

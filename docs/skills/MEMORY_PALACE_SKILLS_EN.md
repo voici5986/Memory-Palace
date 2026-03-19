@@ -101,7 +101,7 @@ Therefore, the current recommendation is two-layered:
 
 Public communication suggestion:
 
-- You can say "the workspace entry is in place."
+- If you have already run the workspace install, you can say "the workspace entry is in place."
 - It is not recommended to state "Gemini is fully ready out-of-the-box."
 
 ## 2. Directory Responsibilities

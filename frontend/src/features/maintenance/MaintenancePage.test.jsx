@@ -220,7 +220,11 @@ describe('MaintenancePage', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 1 }) }));
     await screen.findByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }));
 
-    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.confirmAction', { action: 'delete' }) }));
+    await user.click(screen.getByRole('button', {
+      name: i18n.t('maintenance.vitality.confirmAction', {
+        action: i18n.t('maintenance.vitality.actionLabels.delete'),
+      }),
+    }));
 
     await waitFor(() => {
       expect(api.confirmVitalityCleanup).toHaveBeenCalledWith({

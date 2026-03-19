@@ -416,6 +416,8 @@ value_has_unresolved_placeholder() {
   [[ "${value}" == *"replace-with-your-key"* ]] \
     || [[ "${value}" == *"<your-router-host>"* ]] \
     || [[ "${value}" == *"host.docker.internal:PORT"* ]] \
+    || [[ "${value}" == *"your-embedding-model-id"* ]] \
+    || [[ "${value}" == *"your-reranker-model-id"* ]] \
     || [[ "${value}" =~ :PORT(/|$) ]]
 }
 
@@ -436,19 +438,19 @@ assert_profile_external_settings_ready() {
   local required_keys=()
   case "${embedding_backend}" in
     router)
-      required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY")
+      required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
       ;;
     api|openai)
-      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY")
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
       ;;
     hash|none|"")
       ;;
     *)
-      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY")
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
       ;;
   esac
   if is_truthy "${reranker_enabled_raw}"; then
-    required_keys+=("RETRIEVAL_RERANKER_API_BASE" "RETRIEVAL_RERANKER_API_KEY")
+    required_keys+=("RETRIEVAL_RERANKER_API_BASE" "RETRIEVAL_RERANKER_API_KEY" "RETRIEVAL_RERANKER_MODEL")
   fi
 
   local key

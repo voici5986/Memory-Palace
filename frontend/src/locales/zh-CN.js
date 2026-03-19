@@ -414,6 +414,10 @@ const zhCN = {
       prepareKeep: '准备保留（{{count}}）',
       prepareDelete: '准备删除（{{count}}）',
       confirmAction: '确认 {{action}}',
+      actionLabels: {
+        delete: '删除',
+        keep: '保留',
+      },
       reviewFallback: '审核',
       discardReview: '丢弃审核',
       selectionSummary: '已选：{{selected}}，其中可删除：{{deletable}}',

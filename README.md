@@ -596,6 +596,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
 >
 > The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
+> If you use `docker_one_click.sh/.ps1` for `profile c/d`, unresolved placeholder model IDs are treated the same as placeholder endpoint/key values: the script stops before `docker compose` until you replace them with real values.
 >
 > If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and also forwards optional `INTENT_LLM_*` values when present.
 >
@@ -697,8 +698,8 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 
 | Client | Integration Method |
 |---|---|
-| Claude Code | Prefer a workspace install (`install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force`) |
-| Gemini CLI | Workspace install works for the current repo, but user-scope install is still the more stable default on fresh machines |
+| Claude Code | User-scope install is the stable default on fresh machines; add workspace install only if you also want a project-level entry in this repo |
+| Gemini CLI | User-scope install is the stable default on fresh machines; workspace install stays optional for the current repo |
 | Codex CLI / OpenCode | `sync` gives repo-local skill discovery; use `--scope user --with-mcp` if you want MCP to reliably bind to this repo backend |
 | Cursor / Windsurf / VSCode-host / Antigravity | Repo-local `AGENTS.md` + rendered MCP snippet |
 
@@ -707,8 +708,8 @@ The MCP tool layer handles **deterministic execution**; the Skills strategy laye
 ```bash
 python scripts/sync_memory_palace_skill.py
 python scripts/sync_memory_palace_skill.py --check
+python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope user --with-mcp --force
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --force
-python scripts/install_skill.py --targets gemini,codex,opencode --scope user --with-mcp --force
 python scripts/install_skill.py --targets claude,codex,gemini,opencode --scope workspace --with-mcp --check
 ```
 
@@ -766,7 +767,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. They generate local reports under `docs/skills/`.
+If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. By default they generate local reports under `docs/skills/`; if you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as manual host-side follow-up rather than a repository-mainline failure.
 
 Full guides:
 
@@ -861,8 +862,9 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 
 ### Benchmark Reproduction Notes
 
-The user-facing project package does **not** bundle the internal
-`tests/benchmark` harness.
+The current repository still keeps the benchmark helpers and test entries under
+`backend/tests/benchmark/`, but treat them as deeper maintenance / re-check
+material rather than the first step for new users.
 
 These tables are kept as a **published summary** of project validation runs.
 

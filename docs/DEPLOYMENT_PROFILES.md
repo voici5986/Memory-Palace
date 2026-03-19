@@ -160,6 +160,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
 >
 > **模型 ID 提醒**：上面的 `your-embedding-model-id` / `your-reranker-model-id` 只是 shell-safe 占位示例。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
+> 如果你使用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，脚本会把这些占位 model id 也当成未解析配置；它会在进入 `docker compose` 前直接拦下，而不是等容器启动后再暴露错误。
 
 如果你采用直连方式，先注意一个边界：
 
@@ -193,7 +194,7 @@ curl -fsS http://127.0.0.1:18000/browse/node -H "X-MCP-API-Key: <YOUR_MCP_API_KE
 1. 请只拿**同一套最终部署配置**做对比和验收，不要混用不同链路的结果。
 2. 对 `docker_one_click` 来说，`--allow-runtime-env-injection` 属于**本地联调路径**，不是“读取仓库 `.env` 作为最终 Docker 配置”的意思。
 3. 如果你要验收真正准备上线的直连 Docker 配置，请直接拿那份最终 Docker env 文件做启动 + 健康检查。
-4. 若占位 endpoint/key 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
+4. 若占位 endpoint/key/model id 下启动失败，属于预期 fail-closed；请替换成真实可用值后再复验。
 
 ### 模型 ID 示例
 

@@ -90,7 +90,7 @@ This step only resolves **skill auto-discovery**, not yet MCP.
 
 ---
 
-## 3. Step Two: Establish Workspace Direct Connection
+## 3. Step Two: Start with the more stable user-scope path, then add workspace entries if needed
 
 `install_skill.py` now supports more than just installing skills:
 
@@ -106,6 +106,18 @@ A very useful detail:
 - If the target JSON itself is corrupted, the script will directly report the specific file path, line, and column number, instead of vomiting a full screen of Python tracebacks.
 
 ### Recommended Command
+
+For a fresh machine, the more stable default is still to start with `user-scope` first:
+
+```bash
+python scripts/install_skill.py \
+  --targets claude,codex,gemini,opencode \
+  --scope user \
+  --with-mcp \
+  --force
+```
+
+If you also want the **current repository** to get an extra project-level entry, add a workspace install afterwards:
 
 ```bash
 python scripts/install_skill.py \
@@ -220,7 +232,8 @@ The following conclusions assume you have finished the `sync/install` commands a
 
 Conclusion:
 
-- **Ready to use immediately upon opening the current repository**
+- **The more stable default is still to start with `--scope user --with-mcp`**
+- If you also want a project-level entry in the current repository, add a workspace install afterwards
 
 ### Gemini CLI
 
@@ -230,8 +243,8 @@ Conclusion:
 
 Conclusion:
 
-- **Workspace entry point is in place**
-- If you want to be more stable or prepare for cross-repository reuse, add `--scope user --with-mcp` once more.
+- **The more stable default is still to start with `--scope user --with-mcp`**
+- If you also want a workspace entry in the current repository, add a workspace install afterwards.
 - If you see `Policy file warning in memory-palace-overrides.toml`, rerun `--scope user --with-mcp --force` first.
 - When writing for others, still be conservative: smoke tests have passed, but `gemini_live` hasn't reached "fully passed" status yet.
 
@@ -298,6 +311,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
+If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 
 This check sequentially calls multiple CLIs; if you have `claude`, `codex`, `opencode`, and `gemini` installed, it usually takes a few minutes to complete. Don't assume it's "hung" if there's no output for dozens of seconds.
 Additionally, it defaults to attempting `gemini_live`: if the current Gemini configuration can resolve a real database path, it will perform a round of `create/update/guard` verification on that database and may leave test memories like `notes://gemini_suite_*`. If you only want a normal smoke test, explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
@@ -322,6 +337,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 Similarly, this report is a local artifact that "appears after running"; it is normal that it's not in the public GitHub repository.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first and write the e2e report to another local path.
 It uses an isolated temporary database by default and won't touch your formal database; however, it may still write stderr, logs, or temporary directory paths into the report upon failure. Check the content yourself before forwarding it to others.
 
 These two reports are primarily for reviewing results in the current environment and are not main entry documents.

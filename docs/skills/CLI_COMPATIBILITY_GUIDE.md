@@ -199,8 +199,8 @@ python scripts/install_skill.py \
 
 结论：
 
-- **先跑一次 workspace 安装，再打开当前仓库即可直接用**
-- 如果要带去别的仓库，再补 `--scope user --with-mcp`
+- **默认更稳的推荐是先跑 `--scope user --with-mcp`**
+- 如果你还想让当前仓库额外落一个项目级入口，再补一次 workspace 安装
 
 ### Gemini CLI
 
@@ -215,8 +215,8 @@ python scripts/install_skill.py \
 
 结论：
 
-- **跑完 workspace 安装后，workspace 入口就位**
-- 若你想更稳，或准备跨仓复用，仍推荐再补一次 `--scope user --with-mcp`
+- **默认更稳的推荐仍是先跑 `--scope user --with-mcp`**
+- 如果你还想让当前仓库额外落一个 workspace 入口，再补一次 workspace 安装
 - 如果你看到 `Policy file warning in memory-palace-overrides.toml`，优先重跑同一条 `--scope user --with-mcp --force`
 - 写给别人看时，建议写成“smoke 已通过，但 `gemini_live` 尚未完全通过”
 
@@ -323,7 +323,9 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
 如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
 另外，这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+如果当前机器没有 `Antigravity` 宿主 runtime，这一项更适合看成“目标宿主上的手工补验还没做”，不要先把它理解成仓库主链路失败。
 如果你看到的失败项只剩 `mcp_bindings`，先不要急着怀疑仓库本身。更常见的情况是你机器上的 user-scope MCP 条目还没同步到当前 checkout；优先先重跑：
 
 ```bash
@@ -345,6 +347,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把 e2e 报告改写到别的本地路径。
 `MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
 
 ## 正向 / 反向 prompt

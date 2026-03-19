@@ -206,8 +206,8 @@ Authorization: Bearer <MCP_API_KEY>
    ```
 
    应确保以下文件不在提交中（均已在 `.gitignore` 中配置）：
-   - `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件）
-   - `.venv`、`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`（通常由你本地的 sync / install 脚本生成）
+   - `.env`、`.env.*`（保留 `.env.example`；如你显式复用了固定 Docker env 文件，也包括 `.env.docker`）
+   - `.venv`、`.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`、`.tmp/`、`.playwright-cli/`（通常由你本地的 sync / install / 浏览器验证脚本生成）
    - `*.db`（数据库文件）
    - `*.init.lock`、`*.migrate.lock`（数据库初始化 / 迁移锁文件）
    - `backend/backend.log`、`frontend/frontend.log`
@@ -250,9 +250,9 @@ Authorization: Bearer <MCP_API_KEY>
 
 | 文件 / 目录 | 说明 |
 |---|---|
-| `.env`、`.env.docker`（如果你显式复用了固定 Docker env 文件） | 可能包含真实 API Key |
+| `.env`、`.env.*`（保留 `.env.example`） | 可能包含真实 API Key |
 | `.venv`、`backend/.venv`、`frontend/.venv` | 本地虚拟环境，不应进入仓库 |
-| `.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/` | 本地工具 / MCP 配置目录（通常由你本地的 sync / install 脚本生成） |
+| `.mcp.json`、`.mcp.json.bak`、`.claude/`、`.codex/`、`.cursor/`、`.opencode/`、`.gemini/`、`.agent/`、`.tmp/`、`.playwright-cli/` | 本地工具 / MCP / 浏览器验证产物目录（通常由你本地的 sync / install / 调试脚本生成） |
 | `*.db` | SQLite 数据库文件（如 `demo.db`） |
 | `*.init.lock`、`*.migrate.lock` | 数据库初始化 / 迁移时生成的锁文件 |
 | `backend/backend.log` | 后端运行日志 |
@@ -273,6 +273,8 @@ Authorization: Bearer <MCP_API_KEY>
 | `docs/changelog/current_code_improvements_vs_legacy_docs.md` | 补充差异清单 |
 
 > 💡 保留 `.env.example` 作为配置模板提交到仓库。
+>
+> 💡 这两份本地验证报告默认会写到上面的 `docs/skills/` 路径；如果你通过 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` 改过输出位置，分享前也记得检查那份自定义文件。
 >
 > 💡 公开文档里建议统一使用占位符：
 >

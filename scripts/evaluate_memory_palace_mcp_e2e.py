@@ -12,7 +12,17 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
-REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
+
+
+def _resolve_report_path() -> Path:
+    raw_value = os.getenv("MEMORY_PALACE_MCP_E2E_REPORT_PATH", "").strip()
+    if not raw_value:
+        return DEFAULT_REPORT_PATH
+    path = Path(raw_value).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
 
 
 def _maybe_reexec_with_backend_python() -> None:
@@ -284,9 +294,11 @@ def run_suite_sync() -> tuple[list[StepResult], str]:
 
 def main() -> int:
     results, stderr_output = run_suite_sync()
-    REPORT_PATH.write_text(build_markdown(results, stderr_output) + "\n", encoding="utf-8")
+    report_path = _resolve_report_path()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(build_markdown(results, stderr_output) + "\n", encoding="utf-8")
     failed = [item for item in results if item.status == "FAIL"]
-    print(REPORT_PATH)
+    print(report_path)
     return 1 if failed else 0
 
 

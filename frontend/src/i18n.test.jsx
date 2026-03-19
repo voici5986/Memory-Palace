@@ -45,10 +45,6 @@ vi.mock('./features/observability/ObservabilityPage', () => ({
   default: () => <div>observability-page</div>,
 }));
 
-vi.mock('./components/AgentationLite', () => ({
-  default: () => null,
-}));
-
 describe('i18n bootstrap', () => {
   beforeEach(() => {
     window.localStorage?.removeItem?.('memory-palace.dashboardAuth');

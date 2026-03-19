@@ -82,6 +82,13 @@ export default function MaintenancePage() {
     return extractApiError(vitalityErrorState.error, t(vitalityErrorState.fallbackKey));
   }, [t, vitalityErrorState]);
 
+  const translateVitalityAction = useCallback((action) => {
+    if (!action) {
+      return t('maintenance.vitality.reviewFallback');
+    }
+    return t(`maintenance.vitality.actionLabels.${action}`, { defaultValue: action });
+  }, [t]);
+
   const invalidatePreparedReview = useCallback(() => {
     vitalityPrepareSeqRef.current += 1;
     setVitalityPreparedReview(null);
@@ -864,7 +871,7 @@ export default function MaintenancePage() {
                   className="px-3 py-1.5 text-xs rounded bg-rose-900/40 text-rose-200 border border-rose-800/50 hover:bg-rose-900/60 disabled:opacity-50"
                 >
                   {t('maintenance.vitality.confirmAction', {
-                    action: vitalityPreparedReview?.action || t('maintenance.vitality.reviewFallback'),
+                    action: translateVitalityAction(vitalityPreparedReview?.action),
                   })}
                 </button>
                 {vitalityPreparedReview && (
@@ -887,7 +894,7 @@ export default function MaintenancePage() {
               {vitalityPreparedReview && (
                 <div className="mb-4 rounded border border-amber-800/40 bg-amber-950/20 p-3 text-xs text-amber-200">
                   <div>{t('maintenance.vitality.reviewId', { value: vitalityPreparedReview.review_id })}</div>
-                  <div>{t('maintenance.vitality.action', { value: vitalityPreparedReview.action })}</div>
+                  <div>{t('maintenance.vitality.action', { value: translateVitalityAction(vitalityPreparedReview.action) })}</div>
                   <div>{t('maintenance.vitality.reviewerValue', { value: vitalityPreparedReview.reviewer })}</div>
                   <div>{t('maintenance.vitality.confirmationPhrase', { value: vitalityPreparedReview.confirmation_phrase })}</div>
                 </div>

@@ -143,8 +143,8 @@ export default function SetupAssistantModal({
   const [form, setForm] = React.useState(() => defaultFormState(authState));
   const [statusLoading, setStatusLoading] = React.useState(false);
   const [setupStatus, setSetupStatus] = React.useState(null);
-  const [statusError, setStatusError] = React.useState(null);
-  const [saveError, setSaveError] = React.useState(null);
+  const [statusErrorState, setStatusErrorState] = React.useState(null);
+  const [saveErrorState, setSaveErrorState] = React.useState(null);
   const [saveSuccess, setSaveSuccess] = React.useState(null);
   const [savingMode, setSavingMode] = React.useState(null);
 
@@ -155,8 +155,8 @@ export default function SetupAssistantModal({
     setForm(defaultFormState(authState));
     setStatusLoading(true);
     setSetupStatus(null);
-    setStatusError(null);
-    setSaveError(null);
+    setStatusErrorState(null);
+    setSaveErrorState(null);
     setSaveSuccess(null);
 
     getSetupStatus()
@@ -175,7 +175,10 @@ export default function SetupAssistantModal({
       })
       .catch((error) => {
         if (cancelled) return;
-        setStatusError(extractApiError(error, t('setup.messages.statusUnavailable')));
+        setStatusErrorState({
+          error,
+          fallbackKey: 'setup.messages.statusUnavailable',
+        });
       })
       .finally(() => {
         if (cancelled) return;
@@ -190,6 +193,29 @@ export default function SetupAssistantModal({
   const updateField = React.useCallback((key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
   }, []);
+
+  const statusError = React.useMemo(() => {
+    if (!statusErrorState) return null;
+    return extractApiError(statusErrorState.error, t(statusErrorState.fallbackKey));
+  }, [statusErrorState, t]);
+
+  const saveError = React.useMemo(() => {
+    if (!saveErrorState) return null;
+    if (saveErrorState.error) {
+      return extractApiError(saveErrorState.error, t(saveErrorState.fallbackKey));
+    }
+    return t(saveErrorState.fallbackKey);
+  }, [saveErrorState, t]);
+
+  const saveSuccessMessage = React.useMemo(() => {
+    if (!saveSuccess) return null;
+    if (saveSuccess.kind === 'browser') {
+      return t('setup.messages.browserOnlySaved');
+    }
+    return t('setup.messages.serverSaved', {
+      target: saveSuccess.targetLabel || '.env',
+    });
+  }, [saveSuccess, t]);
 
   const applyPreset = React.useCallback((preset) => {
     setForm((current) => {
@@ -240,25 +266,30 @@ export default function SetupAssistantModal({
   const handleSaveBrowserOnly = React.useCallback(() => {
     const saved = saveStoredMaintenanceAuth(form.dashboard_api_key, authState?.mode ?? 'header');
     if (saved === false) {
-      setSaveError(t('setup.messages.saveFailed'));
+      setSaveErrorState({
+        error: null,
+        fallbackKey: 'setup.messages.saveFailed',
+      });
       return;
     }
     if (!saved) {
-      setSaveError(t('setup.messages.browserOnlyRequiresKey'));
+      setSaveErrorState({
+        error: null,
+        fallbackKey: 'setup.messages.browserOnlyRequiresKey',
+      });
       return;
     }
     onAuthUpdated?.(saved);
-    setSaveError(null);
+    setSaveErrorState(null);
     setSaveSuccess({
       kind: 'browser',
-      message: t('setup.messages.browserOnlySaved'),
     });
     onClose();
-  }, [authState?.mode, form.dashboard_api_key, onAuthUpdated, onClose, t]);
+  }, [authState?.mode, form.dashboard_api_key, onAuthUpdated, onClose]);
 
   const handlePersistConfig = React.useCallback(async () => {
     setSavingMode('server');
-    setSaveError(null);
+    setSaveErrorState(null);
     setSaveSuccess(null);
     try {
       const payload = {
@@ -278,15 +309,18 @@ export default function SetupAssistantModal({
       }));
       setSaveSuccess({
         kind: 'server',
-        message: t('setup.messages.serverSaved', { target: response.target_label || '.env' }),
+        targetLabel: response.target_label || '.env',
         restart_targets: response.restart_targets || [],
       });
     } catch (error) {
-      setSaveError(extractApiError(error, t('setup.messages.saveFailed')));
+      setSaveErrorState({
+        error,
+        fallbackKey: 'setup.messages.saveFailed',
+      });
     } finally {
       setSavingMode(null);
     }
-  }, [authState?.mode, form, onAuthUpdated, t]);
+  }, [authState?.mode, form, onAuthUpdated]);
 
   const currentLocale = i18n.resolvedLanguage || 'en';
   const nextLocale = currentLocale === 'en' ? 'zh-CN' : 'en';
@@ -721,7 +755,7 @@ export default function SetupAssistantModal({
                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-800">
                       <div className="mb-1 flex items-center gap-2 font-medium">
                         <CheckCircle2 size={16} />
-                        {saveSuccess.message}
+                        {saveSuccessMessage}
                       </div>
                       {saveSuccess.kind === 'server' && restartTargets.length > 0 ? (
                         <div>{t('setup.summary.restartHint', { targets: restartTargets.join(' / ') })}</div>

@@ -159,6 +159,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # Remote recommended slightly
 > **🔑 Primary Tuning Parameter for C/D**: `RETRIEVAL_RERANKER_WEIGHT`, suggested range `0.20 ~ 0.40`, fine-tune in `0.05` increments.
 >
 > **Model ID Reminder**: The `your-embedding-model-id` / `your-reranker-model-id` values above are shell-safe placeholder examples. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
+> If you use `docker_one_click.sh/.ps1` for `profile c/d`, the script treats those placeholder model IDs as unresolved configuration too. It stops before `docker compose` instead of waiting for the container startup path to fail later.
 
 If you adopt the direct connection method, note one boundary first:
 
@@ -197,7 +198,7 @@ Decision Criteria:
 1.  Please only compare and accept results from the **same final deployment configuration**. Do not mix results from different paths.
 2.  For `docker_one_click`, `--allow-runtime-env-injection` is a **local debugging path**, not a promise that the script is consuming the repository `.env` as the final Docker config.
 3.  If you want to validate the exact direct-API Docker configuration you plan to deploy, start from that final Docker env file and then run the startup + health checks against that same file.
-4.  If startup fails under placeholder endpoints/keys, it is an expected fail-closed; please replace them with real, available values and re-verify.
+4.  If startup fails under placeholder endpoints/keys/model IDs, it is an expected fail-closed; please replace them with real, available values and re-verify.
 
 ### Model ID Examples
 

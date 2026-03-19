@@ -386,6 +386,8 @@ function Test-UnresolvedPlaceholder {
         $Value.Contains('replace-with-your-key') -or
         $Value.Contains('<your-router-host>') -or
         $Value.Contains('host.docker.internal:PORT') -or
+        $Value.Contains('your-embedding-model-id') -or
+        $Value.Contains('your-reranker-model-id') -or
         ($Value -match ':PORT($|/)')
     )
 }
@@ -408,14 +410,17 @@ function Assert-ProfileExternalSettingsReady {
         'router' {
             $requiredKeys.Add('ROUTER_API_BASE')
             $requiredKeys.Add('ROUTER_API_KEY')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
         }
         'api' {
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
         }
         'openai' {
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
         }
         'hash' { }
         'none' { }
@@ -423,6 +428,7 @@ function Assert-ProfileExternalSettingsReady {
             if (-not [string]::IsNullOrWhiteSpace($embeddingBackend)) {
                 $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
                 $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
+                $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
             }
         }
     }
@@ -430,6 +436,7 @@ function Assert-ProfileExternalSettingsReady {
     if (Test-TruthyValue -Value $rerankerEnabled) {
         $requiredKeys.Add('RETRIEVAL_RERANKER_API_BASE')
         $requiredKeys.Add('RETRIEVAL_RERANKER_API_KEY')
+        $requiredKeys.Add('RETRIEVAL_RERANKER_MODEL')
     }
 
     $hasIssue = $false
