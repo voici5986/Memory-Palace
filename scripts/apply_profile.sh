@@ -37,7 +37,7 @@ done
 
 platform_input="${1:-macos}"
 profile_input="${2:-b}"
-target_file="${3:-${PROJECT_ROOT}/.env}"
+target_file_input="${3:-}"
 
 platform="$(printf '%s' "${platform_input}" | tr '[:upper:]' '[:lower:]')"
 profile="$(printf '%s' "${profile_input}" | tr '[:upper:]' '[:lower:]')"
@@ -57,6 +57,14 @@ case "${profile}" in
     exit 2
     ;;
 esac
+
+if [[ -n "${target_file_input}" ]]; then
+  target_file="${target_file_input}"
+elif [[ "${platform}" == "docker" ]]; then
+  target_file="${PROJECT_ROOT}/.env.docker"
+else
+  target_file="${PROJECT_ROOT}/.env"
+fi
 
 base_env="${PROJECT_ROOT}/.env.example"
 template_platform="${platform}"

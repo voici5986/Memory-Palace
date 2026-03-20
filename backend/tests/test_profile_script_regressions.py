@@ -293,6 +293,34 @@ def test_apply_profile_shell_docker_profile_syncs_compose_wal_overrides(
     assert values.get("MEMORY_PALACE_DOCKER_JOURNAL_MODE") == "delete"
 
 
+def test_apply_profile_shell_defaults_docker_target_to_env_docker(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-a.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "docker", "a"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (project_root / ".env.docker").exists()
+    assert not (project_root / ".env").exists()
+
+
 def test_apply_profile_shell_injects_runtime_auto_flush_default_when_profile_omits_it(
     tmp_path: Path,
 ) -> None:
@@ -493,6 +521,47 @@ def test_apply_profile_powershell_dry_run_prints_generated_env_without_touching_
     assert "SEARCH_DEFAULT_MODE=hybrid" in result.stdout
     assert existing_target.read_text(encoding="utf-8") == original_text
     assert "Generated .env.generated from" not in result.stdout
+
+
+def test_apply_profile_powershell_defaults_docker_target_to_env_docker(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh not available")
+
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.ps1"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.ps1", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-a.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/apply_profile.ps1",
+            "-Platform",
+            "docker",
+            "-Profile",
+            "a",
+        ],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (project_root / ".env.docker").exists()
+    assert not (project_root / ".env").exists()
 
 
 def test_apply_profile_powershell_rejects_unresolved_database_url_placeholders(

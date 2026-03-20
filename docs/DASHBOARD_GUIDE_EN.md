@@ -235,6 +235,8 @@ Each card can be expanded to view full content. Diff details only appear when th
 4. Confirm the deletion in the popup dialog
 
 > ⚠️ Deletion is permanent and cannot be undone. Review each item carefully before confirming.
+>
+> 💡 If a deprecated item is still the final migration target of older versions, the cleanup dialog will refuse that deletion first. In plain language: start from the older deprecated copies, not the last remaining target.
 
 ### 💚 Lower Section: Vitality Cleanup Candidates
 

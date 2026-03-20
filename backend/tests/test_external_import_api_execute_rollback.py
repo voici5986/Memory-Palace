@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api import maintenance as maintenance_api
@@ -145,6 +145,26 @@ def _learn_payload(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+@pytest.mark.asyncio
+async def test_maintenance_run_write_lane_surfaces_write_lane_timeout_as_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _raise_timeout(*, session_id=None, operation: str, task):
+        _ = session_id, operation, task
+        raise RuntimeError("write_lane_timeout")
+
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "run_write", _raise_timeout
+    )
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await maintenance_api._run_write_lane("unit_test", lambda: None)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {"error": "write_lane_timeout"}
 
 
 @pytest.fixture(autouse=True)

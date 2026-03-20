@@ -1,6 +1,7 @@
 import builtins
 import importlib.util
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -13,6 +14,24 @@ from db.sqlite_client import SQLiteClient
 
 def _sqlite_url(db_path: Path) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
+
+
+@pytest.mark.asyncio
+async def test_review_run_write_lane_surfaces_write_lane_timeout_as_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _raise_timeout(*, session_id: Optional[str], operation: str, task):
+        _ = session_id, operation, task
+        raise RuntimeError("write_lane_timeout")
+
+    monkeypatch.setattr(review_api.runtime_state.write_lanes, "run_write", _raise_timeout)
+    monkeypatch.setattr(review_api, "_ENABLE_WRITE_LANE_QUEUE", True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._run_write_lane("unit_test", lambda: None)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {"error": "write_lane_timeout"}
 
 
 @pytest.mark.asyncio

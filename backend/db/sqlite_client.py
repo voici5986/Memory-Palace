@@ -14,6 +14,7 @@ import math
 import hashlib
 import sqlite3
 import subprocess
+import threading
 import time
 import httpx
 from pathlib import Path as FilePath
@@ -2181,6 +2182,35 @@ class SQLiteClient:
                 continue
         return None
 
+    def _validate_embedding_dimension(
+        self,
+        embedding: Optional[List[float]],
+        *,
+        degrade_reasons: Optional[List[str]] = None,
+        backend: Optional[str] = None,
+    ) -> Optional[List[float]]:
+        if embedding is None:
+            return None
+
+        expected_dim = int(self._embedding_dim)
+        actual_dim = len(embedding)
+        if actual_dim == expected_dim:
+            return embedding
+
+        self._append_degrade_reason(
+            degrade_reasons, "embedding_response_dim_mismatch"
+        )
+        self._append_degrade_reason(
+            degrade_reasons,
+            f"embedding_response_dim_mismatch:{actual_dim}!={expected_dim}",
+        )
+        if backend:
+            self._append_degrade_reason(
+                degrade_reasons,
+                f"embedding_response_dim_mismatch:{backend}:{actual_dim}!={expected_dim}",
+            )
+        return None
+
     def _extract_rerank_scores(
         self, payload: Any, total_documents: int
     ) -> Dict[int, float]:
@@ -2425,7 +2455,12 @@ class SQLiteClient:
         embedding = self._extract_embedding_from_response(response)
         if embedding is None:
             self._append_degrade_reason(degrade_reasons, "embedding_response_invalid")
-        return embedding
+            return None
+        return self._validate_embedding_dimension(
+            embedding,
+            degrade_reasons=degrade_reasons,
+            backend=(self._embedding_backend or "").strip().lower() or None,
+        )
 
     async def _fetch_remote_embedding_for_backend(
         self,
@@ -2472,7 +2507,12 @@ class SQLiteClient:
             self._append_degrade_reason(
                 degrade_reasons, f"embedding_response_invalid:{backend_value}"
             )
-        return embedding
+            return None
+        return self._validate_embedding_dimension(
+            embedding,
+            degrade_reasons=degrade_reasons,
+            backend=backend_value,
+        )
 
     async def _get_embedding_via_provider_chain(
         self,
@@ -5898,7 +5938,12 @@ class SQLiteClient:
             }
 
     async def search(
-        self, query: str, limit: int = 10, domain: Optional[str] = None
+        self,
+        query: str,
+        limit: int = 10,
+        domain: Optional[str] = None,
+        *,
+        mode: str = "keyword",
     ) -> List[Dict[str, Any]]:
         """
         Legacy-compatible search by path/content.
@@ -5908,6 +5953,8 @@ class SQLiteClient:
             limit: Max results
             domain: If specified, only search in this domain.
                     If None, search across all domains.
+            mode: Retrieval mode forwarded to search_advanced. Defaults to
+                "keyword" for backward compatibility.
 
         Returns:
             Legacy result structure used by existing MCP layer.
@@ -5915,7 +5962,7 @@ class SQLiteClient:
         filters = {"domain": domain} if domain is not None else {}
         advanced_payload = await self.search_advanced(
             query=query,
-            mode="keyword",
+            mode=mode,
             max_results=max(1, limit),
             candidate_multiplier=4,
             filters=filters,
@@ -6105,14 +6152,14 @@ class SQLiteClient:
                 )
             )
             fts_exists = fts_exists_result.first() is not None
-            self._fts_available = self._fts_available and fts_exists
+            effective_fts_available = self._fts_available and fts_exists
 
             meta_rows = await session.execute(select(IndexMeta))
             meta = {row.key: row.value for row in meta_rows.scalars().all()}
 
             return {
                 "capabilities": {
-                    "fts_available": self._fts_available and fts_exists,
+                    "fts_available": effective_fts_available,
                     "vector_available": self._vector_available,
                     "embedding_backend": self._embedding_backend,
                     "embedding_model": self._embedding_model,
@@ -6285,16 +6332,22 @@ class SQLiteClient:
             return memories
 
     async def _resolve_migration_chain(
-        self, session: AsyncSession, start_id: int, max_hops: int = 50
+        self, session: AsyncSession, start_id: int, max_hops: int = 2048
     ) -> Optional[Dict[str, Any]]:
         """
         Follow the migrated_to chain from start_id to the final target.
 
         The final target is the memory at the end of the chain (migrated_to=NULL).
-        Returns None if the chain is broken (missing memory) or too long (cycle).
+        Returns None if the chain is broken, cyclic, or exceeds the safety bound.
         """
         current_id = start_id
-        for _ in range(max_hops):
+        visited: set[int] = set()
+        while True:
+            if current_id in visited:
+                return None
+            visited.add(current_id)
+            if max_hops > 0 and len(visited) > max_hops:
+                return None
             result = await session.execute(
                 select(Memory).where(Memory.id == current_id)
             )
@@ -6322,7 +6375,6 @@ class SQLiteClient:
                     "paths": paths,
                 }
             current_id = memory.migrated_to
-        return None  # Chain too long, likely a cycle
 
     async def get_all_orphan_memories(self) -> List[Dict[str, Any]]:
         """
@@ -6535,6 +6587,19 @@ class SQLiteClient:
                         f"(has {int(path_count or 0)} active path(s)). Deletion aborted."
                     )
 
+            predecessor_count_result = await session.execute(
+                select(func.count())
+                .select_from(Memory)
+                .where(Memory.migrated_to == memory_id)
+            )
+            predecessor_count = int(predecessor_count_result.scalar() or 0)
+            if require_orphan and predecessor_count > 0 and successor_id is None:
+                raise PermissionError(
+                    f"Memory {memory_id} is still the final target for "
+                    f"{predecessor_count} predecessor version(s). "
+                    "Delete older deprecated versions first."
+                )
+
             # 3. Repair the chain: any memory pointing to the deleted node
             #    should now point to the deleted node's successor
             await session.execute(
@@ -6560,24 +6625,31 @@ class SQLiteClient:
 # =============================================================================
 
 _sqlite_client: Optional[SQLiteClient] = None
+_sqlite_client_lock = threading.Lock()
 
 
 def get_sqlite_client() -> SQLiteClient:
     """Get the global SQLiteClient instance."""
     global _sqlite_client
-    if _sqlite_client is None:
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            raise ValueError(
-                "DATABASE_URL environment variable is not set. Please check your .env file."
-            )
-        _sqlite_client = SQLiteClient(database_url)
+    if _sqlite_client is not None:
+        return _sqlite_client
+
+    with _sqlite_client_lock:
+        if _sqlite_client is None:
+            database_url = os.getenv("DATABASE_URL")
+            if not database_url:
+                raise ValueError(
+                    "DATABASE_URL environment variable is not set. Please check your .env file."
+                )
+            _sqlite_client = SQLiteClient(database_url)
     return _sqlite_client
 
 
 async def close_sqlite_client():
     """Close the global SQLiteClient connection."""
     global _sqlite_client
-    if _sqlite_client:
-        await _sqlite_client.close()
+    with _sqlite_client_lock:
+        client = _sqlite_client
         _sqlite_client = None
+    if client:
+        await client.close()

@@ -85,7 +85,7 @@ This is the most "business-like" group of interfaces:
 - The write endpoints in this group now also create Review snapshots first; in Review, the visible session name carries the current database scope (for example `dashboard-<scope>`) so different SQLite targets do not get mixed together
 - `POST / PUT /browse/node` also applies a default content-length check (`BROWSE_CONTENT_MAX_CHARS`, default 1 MiB) so accidental huge bodies do not go straight through the Dashboard write path
 - `POST /browse/node` also validates the resulting path length (`BROWSE_PATH_MAX_CHARS`, default 512) before writing; if `parent_path + title` is too long, the API returns `422` immediately instead of letting the write proceed
-- If the write lane cannot hand out a write slot in time, these write endpoints now return a structured `503` (`write_lane_timeout`) instead of a generic `500`
+- If the write lane cannot hand out a write slot in time, the `browse` / `review` / `maintenance` write endpoints now return a structured `503` (`write_lane_timeout`) instead of a generic `500`; the MCP write tools return the same condition as a retryable structured error payload
 
 ### Review and Rollback (`/review`)
 
@@ -128,7 +128,7 @@ Route-level API Key authentication (all endpoints require authentication).
 |---|---|---|
 | `GET` | `/maintenance/orphans` | View orphaned memories (deprecated or no path pointing to them) |
 | `GET` | `/maintenance/orphans/{memory_id}` | View orphaned memory details |
-| `DELETE` | `/maintenance/orphans/{memory_id}` | Permanently delete orphaned memory |
+| `DELETE` | `/maintenance/orphans/{memory_id}` | Permanently delete orphaned memory (if a deprecated final target is still referenced by older versions, deletion is rejected until the older chain is cleaned first) |
 | `POST` | `/maintenance/import/prepare` | Prepare external import task (generates executable plan) |
 | `POST` | `/maintenance/import/execute` | Execute external import task |
 | `GET` | `/maintenance/import/jobs/{job_id}` | View import task status |

@@ -51,6 +51,27 @@ class _BrokenAncestorTreeClient(_AncestorTreeClient):
         return await super().get_memory_by_path(path, domain)
 
 
+class _BatchAncestorTreeClient(_AncestorTreeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_calls = 0
+        self.path_calls: List[str] = []
+
+    async def get_memory_by_path(self, path: str, domain: str = "core"):
+        self.path_calls.append(path)
+        return await super().get_memory_by_path(path, domain)
+
+    async def get_memories_by_paths(self, path_requests):
+        self.batch_calls += 1
+        payload: Dict[str, Dict[str, Any]] = {}
+        for domain, path in path_requests:
+            node = self._nodes.get(path)
+            if not node:
+                continue
+            payload[f"{domain}://{path}"] = dict(node)
+        return payload
+
+
 class _SystemRecentClient:
     async def get_recent_memories(self, limit: int = 10):
         _ = limit
@@ -96,6 +117,26 @@ async def test_read_memory_include_ancestors_renders_parent_chain(
     assert "ANCESTOR MEMORIES (Nearest Parent -> Root)" in raw
     assert "- URI: core://agent/profile [#2]" in raw
     assert "- URI: core://agent [#1]" in raw
+
+
+@pytest.mark.asyncio
+async def test_read_memory_include_ancestors_prefers_batch_lookup_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _BatchAncestorTreeClient()
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    raw = await mcp_server.read_memory(
+        "core://agent/profile/preferences",
+        include_ancestors=True,
+    )
+
+    assert "ANCESTOR MEMORIES (Nearest Parent -> Root)" in raw
+    assert client.batch_calls == 1
+    assert client.path_calls
+    assert set(client.path_calls) == {"agent/profile/preferences"}
 
 
 @pytest.mark.asyncio

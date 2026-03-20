@@ -84,7 +84,7 @@
 
 现在 SQLite 的短暂锁冲突也会做一次小范围重试，后台索引任务写库时也会经过同一条全局 write lane。说人话就是：前台写入和异步重建在本地多进程压力下更不容易互相撞上。
 
-Dashboard 树形写接口现在在 write lane 等太久时，也会返回结构化的 `503`（`write_lane_timeout`），不再只给一个很难排查的通用 `500`。
+Dashboard / Review / Maintenance 这几组写接口现在在 write lane 等太久时，也会返回结构化的 `503`（`write_lane_timeout`），不再只给一个很难排查的通用 `500`。MCP 写工具遇到同样情况时，也会返回可重试的结构化错误结果。
 
 ### 🔍 统一检索引擎
 
@@ -397,7 +397,7 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的 `.env`**。
+脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的环境文件**。对本地 `macos` / `windows`，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，`apply_profile.sh/.ps1` 现在会默认写到 `.env.docker`。
 
 把 `deploy/profiles/*/*.env` 理解成 **Profile 模板输入**，不要直接手抄某个模板文件当成最终 `.env`。有些模板值会先保留占位路径，再由 `apply_profile.*` 按当前仓库位置自动改写。
 
@@ -650,9 +650,10 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关，启用与否由 `RETRIEVAL_RERANKER_ENABLED` 控制。
 > - Reranker 连接参数优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL`；缺失时才回退 `ROUTER_*`（其中 base/key 还可继续回退 `OPENAI_*`）。
 > - 当前代码会把 `RETRIEVAL_EMBEDDING_DIM` 作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 一起发出去；如果 provider 明确不支持这个字段，会自动重试一次不带 `dimensions` 的旧请求。
+> - 如果最终返回的 embedding 维度还是和 `RETRIEVAL_EMBEDDING_DIM` 不一致，运行时现在会立刻拒绝这条向量并走 fallback / degrade，不会再静默写入一条错维度的索引记录。
 >
 > 如果你的 provider 对 Embedding / Reranker 使用的是带命名空间的 model id（例如 `Qwen/...`），请填写你自己的 provider 实际 model id，不要把示例值原样照抄到别的环境。
-> 如果你本地用的是 Ollama 这类 OpenAI-compatible 入口，也优先走 `/v1/embeddings` 这条路径；本地小样本联调里，`qwen3-embedding:8b-q8_0` 配合显式 `dimensions=1024` 可以正常返回 1024 维向量。
+> 如果你本地用的是 Ollama 这类 OpenAI-compatible 入口，也优先走 `/v1/embeddings` 这条路径；只有在模型本身确实返回 1024 维向量时，再显式设置 `dimensions=1024`。
 > 如果你后面要用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，这些示例 model id 也会被当成未解析占位符；在换成真实值之前，脚本会直接在 `docker compose` 前 fail-closed。
 >
 > **推荐口径（重要）**：

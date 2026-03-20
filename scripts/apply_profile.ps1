@@ -48,7 +48,11 @@ Examples:
 }
 
 if ([string]::IsNullOrWhiteSpace($Target)) {
-    $Target = Join-Path $projectRoot '.env'
+    if ($Platform -eq 'docker') {
+        $Target = Join-Path $projectRoot '.env.docker'
+    } else {
+        $Target = Join-Path $projectRoot '.env'
+    }
 }
 
 $baseEnv = Join-Path $projectRoot '.env.example'

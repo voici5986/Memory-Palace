@@ -532,6 +532,14 @@ index_status()
 
 > ⚠️ 当 `index_dropped > 0` 时，表示有索引任务未能入队。客户端应将其视为降级信号，结合 `degrade_reasons` 进行告警或补偿。
 
+### Write-Lane 超时
+
+对 `create_memory`、`update_memory`、`delete_memory`、`add_alias`、`compact_context` 这类写工具：
+
+- 如果 write lane 已经塞满，响应里现在会带 `reason=write_lane_timeout`
+- 同一个响应里还会带 `retryable=true` 和 `retry_hint`
+- 对应的 HTTP API 则会把同样的问题返回成结构化 `503`
+
 ---
 
 ## 降级机制

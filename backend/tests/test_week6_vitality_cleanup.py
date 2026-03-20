@@ -705,6 +705,95 @@ async def test_vitality_cleanup_confirm_skips_active_path_memory(
 
 
 @pytest.mark.asyncio
+async def test_vitality_cleanup_confirm_skips_referenced_chain_tail_memory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-cleanup-chain-tail.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="Chain tail v1",
+        priority=1,
+        title="cleanup_chain_tail",
+        domain="core",
+    )
+    await client.update_memory(
+        path="cleanup_chain_tail",
+        content="Chain tail v2",
+        domain="core",
+    )
+    second = await client.update_memory(
+        path="cleanup_chain_tail",
+        content="Chain tail v3",
+        domain="core",
+    )
+    tail_id = int(second["new_memory_id"])
+    await client.remove_path(path="cleanup_chain_tail", domain="core")
+
+    async with client.session() as session:
+        memory = await session.get(Memory, tail_id)
+        assert memory is not None
+        memory.vitality_score = 0.05
+        memory.last_accessed_at = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+        )
+        memory.access_count = 0
+        session.add(memory)
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "cleanup_reviews", CleanupReviewCoordinator()
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
+    )
+
+    query_payload = await client.get_vitality_cleanup_candidates(
+        threshold=0.2,
+        inactive_days=14,
+        limit=20,
+    )
+    item = next(entry for entry in query_payload["items"] if entry["memory_id"] == tail_id)
+
+    prepare_req = maintenance_api.VitalityCleanupPrepareRequest(
+        action="delete",
+        selections=[
+            maintenance_api.CleanupSelectionItem(
+                memory_id=item["memory_id"],
+                state_hash=item["state_hash"],
+            )
+        ],
+        reviewer="test-user",
+    )
+    prepare_result = await maintenance_api.prepare_vitality_cleanup(prepare_req)
+    review = prepare_result["review"]
+
+    confirm_req = maintenance_api.VitalityCleanupConfirmRequest(
+        review_id=review["review_id"],
+        token=review["token"],
+        confirmation_phrase=review["confirmation_phrase"],
+    )
+    confirm_result = await maintenance_api.confirm_vitality_cleanup(confirm_req)
+
+    async with client.session() as session:
+        still_exists = await session.get(Memory, tail_id)
+        assert still_exists is not None
+
+    await client.close()
+    assert confirm_result["ok"] is True
+    assert confirm_result["deleted_count"] == 0
+    assert confirm_result["skipped_count"] == 1
+    assert confirm_result["skipped"][0]["reason"] == "chain_referenced"
+
+
+@pytest.mark.asyncio
 async def test_vitality_cleanup_confirm_detects_stale_state_after_prepare(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

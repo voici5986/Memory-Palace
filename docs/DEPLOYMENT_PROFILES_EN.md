@@ -155,9 +155,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # Note: There is no RETRIEVAL_RERANKER_BACKEND configuration item
 ```
 
-> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field; but if the final returned vector size still disagrees with your config, the mismatch will surface later during indexing or retrieval.
+> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field. If the final response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry.
 >
-> In the local small-sample validation for this session, the remote API embedding + reranker C/D path was rechecked successfully. A common local OpenAI-compatible path was also rechecked: Ollama `/v1/embeddings` can be used with an explicit `dimensions=1024` when the model supports it.
+> If you are using a local OpenAI-compatible path such as Ollama, prefer `/v1/embeddings` and only set an explicit `dimensions=1024` when the model really returns 1024-dimensional vectors.
 
 **Profile D** (Remote API Services) —— No local GPU required, uses cloud models:
 
@@ -424,7 +424,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> Script Logic: Copies `.env.example` to `.env`, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
+> Script Logic: Copies `.env.example` to the generated env file, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. For local platforms, the default target remains `.env`; if you run the `docker` variant without an explicit target, the default target is now `.env.docker`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates env keys after generation to prevent inconsistent behavior across different parsers for keys that appear multiple times.
 >
@@ -631,8 +631,8 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 
 | Script | Description |
 |---|---|
-| `scripts/apply_profile.sh` | Generates `.env` from template (macOS / Linux) |
-| `scripts/apply_profile.ps1` | Generates `.env` from template (Windows PowerShell) |
+| `scripts/apply_profile.sh` | Generates the env file from template (`.env` by default for local platforms; `.env.docker` by default for `docker` when target is omitted) |
+| `scripts/apply_profile.ps1` | Generates the env file from template (`.env` by default for local platforms; `.env.docker` by default for `docker` when target is omitted) |
 | `scripts/docker_one_click.sh` | Docker one-click deployment (macOS / Linux) |
 | `scripts/docker_one_click.ps1` | Docker one-click deployment (Windows PowerShell) |
 

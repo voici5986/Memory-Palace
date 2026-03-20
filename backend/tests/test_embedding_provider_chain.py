@@ -81,7 +81,7 @@ async def test_embedding_provider_chain_uses_configured_fallback_provider(
         call_meta["api_key"] = api_key
         assert payload["model"] == "chain-model"
         assert payload["dimensions"] == client._embedding_dim
-        return {"data": [{"embedding": [0.11, 0.22, 0.33]}]}
+        return {"data": [{"embedding": [0.11] * client._embedding_dim}]}
 
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: list[str] = []
@@ -93,7 +93,7 @@ async def test_embedding_provider_chain_uses_configured_fallback_provider(
         )
     await client.close()
 
-    assert embedding == [0.11, 0.22, 0.33]
+    assert embedding == [0.11] * client._embedding_dim
     assert call_meta["base"] == "https://embedding.example/v1"
     assert call_meta["endpoint"] == "/embeddings"
     assert call_meta["api_key"] == "test-key"
@@ -153,6 +153,39 @@ async def test_post_json_retries_embedding_without_dimensions_when_provider_reje
     assert "dimensions" not in calls[1]
     assert embedding == [0.5] * 1024
     assert degrade_reasons == []
+
+
+@pytest.mark.asyncio
+async def test_remote_embedding_dim_mismatch_falls_back_to_hash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://embedding.example/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "embedding-dim-mismatch.db"))
+    await client.init_db()
+
+    async def _fake_post_json(*_args, **_kwargs):
+        return {"data": [{"embedding": [0.25] * 8}]}
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    degrade_reasons: list[str] = []
+    async with client.session() as session:
+        embedding = await client._get_embedding(
+            session,
+            "remote embedding dimension mismatch sample",
+            degrade_reasons=degrade_reasons,
+        )
+    await client.close()
+
+    assert len(embedding) == 16
+    assert embedding != [0.25] * 8
+    assert "embedding_response_dim_mismatch" in degrade_reasons
+    assert "embedding_response_dim_mismatch:8!=16" in degrade_reasons
+    assert "embedding_fallback_hash" in degrade_reasons
 
 
 @pytest.mark.asyncio

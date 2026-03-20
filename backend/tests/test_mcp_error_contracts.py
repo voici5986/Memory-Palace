@@ -37,6 +37,11 @@ class _DeleteMemoryClient:
         return {"ok": True}
 
 
+class _TimeoutWriteClient:
+    async def write_guard(self, **_kwargs):
+        return {"action": "ADD", "method": "stub", "reason": "timeout"}
+
+
 @pytest.mark.asyncio
 async def test_read_memory_partial_validation_errors_return_json() -> None:
     raw = await mcp_server.read_memory("core://agent/index", chunk_id=-1)
@@ -108,6 +113,35 @@ async def test_create_memory_rejects_system_domain_writes(monkeypatch) -> None:
 
     assert payload["ok"] is False
     assert "read-only" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_create_memory_write_lane_timeout_returns_retryable_tool_payload(
+    monkeypatch,
+) -> None:
+    async def _raise_timeout(_operation: str, _task):
+        raise RuntimeError("write_lane_timeout")
+
+    async def _never_defer():
+        return False
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _TimeoutWriteClient())
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _raise_timeout)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _never_defer)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://",
+        content="delayed create",
+        priority=1,
+        title="delayed_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert payload["reason"] == "write_lane_timeout"
+    assert payload["retryable"] is True
+    assert payload["message"] == "Error: write_lane_timeout"
 
 
 @pytest.mark.asyncio

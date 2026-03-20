@@ -88,7 +88,7 @@ Same-session `compact_context` / auto-flush flushes now also take a database-fil
 
 Transient SQLite lock conflicts now also get a small bounded retry, and background index jobs go through the same global write gate instead of racing the foreground path. In plain language: foreground writes and async reindex work are less likely to trip over each other under local multi-process pressure.
 
-Dashboard tree writes now also surface write-lane saturation as a structured `503` (`write_lane_timeout`) instead of a generic `500`.
+Dashboard / Review / Maintenance write endpoints now surface write-lane saturation as a structured `503` (`write_lane_timeout`) instead of a generic `500`. The MCP write tools also return a retryable structured error payload for the same condition.
 
 ### 🔍 Unified Retrieval Engine
 
@@ -398,7 +398,7 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-This generates a Profile B-based `.env` using the platform-specific template at `deploy/profiles/{macos,windows,docker}/profile-b.env`.
+This generates a Profile B-based env file using the platform-specific template at `deploy/profiles/{macos,windows,docker}/profile-b.env`. For local `macos` / `windows`, the default target is `.env`; if you run the `docker` variant without an explicit target file, `apply_profile.sh/.ps1` now defaults to `.env.docker`.
 
 Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.env` files you should copy by hand. Some template values intentionally keep placeholder paths until `apply_profile.*` rewrites them for the current repository location.
 
@@ -649,9 +649,10 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
 > - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
 > - The current runtime also sends `RETRIEVAL_EMBEDDING_DIM` as the `dimensions` field on OpenAI-compatible `/embeddings` requests; if a provider explicitly rejects that field, it automatically retries once without `dimensions`.
+> - If the final embedding response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry.
 >
 > The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
-> If you are using a local OpenAI-compatible endpoint such as Ollama, prefer the `/v1/embeddings` path as well; in the local small-sample validation for this session, `qwen3-embedding:8b-q8_0` worked correctly with an explicit `dimensions=1024`.
+> If you are using a local OpenAI-compatible endpoint such as Ollama, prefer the `/v1/embeddings` path as well; only set an explicit `dimensions=1024` when the model really returns 1024-dimensional vectors.
 > If you use `docker_one_click.sh/.ps1` for `profile c/d`, unresolved placeholder model IDs are treated the same as placeholder endpoint/key values: the script stops before `docker compose` until you replace them with real values.
 >
 > If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, forwards explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*`, and optional `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*` values, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and falls back to `ROUTER_RERANKER_MODEL` when `RETRIEVAL_RERANKER_MODEL` is still missing.

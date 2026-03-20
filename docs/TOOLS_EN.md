@@ -532,6 +532,14 @@ Return values for `create_memory` and `update_memory` include the following Writ
 
 > ⚠️ When `index_dropped > 0`, it means some indexing tasks failed to enter the queue. The client should treat this as a degradation signal, checking `degrade_reasons` for alerts or compensation.
 
+### Write-Lane Timeout
+
+For write tools such as `create_memory`, `update_memory`, `delete_memory`, `add_alias`, and `compact_context`:
+
+- when the write lane is saturated, the response now carries `reason=write_lane_timeout`
+- the same response also carries `retryable=true` and `retry_hint`
+- the HTTP API equivalents surface the same condition as a structured `503`
+
 ---
 
 ## Degradation Mechanism

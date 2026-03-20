@@ -156,9 +156,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
-> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求；但如果最终返回的真实维度和你的配置不一致，问题仍然会在索引或检索阶段暴露出来。
+> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求。如果最终返回的真实维度还是和你的配置不一致，运行时现在会立刻拒绝这条向量并走 fallback / degrade，不会再静默写入一条错维度索引。
 >
-> 本次本地小样本联调里，远端 API embedding + reranker 这条 C/D 路径已经再次跑通；另外，一条常见的本地 OpenAI-compatible 路径也已复核过：Ollama 的 `/v1/embeddings` 在模型支持时可以配合显式 `dimensions=1024` 使用。
+> 如果你本地用的是 Ollama 这类 OpenAI-compatible 路径，也优先走 `/v1/embeddings`；只有在模型本身确实返回 1024 维向量时，再显式设置 `dimensions=1024`。
 
 **Profile D**（远程 API 服务）——无需本地 GPU，使用云端模型：
 
@@ -420,7 +420,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...` 做预览。
+> 脚本执行逻辑：复制 `.env.example` 为生成后的环境文件，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。对本地平台，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...` 做预览。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
 >
@@ -622,8 +622,8 @@ curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
 
 | 脚本 | 说明 |
 |---|---|
-| `scripts/apply_profile.sh` | 从模板生成 `.env`（macOS / Linux） |
-| `scripts/apply_profile.ps1` | 从模板生成 `.env`（Windows PowerShell） |
+| `scripts/apply_profile.sh` | 从模板生成环境文件（本地平台默认 `.env`；`docker` 且未显式传目标时默认 `.env.docker`） |
+| `scripts/apply_profile.ps1` | 从模板生成环境文件（本地平台默认 `.env`；`docker` 且未显式传目标时默认 `.env.docker`） |
 | `scripts/docker_one_click.sh` | Docker 一键部署（macOS / Linux） |
 | `scripts/docker_one_click.ps1` | Docker 一键部署（Windows PowerShell） |
 

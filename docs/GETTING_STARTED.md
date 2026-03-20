@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
+> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。对本地 `macos` / `windows`，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >

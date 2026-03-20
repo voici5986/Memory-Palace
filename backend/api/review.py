@@ -53,11 +53,19 @@ async def _run_write_lane(
     if not _ENABLE_WRITE_LANE_QUEUE:
         return await task()
     resolved_session_id = str(session_id or "").strip() or f"review.{operation}"
-    return await runtime_state.write_lanes.run_write(
-        session_id=resolved_session_id,
-        operation=f"review.{operation}",
-        task=task,
-    )
+    try:
+        return await runtime_state.write_lanes.run_write(
+            session_id=resolved_session_id,
+            operation=f"review.{operation}",
+            task=task,
+        )
+    except RuntimeError as exc:
+        if str(exc) == "write_lane_timeout":
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "write_lane_timeout"},
+            ) from exc
+        raise
 
 
 def _validate_session_id_or_400(session_id: str) -> str:

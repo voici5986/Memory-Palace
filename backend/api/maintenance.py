@@ -287,11 +287,19 @@ async def _run_write_lane(
 ) -> Any:
     if not ENABLE_WRITE_LANE_QUEUE:
         return await task()
-    return await runtime_state.write_lanes.run_write(
-        session_id=session_id,
-        operation=operation,
-        task=task,
-    )
+    try:
+        return await runtime_state.write_lanes.run_write(
+            session_id=session_id,
+            operation=operation,
+            task=task,
+        )
+    except RuntimeError as exc:
+        if str(exc) == "write_lane_timeout":
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "write_lane_timeout"},
+            ) from exc
+        raise
 
 
 class _LazySQLiteClientProxy:
@@ -3107,6 +3115,12 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
     skipped: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
+    def _classify_delete_permission_error(exc: PermissionError) -> str:
+        message = str(exc or "").strip().lower()
+        if "final target" in message and "predecessor version" in message:
+            return "chain_referenced"
+        return "active_paths"
+
     for memory_id in selected_ids:
         latest_item = latest_by_id.get(memory_id)
         if latest_item is None:
@@ -3147,8 +3161,13 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
                 skipped.append({"memory_id": memory_id, "reason": "stale_state"})
                 continue
             errors.append({"memory_id": memory_id, "error": str(exc)})
-        except PermissionError:
-            skipped.append({"memory_id": memory_id, "reason": "active_paths"})
+        except PermissionError as exc:
+            skipped.append(
+                {
+                    "memory_id": memory_id,
+                    "reason": _classify_delete_permission_error(exc),
+                }
+            )
         except ValueError:
             skipped.append({"memory_id": memory_id, "reason": "memory_missing"})
         except Exception as exc:

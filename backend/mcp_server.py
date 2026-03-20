@@ -722,6 +722,21 @@ def _tool_response(*, ok: bool, message: str, **extra: Any) -> str:
     return _to_json(payload)
 
 
+def _is_write_lane_timeout_error(exc: BaseException) -> bool:
+    return str(exc or "").strip() == "write_lane_timeout"
+
+
+def _write_lane_timeout_tool_response(*, message: str, **extra: Any) -> str:
+    return _tool_response(
+        ok=False,
+        message=message,
+        reason="write_lane_timeout",
+        retryable=True,
+        retry_hint="Write lane is saturated. Retry after the current write backlog drains.",
+        **extra,
+    )
+
+
 async def _record_guard_event(
     *,
     operation: str,
@@ -2602,22 +2617,22 @@ async def _collect_ancestor_memories(
     if len(segments) <= 1:
         return []
 
+    candidate_paths = [
+        "/".join(segments[:depth])
+        for depth in range(len(segments) - 1, 0, -1)
+    ][:max_hops]
+
     ancestors: List[Dict[str, Any]] = []
     seen_keys: set[Tuple[Any, str]] = set()
-    for depth in range(len(segments) - 1, 0, -1):
-        if len(ancestors) >= max_hops:
-            break
-        candidate_path = "/".join(segments[:depth])
-        memory = await client.get_memory_by_path(candidate_path, domain)
-        if not memory:
-            continue
+
+    def _append_ancestor(memory: Dict[str, Any], candidate_path: str) -> None:
         ancestor_uri = make_uri(domain, candidate_path)
         key = (
             memory.get("id"),
             ancestor_uri,
         )
         if key in seen_keys:
-            continue
+            return
         seen_keys.add(key)
         ancestors.append(
             {
@@ -2628,6 +2643,25 @@ async def _collect_ancestor_memories(
                 "content_snippet": _event_preview(str(memory.get("content", "")), 160),
             }
         )
+
+    get_memories_by_paths = getattr(client, "get_memories_by_paths", None)
+    if callable(get_memories_by_paths):
+        batched = await get_memories_by_paths(
+            [(domain, candidate_path) for candidate_path in candidate_paths]
+        )
+        if isinstance(batched, dict):
+            for candidate_path in candidate_paths:
+                ancestor_uri = make_uri(domain, candidate_path)
+                memory = batched.get(ancestor_uri)
+                if isinstance(memory, dict):
+                    _append_ancestor(memory, candidate_path)
+            return ancestors
+
+    for candidate_path in candidate_paths:
+        memory = await client.get_memory_by_path(candidate_path, domain)
+        if not memory:
+            continue
+        _append_ancestor(memory, candidate_path)
     return ancestors
 
 
@@ -3745,6 +3779,12 @@ async def create_memory(
             **_guard_fields(guard_decision),
         )
     except Exception as e:
+        if _is_write_lane_timeout_error(e):
+            return _write_lane_timeout_tool_response(
+                message="Error: write_lane_timeout",
+                created=False,
+                **_guard_fields(guard_decision),
+            )
         return _tool_response(
             ok=False,
             message=f"Error: {str(e)}",
@@ -4113,6 +4153,12 @@ async def update_memory(
             **_guard_fields(guard_decision),
         )
     except Exception as e:
+        if _is_write_lane_timeout_error(e):
+            return _write_lane_timeout_tool_response(
+                message="Error: write_lane_timeout",
+                updated=False,
+                **_guard_fields(guard_decision),
+            )
         return _tool_response(
             ok=False,
             message=f"Error: {str(e)}",
@@ -4202,6 +4248,12 @@ async def delete_memory(uri: str) -> str:
             uri=full_uri,
         )
     except Exception as e:
+        if _is_write_lane_timeout_error(e):
+            return _write_lane_timeout_tool_response(
+                message="Error: write_lane_timeout",
+                deleted=False,
+                uri=full_uri,
+            )
         return _tool_response(
             ok=False,
             message=f"Error: {str(e)}",
@@ -4287,6 +4339,10 @@ async def add_alias(
     except ValueError as e:
         return f"Error: {str(e)}"
     except Exception as e:
+        if _is_write_lane_timeout_error(e):
+            return _write_lane_timeout_tool_response(
+                message="Error: write_lane_timeout",
+            )
         return f"Error: {str(e)}"
 
 
@@ -4790,6 +4846,19 @@ async def compact_context(
         }
         return _to_json(payload)
     except Exception as e:
+        if _is_write_lane_timeout_error(e):
+            return _to_json(
+                {
+                    "ok": False,
+                    "error": "write_lane_timeout",
+                    "reason": "write_lane_timeout",
+                    "retryable": True,
+                    "retry_hint": (
+                        "Write lane is saturated. Retry after the current write backlog drains."
+                    ),
+                    "session_id": session_id,
+                }
+            )
         return _to_json({"ok": False, "error": str(e), "session_id": session_id})
     finally:
         _AUTO_FLUSH_IN_PROGRESS.discard(session_id)

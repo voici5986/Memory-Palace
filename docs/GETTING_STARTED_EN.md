@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` files are input templates for the scripts, not the final `.env` files we recommend you copy directly. For the user path, keep using `apply_profile.sh/.ps1`; it is the safer path because it also fills paths automatically and deduplicates repeated keys.
 
-> The `apply_profile` script copies `.env.example` to `.env` (or your specified target file) and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
+> The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, the default target remains `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >

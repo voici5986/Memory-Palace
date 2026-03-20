@@ -85,7 +85,7 @@ backend/
 - 当前这组写接口也会先写 Review snapshot；在 Review 里看到的 session 名会带当前数据库作用域（例如 `dashboard-<scope>`），避免不同 SQLite 目标混到一起
 - `POST / PUT /browse/node` 默认还会对单次 `content` 做长度校验（`BROWSE_CONTENT_MAX_CHARS`，默认 1 MiB），防止把超大正文直接塞进 Dashboard 写接口
 - `POST /browse/node` 还会对生成后的路径长度做前置校验（`BROWSE_PATH_MAX_CHARS`，默认 512），如果 `parent_path + title` 太长，会在真正写入前直接返回 `422`
-- 如果 write lane 长时间拿不到写槽位，这组写接口现在会直接返回结构化 `503`（`write_lane_timeout`），而不是只冒一个通用 `500`
+- 如果 write lane 长时间拿不到写槽位，`browse` / `review` / `maintenance` 这几组写接口现在都会直接返回结构化 `503`（`write_lane_timeout`），而不是只冒一个通用 `500`；MCP 写工具遇到同样情况时，也会返回可重试的结构化错误结果
 
 ### 审查与回滚（`/review`）
 
@@ -128,7 +128,7 @@ backend/
 |---|---|---|
 | `GET` | `/maintenance/orphans` | 查看孤儿记忆（deprecated 或无路径指向） |
 | `GET` | `/maintenance/orphans/{memory_id}` | 查看孤儿记忆详情 |
-| `DELETE` | `/maintenance/orphans/{memory_id}` | 永久删除孤儿记忆 |
+| `DELETE` | `/maintenance/orphans/{memory_id}` | 永久删除孤儿记忆（如果某条 deprecated 最终目标仍被更旧版本引用，会先拒绝删除，直到前面的旧链路先清掉） |
 | `POST` | `/maintenance/import/prepare` | 准备外部导入任务（生成可执行计划） |
 | `POST` | `/maintenance/import/execute` | 执行外部导入任务 |
 | `GET` | `/maintenance/import/jobs/{job_id}` | 查看导入任务状态 |
