@@ -101,16 +101,19 @@ def _format_diff_summary(
     total_new: int,
 ) -> str:
     if total_old == 0:
-        return f"新增内容，共{total_new}字符"
+        return f"Added content: {total_new} chars"
 
     if total_new == 0:
-        return f"删除所有内容，原有{total_old}字符"
+        return f"Deleted all content: {total_old} chars removed"
 
     change_ratio = (additions + deletions) / (total_old + total_new) * 100
 
     if change_ratio < 5:
-        return f"微小变化：新增{additions}字符，删除{deletions}字符"
+        return f"Small change: +{additions} chars, -{deletions} chars"
     elif change_ratio < 20:
-        return f"中等变化：新增{additions}字符，删除{deletions}字符"
+        return f"Moderate change: +{additions} chars, -{deletions} chars"
     else:
-        return f"大幅变化：新增{additions}字符，删除{deletions}字符，变化率{change_ratio:.1f}%"
+        return (
+            f"Large change: +{additions} chars, -{deletions} chars, "
+            f"change ratio {change_ratio:.1f}%"
+        )

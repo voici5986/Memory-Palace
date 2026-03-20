@@ -349,6 +349,8 @@ cd <project-root>
 >
 > `docker_one_click.sh/.ps1` will generate an independent temporary Docker env file for each run by default and pass it to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`. It will only reuse a specified path if that environment variable is explicitly set, rather than always sharing `.env.docker`.
 >
+> On the macOS / Linux shell path, if you explicitly point `MEMORY_PALACE_DOCKER_ENV_FILE` at your own custom file, `docker_one_click.sh` now updates that file through temp files created in the same directory, so replacing it is less likely to degrade into a cross-filesystem copy when the file lives outside the default temp area.
+>
 > If the `MCP_API_KEY` in this Docker env file is empty, `apply_profile.sh/.ps1` will automatically generate a local key for both the Dashboard proxy and SSE.
 >
 > The current compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before the frontend is considered ready. If you see the container has just started but the browser isn't connecting, wait a few seconds first; do not immediately judge it as a deployment failure.
@@ -424,7 +426,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> Script Logic: Copies `.env.example` to the generated env file, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. For local platforms, the default target remains `.env`; if you run the `docker` variant without an explicit target, the default target is now `.env.docker`. On the shell path, `apply_profile.sh` also rewrites the common local `DATABASE_URL` placeholder for the current checkout, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
+> Script Logic: Copies `.env.example` to the generated env file, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. For local platforms, the default target remains `.env`; if you run the `docker` variant without an explicit target, the default target is now `.env.docker`. On the shell path, `apply_profile.sh` also rewrites the common local `DATABASE_URL` placeholder for the current checkout, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if another `apply_profile.sh` process is already writing the same target file, the later one exits early and asks you to retry instead of letting the two runs overwrite each other. Its staged/update temp files are also created next to the target file, reducing cross-filesystem replace surprises. If you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates env keys after generation to prevent inconsistent behavior across different parsers for keys that appear multiple times.
 >

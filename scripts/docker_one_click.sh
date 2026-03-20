@@ -402,8 +402,11 @@ upsert_env_value_in_file() {
   local env_file="$1"
   local key="$2"
   local value="$3"
-  local tmp_file
-  tmp_file="$(mktemp "/tmp/mp-env-upsert-XXXXXX")"
+  local tmp_file env_dir env_base
+  env_dir="$(dirname "${env_file}")"
+  env_base="$(basename "${env_file}")"
+  mkdir -p "${env_dir}" >/dev/null 2>&1 || true
+  tmp_file="$(mktemp "${env_dir}/.${env_base}.upsert.XXXXXX")"
   awk -v target="${key}" -v replacement="${value}" '
     BEGIN { updated=0 }
     $0 ~ ("^" target "=") {

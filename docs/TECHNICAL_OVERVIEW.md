@@ -120,6 +120,7 @@ backend/
 - 先看 session
 - 再看 snapshot / diff
 - 最后决定是 rollback 还是 integrate
+- `POST /review/diff` 更像通用文本对比 helper：它会返回 `diff_html`、`diff_unified` 和一条简短的英文 `summary`；如果环境里缺少 `diff_match_patch`，HTML diff 会自动退回到 `difflib.HtmlDiff`
 
 ### 维护与观测（`/maintenance`）
 

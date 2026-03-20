@@ -464,6 +464,54 @@ def test_apply_profile_shell_backs_up_existing_target_before_overwrite(
     assert "[backup] Existing .env.generated saved to .env.generated.bak" in result.stdout
 
 
+def test_apply_profile_shell_rejects_concurrent_writer_for_same_target(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lock_dir = project_root / ".env.generated.lockdir"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    (lock_dir / "owner_pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "macos", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "another apply_profile.sh process is already writing .env.generated" in result.stderr
+
+
+def test_apply_profile_shell_uses_target_adjacent_temp_files_and_locking_contract() -> None:
+    script_text = (PROJECT_ROOT / "scripts" / "apply_profile.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "try_acquire_path_lock" in script_text
+    assert 'mktemp_adjacent_file "${file_path}" "write"' in script_text
+    assert 'mktemp_adjacent_file "${target_file}" "staged"' in script_text
+    assert "another apply_profile.sh process is already writing" in script_text
+
+
 def test_apply_profile_shell_dry_run_prints_generated_env_without_touching_target(
     tmp_path: Path,
 ) -> None:

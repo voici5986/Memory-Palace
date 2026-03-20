@@ -407,7 +407,7 @@ bash scripts/apply_profile.sh macos b
 
 后端现在也会对**当前实际启用的远端检索配置**做同样的 fail-closed 检查。如果你绕过 `apply_profile.*`，直接手工复制了 C/D 模板，并且还保留着 `host.docker.internal:PORT`、`replace-with-your-key`、`your-embedding-model-id`、`your-reranker-model-id` 这类示例值，启动会直接报错，而不是带着一份明显无效的 provider 配置继续运行。
 
-在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。Windows PowerShell 现在也支持同样的预览方式：`.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`。如果你只是想先看脚本用法，可以直接运行 `.\scripts\apply_profile.ps1 -Help`。
+在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是两边互相覆盖。它生成 staged / update 临时文件时，也会放到目标文件同目录，而不是统一丢到共享 `/tmp`，这样自定义目标路径时更不容易撞上跨文件系统替换的坑。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。Windows PowerShell 现在也支持同样的预览方式：`.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`。如果你只是想先看脚本用法，可以直接运行 `.\scripts\apply_profile.ps1 -Help`。
 
 如果你前面已经生成过 `.env.docker`，也不要直接把那份 Docker 文件改名成 `.env`。Docker profile 里的 `/app/data/...` 这类容器路径只对容器有效；如果你自己把挂载点改成 `/data/...`，本机 `stdio` MCP 也一样不能直接拿来用，还是需要宿主机自己的绝对路径。
 
@@ -575,6 +575,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，**受保护请求通常已经能直接用**；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。这不一定代表配置坏了；只有当受保护数据也一起报 `401` 或空态时，才需要继续排查 env / 代理配置。
 >
 > 客户端配置里仍然请把 `/sse` 当成规范公开入口来写。`/sse/` 现在只保留成兼容写法，也会转发到同一条后端 SSE 路径，所以新的示例和你自己的配置都继续写 `/sse` 即可。
+>
+> `docker_one_click.sh/.ps1` 默认本来就会给每次运行隔离一份 Docker env 文件。对 macOS / Linux 的 shell 路径来说，如果你显式把 `MEMORY_PALACE_DOCKER_ENV_FILE` 指到自己的自定义文件，`docker_one_click.sh` 现在也会在那个文件同目录生成临时文件再替换回去，减少目标文件不在默认临时目录时出现跨文件系统替换问题的概率。
 >
 > 也请把这个 Docker 前端端口当成可信操作员 / 管理入口。只要有人能直接访问 `http://<你的主机>:3000`，他就能使用 Dashboard 以及被代理的受保护接口，所以不要把这个端口当成“有 `MCP_API_KEY` 就等于终端用户鉴权”的公网入口；若要给受信范围之外的人访问，请先在前面加你自己的 VPN、反向代理鉴权或网络访问控制。
 >

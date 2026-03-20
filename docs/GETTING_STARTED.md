@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 也会自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
+> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 也会自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是两边互相覆盖；它生成 staged / update 临时文件时，也会直接放到目标文件同目录，减少跨文件系统替换时的意外。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
@@ -351,6 +351,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > `docker_one_click.sh/.ps1` 默认会为**每次运行**生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定文件，而不是固定共享 `.env.docker`。
 >
 > 同一 checkout 下的并发部署会被 deployment lock 串行化；若已有另一条一键部署在执行，后续进程会直接退出并提示稍后重试。
+>
+> 对 macOS / Linux 的 shell 路径来说，如果你显式把 `MEMORY_PALACE_DOCKER_ENV_FILE` 指到一份自定义文件，`docker_one_click.sh` 现在也会在那个文件同目录生成临时文件再替换回去，减少目标文件不在默认临时目录时出现跨文件系统替换问题的概率。
 >
 > 当前本地 build 路径还会使用按 checkout 固定的本地镜像名。所以只要这个 checkout 里已经成功 build 过一次，即使你换了 `COMPOSE_PROJECT_NAME`，后续再跑 `--no-build` 也能继续复用这些镜像；只有第一次启动或你手动删掉本地镜像时，才需要重新 `--build`。
 >

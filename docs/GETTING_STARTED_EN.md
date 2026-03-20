@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` files are input templates for the scripts, not the final `.env` files we recommend you copy directly. For the user path, keep using `apply_profile.sh/.ps1`; it is the safer path because it also fills paths automatically and deduplicates repeated keys.
 
-> The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. Local shell runs (`macos` / `linux`) and native Windows still default to `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. On the shell path, `apply_profile.sh` also automatically rewrites the common local `DATABASE_URL` placeholder, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
+> The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. Local shell runs (`macos` / `linux`) and native Windows still default to `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. On the shell path, `apply_profile.sh` also automatically rewrites the common local `DATABASE_URL` placeholder, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file. If another `apply_profile.sh` process is already writing the same target file, the later one exits early and asks you to retry instead of letting the two runs overwrite each other; its staged/update temp files are also created next to the target file, reducing cross-filesystem replace surprises.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >
@@ -352,6 +352,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > `docker_one_click.sh/.ps1` defaults to generating an independent temporary Docker env file for **each run**, passed to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`; it only reuses a specific file if that environment variable is explicitly set, rather than sharing a fixed `.env.docker`.
 >
 > Concurrent deployments under the same checkout will be serialized by a deployment lock; if another one-click deployment is already executing, subsequent processes will exit immediately with a prompt to retry later.
+>
+> On the macOS / Linux shell path, if you explicitly point `MEMORY_PALACE_DOCKER_ENV_FILE` at your own custom file, `docker_one_click.sh` now updates that file through temp files created in the same directory, so replacing it is less likely to degrade into a cross-filesystem copy when the file lives outside the default temp area.
 >
 > The local build path now also uses checkout-scoped stable image names. In practice, once this checkout has completed one successful build, `--no-build` can keep reusing those images even if you change `COMPOSE_PROJECT_NAME`; you only need `--build` again on the first run or after deleting the local images.
 >

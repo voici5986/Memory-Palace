@@ -28,7 +28,7 @@ def test_utils_module_imports_without_diff_match_patch(monkeypatch) -> None:
     assert module.DiffMatchPatch is None
     assert "<table class=\"diff\"" in diff_html
     assert "--- old_version" in diff_unified
-    assert "变化" in summary
+    assert "change" in summary.lower()
 
 
 def test_get_text_diff_falls_back_when_optional_dependency_unavailable(
@@ -43,4 +43,4 @@ def test_get_text_diff_falls_back_when_optional_dependency_unavailable(
 
     assert "<table class=\"diff\"" in diff_html
     assert "@@" in diff_unified
-    assert "变化" in summary
+    assert "change" in summary.lower()

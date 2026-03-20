@@ -30,6 +30,7 @@ from .maintenance import require_maintenance_api_key
 from db.snapshot import get_snapshot_manager
 from db.sqlite_client import get_sqlite_client
 from runtime_state import runtime_state
+from shared_utils import env_bool as _env_bool
 
 router = APIRouter(
     prefix="/review",
@@ -37,11 +38,8 @@ router = APIRouter(
     dependencies=[Depends(require_maintenance_api_key)],
 )
 
-_TRUTHY_VALUES = {"1", "true", "yes", "on", "enabled"}
-_ENABLE_WRITE_LANE_QUEUE = (
-    str(os.getenv("RUNTIME_WRITE_LANE_QUEUE", "true")).strip().lower()
-    in _TRUTHY_VALUES
-)
+_VERSION_CHAIN_MAX_HOPS = 64
+_ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 
 
 async def _run_write_lane(
@@ -263,7 +261,7 @@ async def _resolve_chain_tip_memory_id(
     client: Any,
     memory_id: int,
     *,
-    max_hops: int = 64,
+    max_hops: int = _VERSION_CHAIN_MAX_HOPS,
 ) -> Optional[int]:
     """Follow migrated_to pointers and return the final memory id in the chain."""
     current_id = int(memory_id)
@@ -365,7 +363,12 @@ async def _diff_path_create_alias(snapshot: dict, resource_id: str) -> dict:
             "unified": unified, "summary": summary, "has_changes": has_changes}
 
 
-async def _get_surviving_paths(client, memory_id: int) -> list:
+async def _get_surviving_paths(
+    client: Any,
+    memory_id: int,
+    *,
+    max_hops: int = _VERSION_CHAIN_MAX_HOPS,
+) -> list:
     """Follow the version chain from memory_id to the latest version,
     then return all living paths pointing to that memory.
     
@@ -374,23 +377,19 @@ async def _get_surviving_paths(client, memory_id: int) -> list:
     """
     if not memory_id:
         return []
-    
-    # Follow migrated_to chain to find the latest version
-    current_id = memory_id
-    visited = set()
-    while current_id and current_id not in visited:
-        visited.add(current_id)
-        version = await client.get_memory_version(current_id)
-        if not version or not version.get("migrated_to"):
-            break
-        current_id = version["migrated_to"]
-    
-    # Now get paths from the latest version
-    latest = await client.get_memory_version(current_id)
+
+    lookup_memory_id = await _resolve_chain_tip_memory_id(
+        client,
+        memory_id,
+        max_hops=max_hops,
+    )
+    if lookup_memory_id is None:
+        lookup_memory_id = int(memory_id)
+
+    latest = await client.get_memory_version(lookup_memory_id)
     if latest:
         return latest.get("paths", [])
-    
-    # Fallback: check original memory_id
+
     original = await client.get_memory_version(memory_id)
     return original.get("paths", []) if original else []
 

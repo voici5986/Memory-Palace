@@ -416,7 +416,29 @@ def test_utils_module_imports_without_diff_match_patch() -> None:
     assert "<table class=\"diff\"" in diff_html
     assert "--- old_version" in diff_unified
     assert "+++ new_version" in diff_unified
-    assert "新增" in summary
+    assert "change" in summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_get_surviving_paths_stops_after_bounded_chain_traversal() -> None:
+    call_order: list[int] = []
+
+    class _LongChainClient:
+        async def get_memory_version(self, memory_id: int):
+            call_order.append(int(memory_id))
+            current = int(memory_id)
+            if current <= (review_api._VERSION_CHAIN_MAX_HOPS + 5):
+                return {
+                    "id": current,
+                    "migrated_to": current + 1,
+                    "paths": [f"core://node-{current}"],
+                }
+            return {"id": current, "migrated_to": None, "paths": [f"core://node-{current}"]}
+
+    paths = await review_api._get_surviving_paths(_LongChainClient(), 1)
+
+    assert paths == ["core://node-1"]
+    assert len(call_order) == review_api._VERSION_CHAIN_MAX_HOPS + 1
 
 
 def test_diff_endpoint_rejects_invalid_session_id_with_400(

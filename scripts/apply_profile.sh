@@ -96,6 +96,53 @@ normalize_cli_path() {
 }
 
 target_file="$(normalize_cli_path "${target_file}")"
+TARGET_FILE_LOCK=""
+
+try_acquire_path_lock() {
+  local target_path="$1"
+  local lock_dir="${target_path}.lockdir"
+  local owner_file="${lock_dir}/owner_pid"
+  local owner_pid=""
+
+  mkdir -p "$(dirname "${target_path}")" >/dev/null 2>&1 || true
+
+  if mkdir "${lock_dir}" 2>/dev/null; then
+    printf '%s\n' "${BASHPID:-$$}" > "${owner_file}" 2>/dev/null || true
+    echo "${lock_dir}"
+    return 0
+  fi
+
+  if [[ -f "${owner_file}" ]]; then
+    owner_pid="$(cat "${owner_file}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${owner_pid}" ]] && ! kill -0 "${owner_pid}" 2>/dev/null; then
+    rm -rf "${lock_dir}" >/dev/null 2>&1 || true
+    if mkdir "${lock_dir}" 2>/dev/null; then
+      printf '%s\n' "${BASHPID:-$$}" > "${owner_file}" 2>/dev/null || true
+      echo "${lock_dir}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+release_path_lock() {
+  local lock_dir="$1"
+  if [[ -n "${lock_dir}" ]]; then
+    rm -rf "${lock_dir}" >/dev/null 2>&1 || true
+  fi
+}
+
+mktemp_adjacent_file() {
+  local target_path="$1"
+  local label="${2:-tmp}"
+  local target_dir target_name
+  target_dir="$(dirname "${target_path}")"
+  target_name="$(basename "${target_path}")"
+  mkdir -p "${target_dir}" >/dev/null 2>&1 || true
+  mktemp "${target_dir}/.${target_name}.${label}.XXXXXX"
+}
 
 log_info() {
   if [[ "${dry_run}" == "true" ]]; then
@@ -118,7 +165,7 @@ set_env_value() {
   local key="$2"
   local value="$3"
   local tmp_file
-  tmp_file="$(mktemp "${TMPDIR:-/tmp}/${file_path##*/}.XXXXXX")"
+  tmp_file="$(mktemp_adjacent_file "${file_path}" "write")"
   awk -v key="${key}" -v value="${value}" '
     BEGIN { replaced = 0 }
     $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
@@ -349,11 +396,20 @@ if [[ ! -f "${override_env}" ]]; then
   exit 1
 fi
 
-staged_file="$(mktemp "${TMPDIR:-/tmp}/${target_file##*/}.staged.XXXXXX")"
+if [[ "${dry_run}" != "true" ]]; then
+  TARGET_FILE_LOCK="$(try_acquire_path_lock "${target_file}" || true)"
+  if [[ -z "${TARGET_FILE_LOCK}" ]]; then
+    echo "[apply-profile-lock] another apply_profile.sh process is already writing ${target_file}; wait for it to finish before retrying." >&2
+    exit 1
+  fi
+fi
+
+staged_file="$(mktemp_adjacent_file "${target_file}" "staged")"
 cleanup_staged_file() {
   if [[ -n "${staged_file:-}" && -f "${staged_file}" ]]; then
     rm -f "${staged_file}"
   fi
+  release_path_lock "${TARGET_FILE_LOCK:-}"
 }
 trap cleanup_staged_file EXIT
 

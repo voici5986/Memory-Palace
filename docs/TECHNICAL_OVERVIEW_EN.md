@@ -120,6 +120,7 @@ This group of interfaces is more like a "change review area":
 - Check session first
 - Then check snapshot / diff
 - Finally decide whether to rollback or integrate
+- `POST /review/diff` is the generic text-compare helper: it returns `diff_html`, `diff_unified`, and a short plain-English `summary`. If `diff_match_patch` is unavailable in the environment, the HTML diff automatically falls back to `difflib.HtmlDiff`.
 
 ### Maintenance and Observability (`/maintenance`)
 

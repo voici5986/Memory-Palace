@@ -163,6 +163,16 @@ def test_shell_port_probe_falls_back_to_python_socket_bind() -> None:
     ) in shell_text
 
 
+def test_shell_env_upsert_uses_env_adjacent_temp_file_for_atomic_replace() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'env_dir="$(dirname "${env_file}")"' in shell_text
+    assert 'env_base="$(basename "${env_file}")"' in shell_text
+    assert 'mktemp "${env_dir}/.${env_base}.upsert.XXXXXX"' in shell_text
+
+
 def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> None:
     shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
         encoding="utf-8"
