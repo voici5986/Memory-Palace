@@ -110,6 +110,8 @@ bash scripts/apply_profile.sh macos b
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >
+> In addition, `profile c/d` now fail-closed at the script stage when endpoint/key/model placeholders are still unresolved. If values such as `PORT`, `replace-with-your-key`, or `your-embedding-model-id` are still present, the script stops immediately instead of carrying an obviously broken config into later startup steps.
+>
 > Note: **The profile-b `.env` generated locally for macOS / Windows will not automatically fill in `MCP_API_KEY`**. If you are about to open the Dashboard, or directly call `/browse` / `/review` / `/maintenance`, `/sse`, or `/messages`, please supplement `MCP_API_KEY` yourself, or set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local loopback debugging only. Only the `docker` platform profile script will automatically generate a local key if the key is empty.
 >
 > One easy mistake to avoid: do not copy the `DATABASE_URL` from `.env.docker`, or any container-only sqlite path such as `/app/data/...` or `/data/...`, into your local `.env`. Those paths only exist inside the container; local `stdio` MCP on the host will fail with them.
@@ -154,7 +156,7 @@ The following are the most commonly used configuration items in `.env` (for more
 >
 > The model names above are just placeholder examples, not hard project dependencies. Memory Palace is not bound to a specific provider or model family; please change them to actual available embedding / reranker / chat model IDs from your own OpenAI-compatible services.
 >
-> If you later run `docker_one_click.sh/.ps1` for `profile c/d`, those placeholder model IDs are also treated as unresolved placeholders. The script will fail-closed before `docker compose` until you replace them with real values.
+> If you later use `profile c/d`, whether you stop at `apply_profile.sh/.ps1` or continue into `docker_one_click.sh/.ps1`, those placeholder model IDs / endpoints / keys are all treated as unresolved placeholders. The scripts fail-closed until you replace them with real values.
 >
 > If you are about to open the Dashboard locally, or directly use `curl` to call `/browse` / `/review` / `/maintenance`, it is suggested to add one of the following auth configurations to `.env`:
 >
@@ -540,13 +542,13 @@ $env:PORT = "8010"
 python run_sse.py
 ```
 
-> `python run_sse.py` defaults to loopback as well: `HOST=127.0.0.1`, `PORT=8000`, and the SSE endpoint path is `/sse`. SSE mode is still protected by `MCP_API_KEY`.
+> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. You can still override both `HOST` and `PORT` explicitly. SSE mode remains protected by `MCP_API_KEY`.
 >
-> The same SSE process also provides a lightweight `/health` endpoint, mainly for Docker / scripts to perform readiness checks; the truly open streaming entry point for MCP clients remains `/sse`.
+> The same SSE process also provides a lightweight `/health` endpoint, mainly for standalone local debugging; the truly open streaming entry point for MCP clients remains `/sse`.
 >
 > The command above deliberately binds to `127.0.0.1`, which is more suitable for local machine debugging. If you truly need to allow access from other machines, change `HOST` to `0.0.0.0` (or your actual listening address). This will allow remote clients to connect to the listening address, but API Key, reverse proxy, firewall, and transport layer security will still need to be completed by you.
 >
-> If you use Docker one-click deployment or the GHCR compose path, SSE is started by an independent container that explicitly sets `HOST=0.0.0.0` inside the container and is exposed at `http://127.0.0.1:3000/sse` via the frontend proxy.
+> If you use Docker one-click deployment or the GHCR compose path, SSE is no longer served by an independent `sse` container. It is mounted directly inside the `backend` process and then exposed at `http://127.0.0.1:3000/sse` through the frontend proxy. In practice, the Docker topology is now `backend + frontend`, while the public `/sse`, `/messages`, and `/sse/messages` endpoints stay the same.
 >
 > For containerized Profile C / D setups, the compose files also add `host.docker.internal:host-gateway`, so `host.docker.internal` is the preferred way to reach a model service running on your host machine, including modern Linux Docker.
 >

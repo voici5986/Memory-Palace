@@ -1,8 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+resolve_script_path() {
+  local source_path="${1:-}"
+  if [[ -z "${source_path}" ]]; then
+    return 1
+  fi
+
+  while [[ -h "${source_path}" ]]; do
+    local source_dir
+    source_dir="$(cd -P -- "$(dirname -- "${source_path}")" && pwd)"
+    local linked_path
+    linked_path="$(readlink "${source_path}")"
+    if [[ "${linked_path}" != /* ]]; then
+      source_path="${source_dir}/${linked_path}"
+    else
+      source_path="${linked_path}"
+    fi
+  done
+
+  local resolved_dir
+  resolved_dir="$(cd -P -- "$(dirname -- "${source_path}")" && pwd)"
+  printf '%s\n' "${resolved_dir}/$(basename -- "${source_path}")"
+}
+
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "${SCRIPT_PATH}")" && pwd)"
+PROJECT_ROOT="$(cd -P -- "${SCRIPT_DIR}/.." && pwd)"
 BACKEND_DIR="${PROJECT_ROOT}/backend"
 POSIX_VENV_PYTHON="${BACKEND_DIR}/.venv/bin/python"
 WINDOWS_VENV_PYTHON="${BACKEND_DIR}/.venv/Scripts/python.exe"
@@ -17,7 +41,20 @@ read_env_value() {
   if [[ ! -f "${file_path}" ]]; then
     return 0
   fi
-  "${VENV_PYTHON}" - "${file_path}" "${key}" <<'PY'
+  local -a parser_candidates=()
+  if [[ -n "${VENV_PYTHON:-}" ]]; then
+    parser_candidates+=("${VENV_PYTHON}")
+  fi
+  local parser_candidate
+  for parser_candidate in python3 python; do
+    if command -v "${parser_candidate}" >/dev/null 2>&1; then
+      parser_candidates+=("${parser_candidate}")
+    fi
+  done
+
+  local parsed_value=""
+  for parser_candidate in "${parser_candidates[@]}"; do
+    parsed_value="$("${parser_candidate}" - "${file_path}" "${key}" <<'PY' 2>/dev/null || true
 from dotenv import dotenv_values
 import sys
 
@@ -26,6 +63,13 @@ value = dotenv_values(file_path).get(key)
 if value is not None:
     print(value, end="")
 PY
+)"
+    parsed_value="${parsed_value%$'\r'}"
+    if [[ -n "${parsed_value}" ]]; then
+      printf '%s' "${parsed_value}"
+      return 0
+    fi
+  done
 }
 
 normalize_database_url() {

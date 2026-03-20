@@ -159,7 +159,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # Remote recommended slightly
 > **🔑 Primary Tuning Parameter for C/D**: `RETRIEVAL_RERANKER_WEIGHT`, suggested range `0.20 ~ 0.40`, fine-tune in `0.05` increments.
 >
 > **Model ID Reminder**: The `your-embedding-model-id` / `your-reranker-model-id` values above are shell-safe placeholder examples. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
-> If you use `docker_one_click.sh/.ps1` for `profile c/d`, the script treats those placeholder model IDs as unresolved configuration too. It stops before `docker compose` instead of waiting for the container startup path to fail later.
+> If you use `profile c/d`, whether you stop at `apply_profile.sh/.ps1` or continue into `docker_one_click.sh/.ps1`, those placeholder model IDs / endpoints / keys are all treated as unresolved configuration. The script stops early instead of waiting for the container startup path to fail later.
 
 If you adopt the direct connection method, note one boundary first:
 
@@ -440,7 +440,7 @@ If you also want the local Vite entry to proxy same-origin SSE, add:
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
 ```
 
-This also forwards `/sse`, `/messages`, and `/sse/messages` to the local `run_sse.py` process.
+This also forwards `/sse`, `/messages`, and `/sse/messages` to your separately started local `run_sse.py` process, specifically for local Vite-entry debugging.
 
 ---
 
@@ -494,7 +494,7 @@ The following interfaces are protected by `MCP_API_KEY` (**fail-closed**: return
 
 *   `GET/POST/DELETE /maintenance/*`
 *   `GET/POST/PUT/DELETE /browse/*` and `GET/POST/DELETE /review/*`
-*   SSE interfaces (`/sse` and `/messages`, started by `run_sse.py`)
+*   SSE interfaces (`/sse` and `/messages`; standalone local debugging can start them from `run_sse.py`, while the default Docker path serves them from inside the `backend` process)
 
 ### Header Format (Choose one)
 
@@ -547,9 +547,9 @@ When using **Docker one-click deployment**, you don't need to write the key into
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `python run_sse.py` defaults to loopback (`HOST=127.0.0.1`, `PORT=8000`), so `HOST=127.0.0.1` here is the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection.
+> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection.
 >
-> In Docker / Compose, the SSE container explicitly sets `HOST=0.0.0.0` so the service can be reached through the container network and the frontend proxy.
+> In Docker / Compose, SSE is now served directly by the `backend` process and then reached through the frontend proxy; there is no separate `sse` container in the default topology anymore.
 
 For Docker one-click deployment, access directly at:
 

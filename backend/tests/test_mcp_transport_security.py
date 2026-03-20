@@ -47,6 +47,7 @@ def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
     monkeypatch.delenv("PORT", raising=False)
     monkeypatch.setattr(run_sse, "mcp_startup", _noop_startup)
     monkeypatch.setattr(run_sse, "create_sse_app", lambda: "app")
+    monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: True)
     monkeypatch.setattr(
         run_sse.uvicorn,
         "run",

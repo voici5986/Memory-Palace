@@ -712,12 +712,11 @@ if [[ ${no_build} -eq 1 ]]; then
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --no-build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     if ! compose_project_has_any_container backend \
-      && ! compose_project_has_any_container sse \
       && ! compose_project_has_any_container frontend; then
       echo "[compose-up] docker compose failed before creating any service container; skipping readiness probe." >&2
       exit 1
     fi
-    echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
+    echo "[compose-up] docker compose returned non-zero; probing backend/frontend readiness via proxied /sse..." >&2
     probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${planned_frontend_port}")"
     probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${planned_backend_port}")"
     if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then
@@ -737,12 +736,11 @@ else
     NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
     "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
     if ! compose_project_has_any_container backend \
-      && ! compose_project_has_any_container sse \
       && ! compose_project_has_any_container frontend; then
       echo "[compose-up] docker compose failed before creating any service container; skipping readiness probe." >&2
       exit 1
     fi
-    echo "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..." >&2
+    echo "[compose-up] docker compose returned non-zero; probing backend/frontend readiness via proxied /sse..." >&2
     probe_frontend_port="$(resolve_published_port_from_compose frontend 8080 "${planned_frontend_port}")"
     probe_backend_port="$(resolve_published_port_from_compose backend 8000 "${planned_backend_port}")"
     if ! wait_for_deployment_ready 30 2 "${probe_frontend_port}" "${probe_backend_port}"; then

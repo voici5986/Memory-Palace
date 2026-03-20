@@ -13,7 +13,11 @@ import time
 from uuid import uuid4
 
 import run_sse
-from run_sse import apply_mcp_api_key_middleware, create_sse_app
+from run_sse import (
+    apply_mcp_api_key_middleware,
+    create_embedded_sse_apps,
+    create_sse_app,
+)
 from starlette.requests import Request
 
 
@@ -262,6 +266,39 @@ def test_sse_health_endpoint_stays_public_when_api_key_is_configured(monkeypatch
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "memory-palace-sse"}
+
+
+def test_embedded_sse_message_mounts_accept_both_message_paths(monkeypatch) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "week6-sse-secret")
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+    stream_app, message_app = create_embedded_sse_apps()
+    app = FastAPI()
+    app.mount("/sse/messages", message_app)
+    app.mount("/messages", message_app)
+    app.mount("/sse", stream_app)
+
+    with TestClient(app) as client:
+        direct_response = client.post(
+            "/messages",
+            headers={
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "application/json",
+                "Host": "127.0.0.1:8000",
+            },
+        )
+        prefixed_response = client.post(
+            "/sse/messages/",
+            headers={
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "application/json",
+                "Host": "127.0.0.1:8000",
+            },
+        )
+
+    assert direct_response.status_code == 400
+    assert direct_response.text == "session_id is required"
+    assert prefixed_response.status_code == 400
+    assert prefixed_response.text == "session_id is required"
 
 
 def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:

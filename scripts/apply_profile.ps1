@@ -11,6 +11,7 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 $profileLower = $Profile.ToLower()
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
 if ([string]::IsNullOrWhiteSpace($Target)) {
     $Target = Join-Path $projectRoot '.env'
@@ -19,6 +20,30 @@ if ([string]::IsNullOrWhiteSpace($Target)) {
 $baseEnv = Join-Path $projectRoot '.env.example'
 $overrideEnv = Join-Path $projectRoot ("deploy/profiles/{0}/profile-{1}.env" -f $Platform, $profileLower)
 
+function Read-LinesUtf8 {
+    param([string]$FilePath)
+
+    if (-not (Test-Path $FilePath)) {
+        return @()
+    }
+
+    return [System.IO.File]::ReadAllLines($FilePath, $utf8NoBom)
+}
+
+function Write-LinesUtf8 {
+    param(
+        [string]$FilePath,
+        [string[]]$Lines
+    )
+
+    $parent = Split-Path -Parent $FilePath
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    [System.IO.File]::WriteAllLines($FilePath, $Lines, $utf8NoBom)
+}
+
 function Set-EnvValueInFile {
     param(
         [string]$FilePath,
@@ -26,10 +51,7 @@ function Set-EnvValueInFile {
         [string]$Value
     )
 
-    $lines = @()
-    if (Test-Path $FilePath) {
-        $lines = @(Get-Content -Path $FilePath)
-    }
+    $lines = @(Read-LinesUtf8 -FilePath $FilePath)
 
     $escaped = [regex]::Escape($Key)
     $updated = $false
@@ -51,7 +73,7 @@ function Set-EnvValueInFile {
         [void]$newLines.Add("$Key=$Value")
     }
 
-    Set-Content -Path $FilePath -Value $newLines
+    Write-LinesUtf8 -FilePath $FilePath -Lines $newLines.ToArray()
 }
 
 function Dedupe-EnvKeys {
@@ -61,7 +83,7 @@ function Dedupe-EnvKeys {
         return
     }
 
-    $keys = Get-Content -Path $FilePath |
+    $keys = Read-LinesUtf8 -FilePath $FilePath |
         Where-Object { $_ -match '^[A-Z0-9_]+=' } |
         ForEach-Object { ($_ -split '=', 2)[0] } |
         Group-Object |
@@ -70,7 +92,7 @@ function Dedupe-EnvKeys {
 
     foreach ($group in $keys) {
         $escaped = [regex]::Escape($group.Name)
-        $lastLine = Get-Content -Path $FilePath |
+        $lastLine = Read-LinesUtf8 -FilePath $FilePath |
             Where-Object { $_ -match "^${escaped}=" } |
             Select-Object -Last 1
         if (-not $lastLine) {
@@ -93,7 +115,7 @@ function Get-EnvValueFromFile {
     }
 
     $escaped = [regex]::Escape($Key)
-    $lastLine = Get-Content -Path $FilePath |
+    $lastLine = Read-LinesUtf8 -FilePath $FilePath |
         Where-Object { $_ -match "^${escaped}=" } |
         Select-Object -Last 1
 
@@ -110,6 +132,42 @@ function New-DockerMcpApiKey {
     return [Convert]::ToHexString($bytes).ToLowerInvariant()
 }
 
+function Assert-ResolvedProfilePlaceholders {
+    param(
+        [string]$FilePath,
+        [string]$ResolvedProfile
+    )
+
+    if ($ResolvedProfile -notin @('c', 'd')) {
+        return
+    }
+
+    $unresolved = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Read-LinesUtf8 -FilePath $FilePath) {
+        if (
+            $line -match '^(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)=.*:PORT/' `
+            -or $line -match '=replace-with-your-key$' `
+            -or $line -match '=your-embedding-model-id$' `
+            -or $line -match '=your-reranker-model-id$' `
+            -or $line -match '=https://router\.example\.com/'
+        ) {
+            [void]$unresolved.Add($line)
+        }
+    }
+
+    if ($unresolved.Count -eq 0) {
+        return
+    }
+
+    [Console]::Error.WriteLine(
+        "Generated {0}, but profile {1} still contains unresolved placeholders:" -f $FilePath, $ResolvedProfile
+    )
+    foreach ($item in $unresolved) {
+        [Console]::Error.WriteLine("  {0}" -f $item)
+    }
+    throw "Fill the placeholder values before using profile $ResolvedProfile."
+}
+
 if (-not (Test-Path $baseEnv)) {
     Write-Error "Missing base env template: $baseEnv"
     exit 1
@@ -120,12 +178,18 @@ if (-not (Test-Path $overrideEnv)) {
     exit 1
 }
 
-Copy-Item -Path $baseEnv -Destination $Target -Force
-Add-Content -Path $Target -Value ""
-Add-Content -Path $Target -Value "# -----------------------------------------------------------------------------"
-Add-Content -Path $Target -Value "# Appended profile overrides ($Platform/profile-$profileLower)"
-Add-Content -Path $Target -Value "# -----------------------------------------------------------------------------"
-Get-Content -Path $overrideEnv | Add-Content -Path $Target
+$combinedLines = [System.Collections.Generic.List[string]]::new()
+foreach ($line in Read-LinesUtf8 -FilePath $baseEnv) {
+    [void]$combinedLines.Add([string]$line)
+}
+[void]$combinedLines.Add("")
+[void]$combinedLines.Add("# -----------------------------------------------------------------------------")
+[void]$combinedLines.Add("# Appended profile overrides ($Platform/profile-$profileLower)")
+[void]$combinedLines.Add("# -----------------------------------------------------------------------------")
+foreach ($line in Read-LinesUtf8 -FilePath $overrideEnv) {
+    [void]$combinedLines.Add([string]$line)
+}
+Write-LinesUtf8 -FilePath $Target -Lines $combinedLines.ToArray()
 
 if ($Platform -eq 'macos') {
     $placeholder = 'DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db'
@@ -168,5 +232,6 @@ if ($Platform -eq 'docker') {
 }
 
 Dedupe-EnvKeys -FilePath $Target
+Assert-ResolvedProfilePlaceholders -FilePath $Target -ResolvedProfile $profileLower
 
 Write-Host "Generated $Target from $overrideEnv"

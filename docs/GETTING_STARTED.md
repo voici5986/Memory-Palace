@@ -110,6 +110,8 @@ bash scripts/apply_profile.sh macos b
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
+> 另外，`profile c/d` 现在也会在脚本阶段直接拦截未替换的 endpoint / key / model 占位值；如果你还留着示例里的 `PORT`、`replace-with-your-key`、`your-embedding-model-id` 这类占位内容，脚本会先报错，而不是等到后面启动时再用一份明显错误的配置继续往下跑。
+>
 > 但要注意：**macOS / Windows 本地生成的 profile-b `.env` 不会自动补 `MCP_API_KEY`**。如果你接下来就要打开 Dashboard，或者直接调 `/browse` / `/review` / `/maintenance`、`/sse`、`/messages`，请再自行补 `MCP_API_KEY`，或仅在本机回环调试时设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`。只有 `docker` 平台的 profile 脚本会在 key 为空时自动生成一把本地 key。
 >
 
@@ -153,7 +155,7 @@ bash scripts/apply_profile.sh macos b
 >
 > 上面这些模型名只是占位示例，不是项目硬依赖。Memory Palace 不绑定某个固定 provider 或模型家族；请直接改成你自己的 OpenAI-compatible 服务里实际可用的 embedding / reranker / chat model id。
 >
-> 如果你后面要用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，这些示例 model id 也会被当成未解析占位符；在换成真实值之前，脚本会直接在 `docker compose` 前 fail-closed。
+> 如果你后面要用 `profile c/d`，无论是先跑 `apply_profile.sh/.ps1`，还是再走 `docker_one_click.sh/.ps1`，这些示例 model id / endpoint / key 都会被当成未解析占位符；在换成真实值之前，脚本会直接 fail-closed。
 >
 > 如果你接下来就要在本地打开 Dashboard，或者直接用 `curl` 调 `/browse` / `/review` / `/maintenance`，建议在 `.env` 里再补一项鉴权配置（二选一）：
 >
@@ -330,7 +332,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
 >
-> 当前 Docker Compose 还会额外等 **backend 和 SSE 各自的 `/health`** 都通过，才把 frontend 视为 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
+> 当前 Docker Compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，才把 frontend 视为真正 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
 > 当前 Docker 前端还会对 `/index.html` 返回 `Cache-Control: no-store, no-cache, must-revalidate`，尽量减少“前端已经更新，但浏览器还拿着旧入口页面”的情况。如果你刚升级完镜像仍看到明显旧页面，先确认容器已经是新版本，再手动刷新一次页面；只有在你额外接了自己的反向代理或企业缓存层时，才需要继续检查这些中间层是否改写了缓存头。
 >
@@ -539,13 +541,13 @@ $env:PORT = "8010"
 python run_sse.py
 ```
 
-> `run_sse.py` 本地默认就是监听 `127.0.0.1:8000`（可通过 `HOST` 和 `PORT` 自定义），SSE 端点路径为 `/sse`。也就是说，直接运行 `python run_sse.py` 并不会自动绑定到 `0.0.0.0`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
+> `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
-> 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给 Docker / 脚本做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
+> 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给本地独立调试做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >
 > 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连上监听地址，但 API Key、反向代理、防火墙和传输层安全仍然要你自己补齐。
 >
-> 如果你使用 Docker / Compose，SSE 会由独立容器启动；compose 内部已显式把它的 `HOST` 设为 `0.0.0.0`，再通过前端代理暴露在 `http://127.0.0.1:3000/sse`。
+> 如果你使用 Docker / Compose，SSE 不再由独立 `sse` 容器承载，而是直接挂在 `backend` 进程内，再通过前端代理暴露在 `http://127.0.0.1:3000/sse`。这样 Docker 路径下只有 `backend + frontend` 两个服务，但远程客户端看到的 `/sse`、`/messages`、`/sse/messages` 入口保持不变。
 >
 > 也请把这个 Docker 前端端口当成可信管理入口，而不是“带终端用户鉴权的公网入口”。只要有人能直接访问 `3000`，他就能使用 Dashboard 以及被代理的受保护接口；如果要暴露到受信网络之外，请先加你自己的 VPN、反向代理鉴权或网络访问控制。
 >

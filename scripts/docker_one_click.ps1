@@ -868,12 +868,11 @@ try {
     }
     catch {
         $hasBackendContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'backend'
-        $hasSseContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'sse'
         $hasFrontendContainer = Test-ComposeProjectHasAnyContainer -ComposeProjectName $composeProjectName -Service 'frontend'
-        if (-not ($hasBackendContainer -or $hasSseContainer -or $hasFrontendContainer)) {
+        if (-not ($hasBackendContainer -or $hasFrontendContainer)) {
             throw "[compose-up] docker compose failed before creating any service container; skipping readiness probe. detail=$($_.Exception.Message)"
         }
-        Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend/sse readiness..."
+        Write-Warning "[compose-up] docker compose returned non-zero; probing backend/frontend readiness via proxied /sse..."
         $probeFrontendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'frontend' -TargetPort 8080 -FallbackPort ([int]$plannedFrontendPort)
         $probeBackendPort = Get-ComposePublishedPort -ComposeProjectName $composeProjectName -EnvFile $envFile -Service 'backend' -TargetPort 8000 -FallbackPort ([int]$plannedBackendPort)
         if (-not (Wait-DeploymentReady -FrontendPort $probeFrontendPort -BackendPort $probeBackendPort)) {

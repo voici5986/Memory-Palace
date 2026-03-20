@@ -2,11 +2,12 @@ import os
 import sys
 import hmac
 import asyncio
+import socket
 import uvicorn
 from collections import deque
 from contextlib import asynccontextmanager
 from ipaddress import ip_address, ip_network
-from typing import Deque, Dict, Optional
+from typing import Any, Deque, Dict, Optional, Tuple
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -42,6 +43,8 @@ _MCP_API_KEY_HEADER = "X-MCP-API-Key"
 _MCP_API_KEY_ALLOW_INSECURE_LOCAL_ENV = "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on", "enabled"}
 _LOOPBACK_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_DEFAULT_SSE_PORT = 8000
+_LOOPBACK_FALLBACK_SSE_PORT = 8010
 _FORWARDED_HEADER_NAMES = {
     "forwarded",
     "x-forwarded-for",
@@ -72,6 +75,34 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     except (TypeError, ValueError):
         value = default
     return max(minimum, value)
+
+
+def _is_loopback_port_available(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return False
+    except OSError:
+        return True
+
+
+def _resolve_sse_port(host: str) -> int:
+    raw_port = str(os.getenv("PORT") or "").strip()
+    if raw_port:
+        return _env_int("PORT", _DEFAULT_SSE_PORT, minimum=1)
+
+    normalized_host = str(host or "").strip().lower()
+    if (
+        normalized_host in {"127.0.0.1", "localhost"}
+        and not _is_loopback_port_available(_DEFAULT_SSE_PORT)
+    ):
+        print(
+            f"Loopback port {_DEFAULT_SSE_PORT} is already in use; "
+            f"falling back to {_LOOPBACK_FALLBACK_SSE_PORT}.",
+            file=sys.stderr,
+        )
+        return _LOOPBACK_FALLBACK_SSE_PORT
+
+    return _DEFAULT_SSE_PORT
 
 
 def _get_configured_mcp_api_key() -> str:
@@ -236,7 +267,7 @@ async def _read_request_body_with_limit(
 def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeError) -> bool:
     if scope.get("type") != "http":
         return False
-    path = str(scope.get("path") or "")
+    path = _resolve_request_path(scope)
     if path not in _SSE_HTTP_PATHS:
         return False
     message = str(exc)
@@ -249,7 +280,7 @@ def _should_suppress_stream_shutdown_runtime_error(scope: Scope, exc: RuntimeErr
 def _should_suppress_request_validation_value_error(scope: Scope, exc: ValueError) -> bool:
     if scope.get("type") != "http":
         return False
-    path = str(scope.get("path") or "")
+    path = _resolve_request_path(scope)
     if path not in _SSE_HTTP_PATHS:
         return False
     return str(exc).strip() == "Request validation failed"
@@ -258,8 +289,23 @@ def _should_suppress_request_validation_value_error(scope: Scope, exc: ValueErro
 def _should_suppress_closed_resource_error(scope: Scope) -> bool:
     if scope.get("type") != "http":
         return False
-    path = str(scope.get("path") or "")
+    path = _resolve_request_path(scope)
     return path in {"/sse", "/sse/"}
+
+
+def _resolve_request_path(scope: Scope) -> str:
+    root_path = str(scope.get("root_path") or "").rstrip("/")
+    path = str(scope.get("path") or "")
+    if not path:
+        path = "/"
+    elif not path.startswith("/"):
+        path = f"/{path}"
+
+    if not root_path:
+        return path
+    if path == "/":
+        return f"{root_path}/"
+    return f"{root_path}{path}"
 
 
 class MemoryPalaceSseServerTransport(SseServerTransport):
@@ -468,7 +514,7 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
             await app(scope, receive, send)
             return
 
-        path = str(scope.get("path") or "")
+        path = _resolve_request_path(scope)
         if path in _PUBLIC_HTTP_PATHS:
             await app(scope, receive, send)
             return
@@ -528,12 +574,19 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
     return _auth_middleware
 
 
-def create_sse_app() -> ASGIApp:
-    transport = MemoryPalaceSseServerTransport(
+def _build_message_alias_path() -> str:
+    return f"{mcp.settings.sse_path.rstrip('/')}{mcp.settings.message_path}"
+
+
+def _create_sse_transport() -> MemoryPalaceSseServerTransport:
+    return MemoryPalaceSseServerTransport(
         mcp._normalize_path(mcp.settings.mount_path, mcp.settings.message_path),
         security_settings=mcp.settings.transport_security,
     )
 
+def _build_sse_handlers(
+    transport: MemoryPalaceSseServerTransport,
+) -> Tuple[Any, Any]:
     async def handle_sse(scope: Scope, receive: Receive, send: Send) -> Response:
         async with transport.connect_sse(scope, receive, send) as streams:
             await mcp._mcp_server.run(
@@ -549,20 +602,52 @@ def create_sse_app() -> ASGIApp:
     async def health_endpoint(_request: Request) -> Response:
         return JSONResponse({"status": "ok", "service": "memory-palace-sse"})
 
-    routes = [
-        Route("/health", endpoint=health_endpoint, methods=["GET"]),
-        Route(mcp.settings.sse_path, endpoint=sse_endpoint, methods=["GET"]),
-        Mount(mcp.settings.message_path, app=transport.handle_post_message),
-        *mcp._custom_starlette_routes,
-    ]
-    @asynccontextmanager
-    async def lifespan(_app: Starlette):
-        yield
-        try:
-            await drain_pending_flush_summaries(reason="runtime.shutdown")
-        finally:
-            await runtime_state.shutdown()
-            await close_sqlite_client()
+    return sse_endpoint, health_endpoint
+
+
+def create_embedded_sse_apps() -> Tuple[ASGIApp, ASGIApp]:
+    transport = _create_sse_transport()
+    sse_endpoint, _health_endpoint = _build_sse_handlers(transport)
+    stream_app = Starlette(
+        debug=mcp.settings.debug,
+        routes=[Route("/", endpoint=sse_endpoint, methods=["GET"])],
+    )
+    return (
+        apply_mcp_api_key_middleware(stream_app),
+        apply_mcp_api_key_middleware(transport.handle_post_message),
+    )
+
+
+def create_sse_app(
+    *,
+    include_health: bool = True,
+    manage_runtime_lifecycle: bool = True,
+) -> ASGIApp:
+    transport = _create_sse_transport()
+    sse_endpoint, health_endpoint = _build_sse_handlers(transport)
+
+    routes = []
+    if include_health:
+        routes.append(Route("/health", endpoint=health_endpoint, methods=["GET"]))
+    routes.extend(
+        [
+            Mount(_build_message_alias_path(), app=transport.handle_post_message),
+            Route(mcp.settings.sse_path, endpoint=sse_endpoint, methods=["GET"]),
+            Mount(mcp.settings.message_path, app=transport.handle_post_message),
+            *mcp._custom_starlette_routes,
+        ]
+    )
+
+    lifespan = None
+    if manage_runtime_lifecycle:
+        @asynccontextmanager
+        async def lifespan(_app: Starlette):
+            yield
+            try:
+                await drain_pending_flush_summaries(reason="runtime.shutdown")
+            finally:
+                await runtime_state.shutdown()
+                await close_sqlite_client()
 
     app = Starlette(debug=mcp.settings.debug, routes=routes, lifespan=lifespan)
     return apply_mcp_api_key_middleware(app)
@@ -575,16 +660,16 @@ def main():
     """
     print("Initializing Memory Palace SSE Server...")
     asyncio.run(mcp_startup())
-    
+
     # Create the Starlette app for SSE with optional API key guard.
     app = create_sse_app()
-    
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "127.0.0.1")
-    
+
+    host = str(os.getenv("HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    port = _resolve_sse_port(host)
+
     print(f"Starting SSE Server on http://{host}:{port}")
     print(f"SSE Endpoint: http://{host}:{port}/sse")
-    
+
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":

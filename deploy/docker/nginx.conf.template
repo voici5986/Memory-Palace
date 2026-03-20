@@ -16,7 +16,7 @@ server {
   }
 
   location = /sse {
-    proxy_pass http://sse:8000;
+    proxy_pass http://backend:8000/sse/;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -28,7 +28,7 @@ server {
   }
 
   location ^~ /messages {
-    proxy_pass http://sse:8000;
+    proxy_pass http://backend:8000;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -40,7 +40,7 @@ server {
   }
 
   location ^~ /sse/messages {
-    proxy_pass http://sse:8000;
+    proxy_pass http://backend:8000;
     proxy_http_version 1.1;
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;

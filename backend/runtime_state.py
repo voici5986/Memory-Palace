@@ -280,6 +280,7 @@ class SessionSearchCache:
         self._half_life_seconds = float(
             _env_int("RUNTIME_SESSION_CACHE_HALF_LIFE_SECONDS", 6 * 3600, minimum=60)
         )
+        self._stale_hit_ttl_seconds = max(self._half_life_seconds * 8.0, 300.0)
         self._hits: Dict[str, Deque[SessionSearchHit]] = {}
         self._session_last_seen: Dict[str, tuple[float, int]] = {}
         self._touch_sequence = 0
@@ -288,6 +289,42 @@ class SessionSearchCache:
     def _mark_session_seen(self, sid: str) -> None:
         self._touch_sequence += 1
         self._session_last_seen[sid] = (time.monotonic(), self._touch_sequence)
+
+    def _parse_hit_updated_at(self, value: str) -> Optional[datetime]:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            return None
+
+    def _is_hit_stale(
+        self, item: SessionSearchHit, *, now: Optional[datetime] = None
+    ) -> bool:
+        updated_at = self._parse_hit_updated_at(item.updated_at)
+        if updated_at is None:
+            return False
+        current_time = now or datetime.now(timezone.utc)
+        age_seconds = max(0.0, (current_time - updated_at).total_seconds())
+        return age_seconds > self._stale_hit_ttl_seconds
+
+    def _prune_session_hits_unlocked(
+        self, sid: str, *, now: Optional[datetime] = None
+    ) -> None:
+        queue = self._hits.get(sid)
+        if not queue:
+            return
+        current_time = now or datetime.now(timezone.utc)
+        retained = [item for item in queue if not self._is_hit_stale(item, now=current_time)]
+        if retained:
+            if len(retained) != len(queue):
+                self._hits[sid] = deque(retained, maxlen=self._max_hits_per_session)
+            return
+        self._hits.pop(sid, None)
+        self._session_last_seen.pop(sid, None)
+
+    def _prune_stale_sessions_unlocked(self, *, now: Optional[datetime] = None) -> None:
+        current_time = now or datetime.now(timezone.utc)
+        for sid in list(self._hits.keys()):
+            self._prune_session_hits_unlocked(sid, now=current_time)
 
     async def record_hit(
         self,
@@ -313,6 +350,7 @@ class SessionSearchCache:
             source=source,
         )
         async with self._guard:
+            self._prune_stale_sessions_unlocked()
             queue = self._hits.get(sid)
             if queue is None:
                 self._evict_oldest_session_if_needed()
@@ -328,14 +366,15 @@ class SessionSearchCache:
         terms = _tokenize_query(query)
         if not terms:
             return []
+        now = datetime.now(timezone.utc)
         async with self._guard:
+            self._prune_session_hits_unlocked(sid, now=now)
             snapshot = list(self._hits.get(sid, ()))
             if snapshot:
                 self._mark_session_seen(sid)
         if not snapshot:
             return []
 
-        now = datetime.now(timezone.utc)
         by_uri: Dict[str, Dict[str, Any]] = {}
 
         for item in snapshot:
@@ -345,11 +384,7 @@ class SessionSearchCache:
                 continue
 
             text_score = min(1.0, hits / max(1, len(terms)))
-            updated_dt = None
-            try:
-                updated_dt = datetime.fromisoformat(item.updated_at.replace("Z", "+00:00"))
-            except ValueError:
-                updated_dt = now
+            updated_dt = self._parse_hit_updated_at(item.updated_at) or now
 
             age_seconds = max(0.0, (now - updated_dt).total_seconds())
             recency_score = math.exp(-age_seconds / self._half_life_seconds)
@@ -379,6 +414,7 @@ class SessionSearchCache:
     async def summary(self) -> Dict[str, Any]:
         """Return lightweight, process-local stats for SM-Lite observability."""
         async with self._guard:
+            self._prune_stale_sessions_unlocked()
             snapshot = {sid: len(queue) for sid, queue in self._hits.items()}
 
         session_count = len(snapshot)

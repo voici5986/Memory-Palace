@@ -228,6 +228,47 @@ const translateApiErrorMessage = (value) => {
     : null;
 };
 
+const formatValidationErrorLocation = (value) => {
+  if (!Array.isArray(value)) return '';
+  return value
+    .map((segment) => {
+      if (typeof segment === 'number') return String(segment);
+      if (typeof segment === 'string') return segment.trim();
+      return '';
+    })
+    .filter(Boolean)
+    .join('.');
+};
+
+const extractValidationErrorMessages = (detail) => {
+  if (!Array.isArray(detail)) return [];
+  const messages = [];
+  const pushMessage = (value) => {
+    if (typeof value !== 'string') return;
+    const normalized = value.trim();
+    if (!normalized || messages.includes(normalized)) return;
+    messages.push(normalized);
+  };
+
+  detail.forEach((item) => {
+    if (typeof item === 'string') {
+      pushMessage(translateApiErrorMessage(item) || item);
+      return;
+    }
+    if (!item || typeof item !== 'object') return;
+
+    const location = formatValidationErrorLocation(item.loc);
+    const translatedMessage = translateApiErrorMessage(item.msg) || item.msg;
+    if (typeof translatedMessage !== 'string' || !translatedMessage.trim()) {
+      pushMessage(location);
+      return;
+    }
+    pushMessage(location ? `${location}: ${translatedMessage.trim()}` : translatedMessage);
+  });
+
+  return messages;
+};
+
 export const extractApiErrorCode = (error) => {
   const detail = error?.response?.data?.detail;
   const codes = [];
@@ -254,6 +295,10 @@ export const extractApiError = (
   const detail = error?.response?.data?.detail;
   if (typeof detail === 'string' && detail.trim()) {
     return translateApiErrorMessage(detail) || detail;
+  }
+  const validationMessages = extractValidationErrorMessages(detail);
+  if (validationMessages.length > 0) {
+    return validationMessages.join(' | ');
   }
   if (detail && typeof detail === 'object') {
     const parts = [];

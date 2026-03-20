@@ -100,7 +100,7 @@
 
 基于 React 的四视图仪表盘：**记忆浏览器**、**审查与回滚**、**维护管理**、**可观测性监控**。
 
-当前前端默认英文，点右上角语言按钮即可切到中文或切回英文。浏览器会记住你的选择，常见界面文案、日期/数字格式和一部分错误提示会跟随切换。
+当前前端默认英文，点右上角语言按钮即可切到中文或切回英文。浏览器会记住你的选择，常见界面文案、日期/数字格式和一部分错误提示会跟随切换，其中也包括后端返回的结构化校验错误。
 
 当浏览器里既没有已保存的 Dashboard 鉴权，也没有运行时注入的 Dashboard 鉴权时，前端会自动打开首启配置向导。它可以把 Dashboard `MCP_API_KEY` 保存到当前浏览器里，并且在应用直接连本地 checkout 时，把常见本地运行参数写进 `.env`，不需要手动编辑文件。如果你走的是“保存到本地 `.env`”这条路径，并且同时填写了 Dashboard key，向导仍然需要浏览器本地存储来记住这把 key；如果浏览器拦住了本地存储，页面现在会明确提示保存失败，不再假装整套配置都已经成功。涉及后端运行链路的改动仍然需要重启服务。
 
@@ -381,6 +381,8 @@ bash scripts/apply_profile.sh macos b
 
 把 `deploy/profiles/*/*.env` 理解成 **Profile 模板输入**，不要直接手抄某个模板文件当成最终 `.env`。有些模板值会先保留占位路径，再由 `apply_profile.*` 按当前仓库位置自动改写。
 
+对于 `profile c/d`，`apply_profile.sh/.ps1` 现在也会对未替换的 endpoint / key / model 占位值直接 fail-closed。简单说：先把示例里的 `PORT`、key 和 model id 换成真实值，再继续走 Docker 启动或本地 C/D 调试。
+
 如果你前面已经生成过 `.env.docker`，也不要直接把那份 Docker 文件改名成 `.env`。Docker profile 里的 `/app/data/...` 这类容器路径只对容器有效；如果你自己把挂载点改成 `/data/...`，本机 `stdio` MCP 也一样不能直接拿来用，还是需要宿主机自己的绝对路径。
 
 但要注意：
@@ -513,7 +515,7 @@ python run_sse.py
 >
 > 同样地，如果 `.env` 或你显式传入的 `DATABASE_URL` 仍是 `/app/...` 或 `/data/...` 这类 Docker 容器路径，wrapper 现在也会直接拒绝启动。这不是 MCP 协议故障，而是本机路径配置错了；改成宿主机绝对路径，或者继续走 Docker `/sse`。
 >
-> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；即使你直接运行 `python run_sse.py`，默认也仍是回环地址。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
+> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；`python run_sse.py` 会优先尝试回环 `127.0.0.1:8000`，如果本机 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。
 
 详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
 
@@ -534,7 +536,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> Docker 一键部署会自动启动三部分：
+> Docker 一键部署会启动当前默认的双服务拓扑，并对外暴露三类入口：
 >
 > - Dashboard：`http://127.0.0.1:3000`
 > - Backend API：`http://127.0.0.1:18000`
@@ -546,7 +548,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Windows 复核说明（2026 年 3 月 19 日）：这条 repo-local `docker compose -f docker-compose.yml` 路径，已经在原生 Windows 上重新做过端到端验证。`http://127.0.0.1:3000/sse` 会返回 `HTTP 200`，并给出 `/messages/?session_id=...`；`Claude` 和 `Gemini` 也都已经通过这个前端代理 SSE 入口完成过真实的 `read_memory(system://boot)` 调用。
 >
-> 现在 Docker 前端会等 **backend 和 SSE 各自的 `/health`** 都通过，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
+> 现在 Docker 前端会先等 `backend` 的 `/health` 通过，同时一键脚本还会额外检查前端代理出来的 `/sse` 是否可达，才算真正 ready。容器刚起来时如果页面还没完全可用，先多等几秒，再按控制台打印出的地址重试即可。
 >
 > 当前 Docker 前端还会对 `/index.html` 返回 `Cache-Control: no-store, no-cache, must-revalidate`，尽量减少“前端已经更新，但浏览器还拿着旧入口页面”的情况。如果你刚升级完镜像仍看到明显旧页面，先确认容器已经是新版本，再手动刷新一次页面；只有在你额外接了自己的反向代理或 CDN 时，才需要继续检查这些中间层是否改写了缓存头。
 >

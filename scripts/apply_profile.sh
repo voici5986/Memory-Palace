@@ -164,6 +164,38 @@ dedupe_env_keys() {
   )
 }
 
+validate_profile_placeholders() {
+  local file_path="$1"
+  local selected_profile="$2"
+  if [[ "${selected_profile}" != "c" && "${selected_profile}" != "d" ]]; then
+    return 0
+  fi
+
+  local -a unresolved_lines=()
+  local line
+  while IFS= read -r line; do
+    case "${line}" in
+      ROUTER_API_BASE=*":PORT/"*|RETRIEVAL_EMBEDDING_API_BASE=*":PORT/"*|RETRIEVAL_RERANKER_API_BASE=*":PORT/"*)
+        unresolved_lines+=("${line}")
+        ;;
+      *=replace-with-your-key|*=your-embedding-model-id|*=your-reranker-model-id|*=https://router.example.com/*)
+        unresolved_lines+=("${line}")
+        ;;
+    esac
+  done < "${file_path}"
+
+  if [[ "${#unresolved_lines[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  {
+    echo "Generated ${file_path}, but profile ${selected_profile} still contains unresolved placeholders:"
+    printf '  %s\n' "${unresolved_lines[@]}"
+    echo "Fill the placeholder values before using profile ${selected_profile}."
+  } >&2
+  return 1
+}
+
 if [[ ! -f "${base_env}" ]]; then
   echo "Missing base env template: ${base_env}" >&2
   exit 1
@@ -208,5 +240,6 @@ if [[ "${platform}" == "docker" ]]; then
 fi
 
 dedupe_env_keys "${target_file}"
+validate_profile_placeholders "${target_file}" "${profile}"
 
 echo "Generated ${target_file} from ${override_env}"

@@ -207,7 +207,12 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
 **处理**：
 
-1. 先确认 SSE 进程是不是已经起来：
+1. 先确认你当前走的是哪条路径：
+
+   - 本地 standalone `run_sse.py`：继续按下面的 `/health` 检查
+   - Docker / GHCR：优先检查 `http://127.0.0.1:3000/sse` 是否可达，因为 Docker 默认不再有独立 `sse` 容器
+
+2. 如果你走的是 standalone `run_sse.py`，先确认 SSE 进程是不是已经起来：
 
    ```bash
    curl -fsS http://127.0.0.1:8010/health
@@ -215,13 +220,13 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
    如果这里都不通，优先排查进程和端口；如果这里已经返回 `{"status":"ok","service":"memory-palace-sse"}`，再继续看 `/sse` 和 `/messages` 的鉴权或 session。
 
-2. 更换端口（SSE 默认端口为 `8000`）：
+3. 更换端口（`run_sse.py` 会优先尝试 `8000`，必要时可显式切到 `8010`）：
 
    ```bash
    HOST=127.0.0.1 PORT=8010 python run_sse.py
    ```
 
-3. 或查找并释放被占用端口：
+4. 或查找并释放被占用端口：
 
    ```bash
    # macOS / Linux

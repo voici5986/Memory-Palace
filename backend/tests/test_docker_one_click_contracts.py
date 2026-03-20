@@ -114,23 +114,17 @@ def test_default_compose_project_name_uses_sha256_and_normalized_paths_in_both_s
 
 def test_compose_waits_for_healthy_sse_service() -> None:
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    backend_block = compose_text.split("\n  backend:\n", 1)[1].split("\n  sse:\n", 1)[0]
-    sse_block = compose_text.split("\n  sse:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    backend_block = compose_text.split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
     frontend_block = compose_text.split("\n  frontend:\n", 1)[1]
 
     assert "healthcheck:" in backend_block
     assert "http://127.0.0.1:8000/health" in backend_block
     assert 'host.docker.internal:host-gateway' in backend_block
+    assert "HOST: 0.0.0.0" in backend_block
     assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in backend_block
     assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in backend_block
-    assert "healthcheck:" in sse_block
-    assert "http://127.0.0.1:8000/health" in sse_block
-    assert "X-MCP-API-Key" in sse_block
-    assert "os.getenv('MCP_API_KEY')" in sse_block
-    assert 'host.docker.internal:host-gateway' in sse_block
-    assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in sse_block
-    assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in sse_block
-    assert "sse:\n        condition: service_healthy" in frontend_block
+    assert "\n  sse:\n" not in compose_text
+    assert "backend:\n        condition: service_healthy" in frontend_block
 
 
 def test_local_compose_uses_stable_image_names_for_no_build_reuse() -> None:

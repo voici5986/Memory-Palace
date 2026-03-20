@@ -44,7 +44,7 @@ The following interfaces are protected by default:
 | `/maintenance/*` | All requests | `backend/api/maintenance.py` — `require_maintenance_api_key` as a route dependency |
 | `/review/*` | All requests | `backend/api/review.py` — imports and depends on the same authentication function |
 | `/browse/*` | All requests (including read operations) | `backend/api/browse.py` — routes are uniformly mounted with `Depends(require_maintenance_api_key)` |
-| SSE Interfaces | `/sse` and `/messages` | `backend/run_sse.py` — ASGI middleware `apply_mcp_api_key_middleware` |
+| SSE Interfaces | `/sse` and `/messages` | `backend/run_sse.py` — reusable ASGI auth middleware and SSE transport, used both by standalone `run_sse.py` and by mounts inside `backend/main.py` |
 
 > 📖 `GET` requests for `/browse/node` are also within the scope of authentication; please include `X-MCP-API-Key` or `Authorization: Bearer`.
 

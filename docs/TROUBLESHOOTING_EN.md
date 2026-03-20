@@ -209,7 +209,12 @@ The real problem is still only whether that path points into the container.
 
 **Handling**:
 
-1. First confirm if the SSE process is already up:
+1. First confirm which path you are using:
+
+   - local standalone `run_sse.py`: continue with the `/health` probe below
+   - Docker / GHCR: check `http://127.0.0.1:3000/sse` first, because the default Docker path no longer has a separate `sse` container
+
+2. If you are using standalone `run_sse.py`, first confirm if the SSE process is already up:
 
    ```bash
    curl -fsS http://127.0.0.1:8010/health
@@ -217,13 +222,13 @@ The real problem is still only whether that path points into the container.
 
    If this doesn't work, prioritize troubleshooting processes and ports; if it already returns `{"status":"ok","service":"memory-palace-sse"}`, continue checking authentication or sessions for `/sse` and `/messages`.
 
-2. Change the port (default SSE port is `8000`):
+3. Change the port (`run_sse.py` tries `8000` first; use `8010` explicitly when needed):
 
    ```bash
    HOST=127.0.0.1 PORT=8010 python run_sse.py
    ```
 
-3. Or find and release the occupied port:
+4. Or find and release the occupied port:
 
    ```bash
    # macOS / Linux

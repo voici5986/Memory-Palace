@@ -26,6 +26,7 @@ _load_project_dotenv()
 from api import review_router, browse_router, maintenance_router, setup_router
 from db import get_sqlite_client, close_sqlite_client
 from runtime_state import runtime_state
+from run_sse import create_embedded_sse_apps
 
 
 def _utc_iso_now() -> str:
@@ -332,6 +333,12 @@ async def health():
         }
 
     return payload
+
+
+embedded_sse_stream_app, embedded_sse_message_app = create_embedded_sse_apps()
+app.mount("/sse/messages", embedded_sse_message_app)
+app.mount("/messages", embedded_sse_message_app)
+app.mount("/sse", embedded_sse_stream_app)
 
 
 if __name__ == "__main__":

@@ -104,7 +104,7 @@ On the repository-shipped Docker / GHCR compose paths, when `backend` and `sse` 
 
 A React-powered dashboard with four views: **Memory Browser**, **Review & Rollback**, **Maintenance**, and **Observability**.
 
-The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints.
+The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints, including structured validation errors returned by the backend.
 
 When neither runtime Dashboard auth nor stored browser Dashboard auth is available, the frontend auto-opens a first-run setup assistant. It can save the Dashboard `MCP_API_KEY` in the current browser and, when the app is running directly against a local checkout, write the common local runtime fields into `.env` without hand-editing the file. If you use the local `.env` save path and also enter a Dashboard key, the assistant still needs browser storage for that key; if the browser blocks local storage, the page now shows a save failure instead of pretending the whole setup succeeded. Backend-side changes still require a restart.
 
@@ -305,7 +305,7 @@ Default access addresses:
 Important boundaries:
 
 - This path avoids **local image build**, but you still need the repository checkout to get `docker-compose.ghcr.yml`, `.env.example`, and the profile helpers.
-- This path solves **Dashboard / API / SSE service startup** only.
+- This path solves **Dashboard / API / proxied SSE endpoint startup** only.
 - It does **not** automatically configure `Claude / Codex / Gemini / OpenCode / Cursor / Antigravity` on your machine.
 - If you also want repo-local skill + MCP automation, keep the same checkout and continue with [docs/skills/GETTING_STARTED_EN.md](docs/skills/GETTING_STARTED_EN.md).
 - If you do **not** want the repo-local install path, any MCP client that supports remote SSE can still be configured manually to connect to `http://localhost:3000/sse` with the matching API key / auth header. For this GHCR path, that key normally means the `MCP_API_KEY` written into the freshly generated `.env.docker`.
@@ -381,6 +381,8 @@ bash scripts/apply_profile.sh macos b
 This generates a Profile B-based `.env` using the platform-specific template at `deploy/profiles/{macos,windows,docker}/profile-b.env`.
 
 Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.env` files you should copy by hand. Some template values intentionally keep placeholder paths until `apply_profile.*` rewrites them for the current repository location.
+
+For `profile c/d`, `apply_profile.sh/.ps1` now also fail-closed when the generated file still contains unresolved endpoint/key/model placeholders. In plain language: replace the example `PORT`, key, and model-id values first, then continue to Docker startup or local C/D testing.
 
 If you previously generated `.env.docker`, do not simply rename that Docker file to `.env`. The Docker profile uses container-only paths such as `/app/data/...`; if you customized the mount to `/data/...`, that is still container-only. Local `stdio` MCP needs a host-side absolute path instead.
 
@@ -513,7 +515,7 @@ python run_sse.py
 >
 > The same rule now applies when `.env` itself is wrong: if `.env` or an explicit `DATABASE_URL` still points to `/app/...` or `/data/...`, the wrapper refuses to start on purpose. That is a local path configuration error, not an MCP protocol failure.
 >
-> `python run_sse.py` also defaults to loopback (`127.0.0.1:8000`) unless you override `HOST` and `PORT`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
+> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
@@ -534,7 +536,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 .\scripts\docker_one_click.ps1 -Profile c -AllowRuntimeEnvInjection
 ```
 
-> One-click Docker deployment starts all three parts:
+> One-click Docker deployment brings up the current two-service topology and exposes three operator endpoints:
 >
 > - Dashboard: `http://127.0.0.1:3000`
 > - Backend API: `http://127.0.0.1:18000`
@@ -546,7 +548,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Windows check (March 19, 2026): this repo-local `docker compose -f docker-compose.yml` path was rechecked end to end on native Windows. `http://127.0.0.1:3000/sse` returned `HTTP 200`, exposed `/messages/?session_id=...`, and both `Claude` and `Gemini` completed a real `read_memory(system://boot)` call through that proxied SSE endpoint.
 >
-> The Docker frontend now waits for both the backend and the SSE service to pass their own `/health` checks before it is treated as ready. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
+> The Docker frontend now waits for the backend `/health` check before it is treated as ready, and the one-click readiness probe also verifies that the proxied `/sse` endpoint is reachable through the frontend. If containers are already up but the page still looks unavailable, wait a few more seconds and re-check the printed URLs.
 >
 > The Docker frontend also serves `/index.html` with `Cache-Control: no-store, no-cache, must-revalidate` to reduce the chance that a browser keeps an old entry page after a frontend update. If you still see an obviously old page after upgrading the image, first confirm the new container is actually running, then refresh the page once. Only continue checking cache behavior if you also put your own reverse proxy or CDN in front of it.
 >

@@ -44,7 +44,7 @@
 | `/maintenance/*` | 所有请求 | `backend/api/maintenance.py` — `require_maintenance_api_key` 作为路由依赖 |
 | `/review/*` | 所有请求 | `backend/api/review.py` — 导入并依赖同一鉴权函数 |
 | `/browse/*` | 所有请求（含读操作） | `backend/api/browse.py` — 路由统一挂载 `Depends(require_maintenance_api_key)` |
-| SSE 接口 | `/sse` 与 `/messages` | `backend/run_sse.py` — ASGI 中间件 `apply_mcp_api_key_middleware` |
+| SSE 接口 | `/sse` 与 `/messages` | `backend/run_sse.py` — 可复用 ASGI 鉴权中间件与 SSE transport，既可被 standalone `run_sse.py` 使用，也可被 `backend/main.py` 挂载 |
 
 > 📖 `/browse/node` 的 `GET` 请求也在鉴权范围内，请携带 `X-MCP-API-Key` 或 `Authorization: Bearer`。
 
