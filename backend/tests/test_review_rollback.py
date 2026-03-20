@@ -462,6 +462,88 @@ def test_snapshot_manager_recovers_from_corrupted_manifest_using_resource_files(
 
 
 @pytest.mark.asyncio
+async def test_rollback_resource_returns_409_when_newer_memory_snapshot_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConflictSnapshotManager:
+        def get_snapshot(self, session_id: str, resource_id: str):
+            _ = resource_id
+            assert session_id == "session-1"
+            return {
+                "resource_id": "memory:10",
+                "resource_type": "memory",
+                "snapshot_time": "2026-03-20T10:00:00",
+                "data": {
+                    "operation_type": "modify_content",
+                    "memory_id": 10,
+                    "path": "agent/node",
+                    "domain": "core",
+                    "uri": "core://agent/node",
+                    "all_paths": [],
+                },
+            }
+
+        def list_sessions(self):
+            return [
+                {"session_id": "session-2", "created_at": "2026-03-20T10:00:01"},
+                {"session_id": "session-1", "created_at": "2026-03-20T10:00:00"},
+            ]
+
+        def list_snapshots(self, session_id: str):
+            if session_id == "session-2":
+                return [
+                    {
+                        "resource_id": "memory:11",
+                        "resource_type": "memory",
+                        "snapshot_time": "2026-03-20T10:00:01",
+                        "operation_type": "modify_content",
+                        "uri": "core://agent/node",
+                    }
+                ]
+            return [
+                {
+                    "resource_id": "memory:10",
+                    "resource_type": "memory",
+                    "snapshot_time": "2026-03-20T10:00:00",
+                    "operation_type": "modify_content",
+                    "uri": "core://agent/node",
+                }
+            ]
+
+    class _NoRollbackClient:
+        async def get_memory_version(self, memory_id: int):
+            return {"id": memory_id, "migrated_to": None}
+
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return {"id": 10, "content": "current"}
+
+        async def rollback_to_memory(self, path: str, memory_id: int, domain: str):
+            _ = path, memory_id, domain
+            raise AssertionError("rollback_to_memory should not run on conflict")
+
+    monkeypatch.setattr(
+        review_api, "get_snapshot_manager", lambda: _ConflictSnapshotManager()
+    )
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: _NoRollbackClient())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api.rollback_resource(
+            "session-1",
+            "memory:10",
+            review_api.RollbackRequest(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "newer review snapshot exists" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_rollback_path_create_alias_routes_writes_through_write_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

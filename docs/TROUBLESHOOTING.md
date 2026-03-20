@@ -107,7 +107,7 @@ repo-local `scripts/run_memory_palace_mcp_stdio.sh` 只服务于：
 
 它不会复用 Docker 容器里的 `/app/data`，也不会把 `/data/...` 这类容器内 sqlite 路径当成本机路径。现在如果它发现本地 `.env` 仍在用容器路径，会直接拒绝启动，而不是再假装握手成功。
 
-补一条容易误会的小边界：现在 repo-local `bash` wrapper 和原生 Windows 的 `backend/mcp_wrapper.py` 都已经统一用同一套 `.env` 解析逻辑了。也就是说，像下面这种写法本身不是问题：
+补一条容易误会的小边界：现在 repo-local `bash` wrapper 和原生 Windows 的 `backend/mcp_wrapper.py` 都已经统一用同一套 `.env` 解析逻辑了；如果某个 Windows 风格宿主最后把 `backend/mcp_wrapper.py` 跑在 `Git Bash / MSYS / Cygwin` 里，wrapper 也会优先尝试 `.venv/Scripts/python.exe`。也就是说，像下面这种写法本身不是问题：
 
 ```dotenv
 DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
@@ -472,10 +472,11 @@ cd backend
 6. 如果 frontend 容器启动很快就退出，日志里出现：
    - `MCP_API_KEY contains unsupported control characters`
 
-   这通常说明你写进 Docker env 文件的 `MCP_API_KEY` 带了换行或回车。
+   这通常说明你写进 Docker env 文件的 `MCP_API_KEY` 带了 ASCII 控制字符，不只是换行或回车，也可能是制表符。
 
    常见场景是：
    - 从密码管理器或聊天窗口复制 key 时，把结尾换行一起带进去了
+   - 从表格、IM 或某些密码管理器里复制时，把中间的制表符一起带进去了
    - 手工编辑 `.env.docker` 时把 key 写成了多行
 
    处理方式很简单：把 `MCP_API_KEY` 改成**单行**纯文本，再重新启动。这里不需要猜测代理、SSE 或浏览器缓存问题，先把 key 本身清干净。

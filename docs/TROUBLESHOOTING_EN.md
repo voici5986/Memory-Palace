@@ -107,7 +107,7 @@ The repo-local `scripts/run_memory_palace_mcp_stdio.sh` path only serves:
 
 It does not reuse Docker container `/app/data`, and it also treats `/data/...`-style container sqlite paths as the same local misconfiguration. If it detects that the local `.env` still uses a container path, it now refuses to start explicitly instead of pretending the handshake can continue.
 
-One small boundary that is easy to misread: the repo-local shell wrapper and native-Windows `backend/mcp_wrapper.py` now use the same `.env` parsing rules. So a value like this is fine by itself:
+One small boundary that is easy to misread: the repo-local shell wrapper and native-Windows `backend/mcp_wrapper.py` now use the same `.env` parsing rules; if a Windows-style host still launches `backend/mcp_wrapper.py` from `Git Bash / MSYS / Cygwin`, the wrapper also prefers `.venv/Scripts/python.exe` first. So a value like this is fine by itself:
 
 ```dotenv
 DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
@@ -474,10 +474,11 @@ If this command can normally output the version number, starting `mcp_server.py`
 6. If the frontend container exits almost immediately and the logs mention:
    - `MCP_API_KEY contains unsupported control characters`
 
-   this usually means the `MCP_API_KEY` written into the Docker env file contains a newline or carriage return.
+   this usually means the `MCP_API_KEY` written into the Docker env file contains ASCII control characters. Newlines and carriage returns are common, but tabs can also trigger it.
 
    Common ways this happens:
    - the key was copied from a password manager or chat window with the trailing newline still attached
+   - the key was copied from a table, IM window, or password manager export with a tab character still embedded
    - `.env.docker` was edited manually and the key ended up spanning multiple lines
 
    The fix is simple: rewrite `MCP_API_KEY` as a **single-line** plain-text value, then restart. Do not guess at proxy, SSE, or browser-cache issues first; clean up the key itself before troubleshooting anything else.

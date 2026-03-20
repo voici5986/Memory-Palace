@@ -1324,12 +1324,37 @@ async def _revalidate_search_results(
     refreshed_session_entries = 0
     path_state_cache: Dict[str, Optional[Dict[str, Any]]] = {}
     get_memory_by_path = getattr(client, "get_memory_by_path", None)
+    get_memories_by_paths = getattr(client, "get_memories_by_paths", None)
 
-    if not callable(get_memory_by_path):
+    if not callable(get_memory_by_path) and not callable(get_memories_by_paths):
         return list(results), {
             "stale_result_dropped": 0,
             "session_queue_refreshed": 0,
         }
+
+    uri_lookup_pairs: Dict[str, Tuple[str, str]] = {}
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        uri_value = str(item.get("uri") or "").strip()
+        if not uri_value or uri_value in uri_lookup_pairs:
+            continue
+        try:
+            uri_lookup_pairs[uri_value] = parse_uri(uri_value)
+        except ValueError:
+            path_state_cache[uri_value] = None
+
+    if callable(get_memories_by_paths) and uri_lookup_pairs:
+        try:
+            batched_results = await get_memories_by_paths(list(uri_lookup_pairs.values()))
+        except Exception:
+            batched_results = None
+        if isinstance(batched_results, dict):
+            for uri_value in uri_lookup_pairs:
+                current_memory = batched_results.get(uri_value)
+                path_state_cache[uri_value] = (
+                    current_memory if isinstance(current_memory, dict) else None
+                )
 
     for item in results:
         if not isinstance(item, dict):
@@ -1341,11 +1366,14 @@ async def _revalidate_search_results(
             continue
 
         if uri_value not in path_state_cache:
-            try:
-                domain, path = parse_uri(uri_value)
-            except ValueError:
+            domain_path = uri_lookup_pairs.get(uri_value)
+            if domain_path is None:
                 path_state_cache[uri_value] = None
             else:
+                domain, path = domain_path
+                if not callable(get_memory_by_path):
+                    path_state_cache[uri_value] = None
+                    continue
                 try:
                     path_state_cache[uri_value] = await get_memory_by_path(path, domain)
                 except Exception:

@@ -634,6 +634,8 @@ macOS / Linux / Git Bash / WSL：
 > 如果你还没创建 `backend/.venv`，先回到 **Step 2** 完成虚拟环境和依赖安装。
 >
 > Windows 原生环境优先直接走 `python + backend/mcp_wrapper.py`。只有在你本来就准备好了 Git Bash / WSL 的情况下，才继续用 `bash + run_memory_palace_mcp_stdio.sh` 这条组合。
+>
+> 如果某个 Windows 风格宿主最后还是把 `backend/mcp_wrapper.py` 跑在了 `Git Bash / MSYS / Cygwin` 这类环境里，当前 wrapper 也会优先尝试 `.venv/Scripts/python.exe`。这只是兜底行为，不改变上面的推荐路径。
 
 **SSE 模式**：
 

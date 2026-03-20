@@ -65,6 +65,25 @@ class _SessionConsistencyClient:
         return self._current_by_uri.get(f"{domain}://{path}")
 
 
+class _BatchSessionConsistencyClient(_SessionConsistencyClient):
+    def __init__(self, current_by_uri, global_results):
+        super().__init__(current_by_uri=current_by_uri, global_results=global_results)
+        self.batch_calls = []
+        self.single_calls = []
+
+    async def get_memories_by_paths(self, path_requests):
+        self.batch_calls.append(list(path_requests))
+        return {
+            f"{domain}://{path}": self._current_by_uri[f"{domain}://{path}"]
+            for domain, path in path_requests
+            if f"{domain}://{path}" in self._current_by_uri
+        }
+
+    async def get_memory_by_path(self, path: str, domain: str):
+        self.single_calls.append((domain, path))
+        raise AssertionError("single-path lookup should not run when batch lookup exists")
+
+
 @pytest.mark.asyncio
 async def test_search_memory_drops_deleted_session_cache_hits(
     monkeypatch: pytest.MonkeyPatch,
@@ -243,3 +262,61 @@ async def test_search_memory_sorts_final_results_by_display_score_after_session_
     ]
     assert payload["results"][0]["score"] == 0.91
     assert payload["results"][1]["score"] == 0.15
+
+
+@pytest.mark.asyncio
+async def test_search_memory_uses_batch_revalidation_when_client_supports_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _BatchSessionConsistencyClient(
+        current_by_uri={
+            "core://agent/current": {
+                "id": 42,
+                "content": "fresh content from database state",
+                "priority": 0,
+                "created_at": "2026-03-20T12:00:00Z",
+            }
+        },
+        global_results=[],
+    )
+    session_results = [
+        {
+            "uri": "core://agent/current",
+            "memory_id": 7,
+            "snippet": "stale snippet from session cache",
+            "priority": 3,
+            "updated_at": "2026-03-20T10:00:00Z",
+            "match_type": "session_queue",
+            "source": "session_queue",
+        }
+    ]
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    async def _fake_session_search(*, session_id, query, limit):
+        _ = session_id
+        _ = query
+        _ = limit
+        return list(session_results)
+
+    monkeypatch.setattr(runtime_state.session_cache, "search", _fake_session_search)
+
+    raw = await mcp_server.search_memory(
+        "fresh content",
+        mode="hybrid",
+        max_results=5,
+        include_session=True,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["count"] == 1
+    assert payload["results"][0]["uri"] == "core://agent/current"
+    assert payload["results"][0]["memory_id"] == 42
+    assert payload["results"][0]["priority"] == 0
+    assert payload["results"][0]["snippet"] == "fresh content from database state"
+    assert client.batch_calls == [[("core", "agent/current")]]
+    assert client.single_calls == []
+    assert payload["session_first_metrics"]["session_queue_refreshed"] == 1

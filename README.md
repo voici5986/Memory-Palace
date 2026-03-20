@@ -58,9 +58,11 @@ If you want the AI to guide installation step by step, start with the standalone
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **Write-path recovery is tighter**: same-session snapshots now use file locks, transient SQLite lock conflicts get a small bounded retry, and background index jobs share the same write gate as foreground writes.
+- **Review rollback is now more conservative**: if the same URI already has a newer content snapshot in another review session, rolling back the older snapshot now fails closed instead of silently undoing the newer change.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
 - **Dashboard language is now easier to control**: the frontend restores the stored language first; if there is no stored choice yet, common Chinese browser locales fall back to `zh-CN`, otherwise it falls back to English. You can still switch between English and Chinese from the top-right corner, and the browser remembers the choice.
 - **Local operator paths are less brittle**: repo-local stdio wrappers now reuse `.env` `RETRIEVAL_REMOTE_TIMEOUT_SEC`, forward stdio in chunks instead of one byte at a time, and longer-running Dashboard observability / vitality confirmation actions get a longer client-side timeout before the browser gives up.
+- **A few easy-to-miss edges are tighter now**: final search-result revalidation prefers batched path checks, Windows-style hosts that accidentally run `backend/mcp_wrapper.py` from `Git Bash / MSYS / Cygwin` are more likely to pick the correct `.venv` interpreter, and the Docker frontend proxy now rejects ASCII control characters such as tabs inside the proxy-held key.
 - **Public claims stay conservative**: the docs now include a native-Windows repo-local stdio path through `backend/mcp_wrapper.py`, while still asking you to re-check your own remote / GUI-host deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` use the documented CLI path; IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` use repo-local rules plus an MCP snippet; `Gemini live` and GUI-only host validation still carry explicit caveats.
 
@@ -78,6 +80,8 @@ Within the same `session_id`, snapshot writes are now serialized through a per-s
 
 If a Review session's `manifest.json` is damaged, the backend now only rebuilds it when it can preserve the original database scope. In plain terms: switching to another `.env`, compose project, or SQLite file no longer "claims" an old damaged session for the wrong database, and unreadable sessions stay hidden instead of being auto-deleted by a read-only session listing.
 
+If the same URI already has a **newer content snapshot** in another Review session, rolling back the older snapshot now returns `409` instead of pretending the rollback is still safe. In plain terms: the backend now blocks the obvious "old snapshot overwrites newer content" case before it writes.
+
 Normal backend, SSE, and repo-local stdio shutdown paths now also do a **best-effort drain** for pending `compact_context` / auto-flush summaries. In plain language: before the process exits cleanly, the system tries once to persist any pending flush summary; if that step fails, it skips it instead of forcing a risky last-minute write.
 
 Same-session `compact_context` / auto-flush flushes now also take a database-file-backed per-session process lock. In plain language: if two local processes or workers try to compact the same session at the same time, the later one now gets `already_in_progress` instead of racing the write.
@@ -93,6 +97,8 @@ Three retrieval modes — `keyword`, `semantic`, and `hybrid` — with automatic
 Embedding-dimension mismatch checks now follow the current query scope (`domain`, `path_prefix`, and similar filters) instead of scanning unrelated vectors globally. If the vectors inside that scope really do not match the current config, `degrade_reasons` now explicitly says that a reindex is required.
 
 `candidate_multiplier` is still only a first-round expansion hint, not an unlimited pool-size switch. The current implementation keeps a hard cap on the effective candidate pool and exposes the applied value as `candidate_limit_applied` in metadata.
+
+The final "is this path still current?" revalidation step now also prefers batched path lookups when the backend supports them. In plain terms: larger result sets no longer need one SQLite round-trip per row just to confirm the path still exists.
 
 ### 🧠 Intent-Aware Search
 

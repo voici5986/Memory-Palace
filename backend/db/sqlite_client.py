@@ -3513,6 +3513,82 @@ class SQLiteClient:
                 "gist_source_hash": gist.get("source_hash"),
             }
 
+    async def get_memories_by_paths(
+        self,
+        path_requests: Sequence[Tuple[str, str]],
+        reinforce_access: bool = True,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Batch-get memories by (domain, path) pairs.
+
+        Args:
+            path_requests: Sequence of (domain, path) tuples.
+            reinforce_access: Whether to reinforce access_count/vitality on read.
+
+        Returns:
+            Mapping keyed by canonical URI (``domain://path``).
+        """
+        normalized_requests: List[Tuple[str, str]] = []
+        seen_requests: set[Tuple[str, str]] = set()
+        for raw_domain, raw_path in path_requests:
+            domain = str(raw_domain or "").strip()
+            path = str(raw_path or "").strip()
+            if not domain or not path:
+                continue
+            candidate = (domain, path)
+            if candidate in seen_requests:
+                continue
+            seen_requests.add(candidate)
+            normalized_requests.append(candidate)
+
+        if not normalized_requests:
+            return {}
+
+        async with self.session() as session:
+            predicates = [
+                and_(Path.domain == domain, Path.path == path)
+                for domain, path in normalized_requests
+            ]
+            result = await session.execute(
+                select(Memory, Path)
+                .join(Path, Memory.id == Path.memory_id)
+                .where(or_(*predicates))
+                .where(Memory.deprecated == False)
+            )
+            rows = result.all()
+
+            if not rows:
+                return {}
+
+            memory_ids = list(dict.fromkeys(memory.id for memory, _ in rows))
+            if reinforce_access:
+                await self._reinforce_memory_access(session, memory_ids)
+            gist_map = await self._get_latest_gists_map(session, memory_ids)
+
+            payload: Dict[str, Dict[str, Any]] = {}
+            for memory, path_obj in rows:
+                uri = f"{path_obj.domain}://{path_obj.path}"
+                if uri in payload:
+                    continue
+                gist = gist_map.get(memory.id) or {}
+                payload[uri] = {
+                    "id": memory.id,
+                    "content": memory.content,
+                    "priority": path_obj.priority,
+                    "disclosure": path_obj.disclosure,
+                    "deprecated": memory.deprecated,
+                    "created_at": memory.created_at.isoformat()
+                    if memory.created_at
+                    else None,
+                    "domain": path_obj.domain,
+                    "path": path_obj.path,
+                    "gist_text": gist.get("gist_text"),
+                    "gist_method": gist.get("gist_method"),
+                    "gist_quality": gist.get("quality_score"),
+                    "gist_source_hash": gist.get("source_hash"),
+                }
+            return payload
+
     async def get_memory_by_id(self, memory_id: int) -> Optional[Dict[str, Any]]:
         """
         Get a memory by its ID (including deprecated ones).

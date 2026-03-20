@@ -110,10 +110,18 @@ def sqlite_database_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{normalized}"
 
 
+def _prefer_windows_venv_layout() -> bool:
+    if os.name == "nt":
+        return True
+
+    platform_value = str(sys.platform or "").strip().lower()
+    return platform_value == "cygwin" or platform_value.startswith("msys")
+
+
 def resolve_backend_python() -> Path:
     candidates = (
         (WINDOWS_VENV_PYTHON, POSIX_VENV_PYTHON)
-        if os.name == "nt"
+        if _prefer_windows_venv_layout()
         else (POSIX_VENV_PYTHON, WINDOWS_VENV_PYTHON)
     )
     for candidate in candidates:

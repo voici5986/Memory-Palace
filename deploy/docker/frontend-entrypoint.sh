@@ -17,6 +17,14 @@ case "${mcp_api_key}" in
     ;;
 esac
 
+stripped_controls="$(
+  printf '%s' "${mcp_api_key}" | LC_ALL=C tr -d '[:cntrl:]'
+)"
+if [ "${stripped_controls}" != "${mcp_api_key}" ]; then
+  echo "MCP_API_KEY contains unsupported control characters." >&2
+  exit 1
+fi
+
 escaped_mcp_api_key="$(printf '%s' "${mcp_api_key}" | sed 's/[\\\"$]/\\&/g')"
 export MCP_API_KEY_NGINX_ESCAPED="${escaped_mcp_api_key}"
 

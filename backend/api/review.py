@@ -12,11 +12,13 @@ Design Philosophy:
 - Old versions are marked deprecated for review
 - The human can permanently delete deprecated memories after review
 """
-from fastapi import APIRouter, Depends, HTTPException
-import os
-from typing import Any, Awaitable, Callable, Dict, List, Optional
 import difflib
+import os
+from datetime import datetime
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from urllib.parse import unquote
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from models import (
     DiffRequest, DiffResponse,
@@ -78,6 +80,77 @@ def _raise_review_internal_error(*, operation: str, error: str, exc: Exception) 
             "operation": operation,
         },
     ) from exc
+
+
+def _parse_snapshot_time(value: Any) -> Optional[datetime]:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _find_newer_memory_snapshot_conflict(
+    *,
+    manager: Any,
+    baseline_session_id: str,
+    snapshot: Dict[str, Any],
+) -> Optional[Dict[str, str]]:
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    uri = str(data.get("uri") or "").strip()
+    baseline_snapshot_time = _parse_snapshot_time(snapshot.get("snapshot_time"))
+    if not uri or baseline_snapshot_time is None:
+        return None
+
+    for session in manager.list_sessions():
+        other_session_id = str(session.get("session_id") or "").strip()
+        if not other_session_id or other_session_id == baseline_session_id:
+            continue
+        for candidate in manager.list_snapshots(other_session_id):
+            if str(candidate.get("resource_type") or "").strip() != "memory":
+                continue
+            if str(candidate.get("uri") or "").strip() != uri:
+                continue
+            candidate_snapshot_time = _parse_snapshot_time(
+                candidate.get("snapshot_time")
+            )
+            if (
+                candidate_snapshot_time is None
+                or candidate_snapshot_time <= baseline_snapshot_time
+            ):
+                continue
+            return {
+                "session_id": other_session_id,
+                "snapshot_time": str(candidate.get("snapshot_time") or "").strip(),
+            }
+    return None
+
+
+def _raise_if_newer_review_snapshot_exists(
+    *,
+    manager: Any,
+    session_id: str,
+    snapshot: Dict[str, Any],
+) -> None:
+    conflict = _find_newer_memory_snapshot_conflict(
+        manager=manager,
+        baseline_session_id=session_id,
+        snapshot=snapshot,
+    )
+    if not conflict:
+        return
+
+    data = snapshot.get("data") if isinstance(snapshot.get("data"), dict) else {}
+    uri = str(data.get("uri") or "").strip() or "unknown"
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Cannot rollback '{uri}': newer review snapshot exists in session "
+            f"'{conflict['session_id']}' at {conflict['snapshot_time']}."
+        ),
+    )
 
 
 # ========== Session & Snapshot Endpoints ==========
@@ -999,6 +1072,12 @@ async def rollback_resource(session_id: str, resource_id: str, request: Rollback
         if resource_type == "path":
             result = await _rollback_path(data, lane_session_id=lane_session_id)
         elif resource_type == "memory":
+            if operation_type in {"modify_content", "modify"}:
+                _raise_if_newer_review_snapshot_exists(
+                    manager=manager,
+                    session_id=session_id,
+                    snapshot=snapshot,
+                )
             if operation_type == "modify_content":
                 result = await _rollback_memory_content(
                     data,

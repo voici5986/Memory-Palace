@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import subprocess
 
 import run_sse
 from starlette.testclient import TestClient
@@ -105,4 +107,22 @@ def test_frontend_entrypoint_escapes_dollar_signs_in_api_key() -> None:
 
     assert "sed 's/[\\\\\\\"$]/\\\\&/g'" in script_text
     assert "carriage_return=\"$(printf '\\r')\"" in script_text
+    assert "tr -d '[:cntrl:]'" in script_text
     assert "MCP_API_KEY contains unsupported control characters." in script_text
+
+
+def test_frontend_entrypoint_rejects_tab_in_api_key() -> None:
+    script_path = PROJECT_ROOT / "deploy" / "docker" / "frontend-entrypoint.sh"
+    env = os.environ.copy()
+    env["MCP_API_KEY"] = "local\tkey"
+
+    result = subprocess.run(
+        ["sh", str(script_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "unsupported control characters" in result.stderr

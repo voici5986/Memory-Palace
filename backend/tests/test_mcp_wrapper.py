@@ -52,6 +52,28 @@ def test_resolve_backend_python_prefers_posix_layout_on_non_windows_when_both_ex
     assert module.resolve_backend_python() == posix_python
 
 
+@pytest.mark.parametrize("platform_value", ["msys", "msys2", "cygwin"])
+def test_resolve_backend_python_prefers_windows_layout_on_msys_like_hosts(
+    monkeypatch, tmp_path: Path, platform_value: str
+) -> None:
+    module = _load_module()
+    windows_python = tmp_path / "backend" / ".venv" / "Scripts" / "python.exe"
+    posix_python = tmp_path / "backend" / ".venv" / "bin" / "python"
+    windows_python.parent.mkdir(parents=True, exist_ok=True)
+    posix_python.parent.mkdir(parents=True, exist_ok=True)
+    windows_python.write_text("", encoding="utf-8")
+    posix_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "WINDOWS_VENV_PYTHON", windows_python)
+    monkeypatch.setattr(module, "POSIX_VENV_PYTHON", posix_python)
+    monkeypatch.setattr(module.os, "name", "posix", raising=False)
+    monkeypatch.setattr(module.sys, "platform", platform_value, raising=False)
+    monkeypatch.delenv("MSYSTEM", raising=False)
+    monkeypatch.delenv("OSTYPE", raising=False)
+
+    assert module.resolve_backend_python() == windows_python
+
+
 def test_build_runtime_env_rejects_docker_internal_database_url(
     monkeypatch, tmp_path: Path
 ) -> None:
