@@ -143,8 +143,44 @@ port_in_use() {
     nc -z 127.0.0.1 "${port}" >/dev/null 2>&1
     return $?
   fi
+  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    local python_candidate=""
+    local probe_status=0
+    if command -v python3 >/dev/null 2>&1; then
+      python_candidate="python3"
+    else
+      python_candidate="python"
+    fi
+    if "${python_candidate}" - "${port}" <<'PY' >/dev/null 2>&1
+import errno
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    sock.bind(("0.0.0.0", port))
+except OSError as exc:
+    if exc.errno == errno.EADDRINUSE:
+        raise SystemExit(0)
+    raise SystemExit(2)
+finally:
+    sock.close()
+
+raise SystemExit(1)
+PY
+    then
+      probe_status=0
+    else
+      probe_status=$?
+    fi
+    case "${probe_status}" in
+      0) return 0 ;;
+      1) return 1 ;;
+    esac
+  fi
   if [[ "${port_probe_fallback_warned}" -eq 0 ]]; then
-    echo "[port-probe] neither lsof nor nc is available; fail-closed port probing is enabled." >&2
+    echo "[port-probe] neither lsof/nc nor a usable python socket probe is available; fail-closed port probing is enabled." >&2
     port_probe_fallback_warned=1
   fi
   return 0
@@ -535,6 +571,264 @@ assert_profile_external_settings_ready() {
   return 0
 }
 
+get_env_override_or_file_value() {
+  local env_file="$1"
+  local key="$2"
+  local default_value="${3:-}"
+  local env_override="${!key:-}"
+  if [[ -n "${env_override}" ]]; then
+    printf '%s\n' "${env_override}"
+    return 0
+  fi
+  local file_value
+  file_value="$(get_env_value_from_file "${env_file}" "${key}")"
+  if [[ -n "${file_value}" ]]; then
+    printf '%s\n' "${file_value}"
+    return 0
+  fi
+  printf '%s\n' "${default_value}"
+}
+
+docker_env_requests_wal() {
+  local env_file="$1"
+  local wal_enabled_raw
+  local journal_mode_raw
+  wal_enabled_raw="$(get_env_override_or_file_value "${env_file}" "MEMORY_PALACE_DOCKER_WAL_ENABLED" "true")"
+  if ! is_truthy "${wal_enabled_raw}"; then
+    return 1
+  fi
+  journal_mode_raw="$(get_env_override_or_file_value "${env_file}" "MEMORY_PALACE_DOCKER_JOURNAL_MODE" "wal")"
+  journal_mode_raw="$(printf '%s' "${journal_mode_raw}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${journal_mode_raw}" == "wal" ]]
+}
+
+trim_wrapping_quotes() {
+  local value="${1:-}"
+  if [[ "${#value}" -ge 2 ]]; then
+    if [[ "${value:0:1}" == "\"" && "${value: -1}" == "\"" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s\n' "${value}"
+}
+
+target_affects_runtime_database() {
+  local target="${1:-}"
+  if [[ "${target}" == "/" ]]; then
+    return 0
+  fi
+  target="${target%/}"
+  if [[ -z "${target}" ]]; then
+    return 1
+  fi
+  [[ "/app/data" == "${target}" || "/app/data" == "${target}/"* ]]
+}
+
+normalize_bind_source_path() {
+  local source_path="${1:-}"
+  source_path="$(trim_wrapping_quotes "${source_path}")"
+  if [[ -z "${source_path}" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+  if [[ "${source_path}" == "~"* ]]; then
+    source_path="${HOME}${source_path:1}"
+  fi
+  case "${source_path}" in
+    //*)
+      printf '%s\n' "${source_path}"
+      return 0
+      ;;
+    /*)
+      printf '%s\n' "${source_path}"
+      return 0
+      ;;
+  esac
+  printf '%s\n' "${PROJECT_ROOT}/${source_path}"
+}
+
+resolve_existing_probe_path() {
+  local candidate="${1:-}"
+  if [[ -z "${candidate}" ]]; then
+    return 1
+  fi
+  while [[ ! -e "${candidate}" ]]; do
+    local parent
+    parent="$(dirname "${candidate}")"
+    if [[ -z "${parent}" || "${parent}" == "${candidate}" ]]; then
+      return 1
+    fi
+    candidate="${parent}"
+  done
+  printf '%s\n' "${candidate}"
+}
+
+detect_filesystem_type() {
+  local probe_path="${1:-}"
+  local fs_type=""
+  if fs_type="$(stat -f %T "${probe_path}" 2>/dev/null)" && [[ -n "${fs_type}" ]]; then
+    printf '%s\n' "${fs_type}"
+    return 0
+  fi
+  if fs_type="$(stat -f -c %T "${probe_path}" 2>/dev/null)" && [[ -n "${fs_type}" ]]; then
+    printf '%s\n' "${fs_type}"
+    return 0
+  fi
+  if fs_type="$(df -T "${probe_path}" 2>/dev/null | awk 'NR==2 {print $2}')" && [[ -n "${fs_type}" ]]; then
+    printf '%s\n' "${fs_type}"
+    return 0
+  fi
+  return 1
+}
+
+filesystem_type_is_network_risky() {
+  local fs_type="${1:-}"
+  fs_type="$(printf '%s' "${fs_type}" | tr '[:upper:]' '[:lower:]')"
+  case "${fs_type}" in
+    nfs|nfs4|cifs|smbfs)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_probable_network_bind_source() {
+  local source_path="${1:-}"
+  case "${source_path}" in
+    //*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+collect_backend_bind_mounts_from_compose_config() {
+  local env_file="$1"
+  local config_output
+  if ! config_output="$(
+    COMPOSE_PROJECT_NAME="${compose_project_name:-${COMPOSE_PROJECT_NAME:-}}" \
+      "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml config 2>/dev/null
+  )"; then
+    echo "[wal-guard] Failed to render docker compose config while validating bind mounts." >&2
+    return 1
+  fi
+  printf '%s\n' "${config_output}" | awk '
+    function strip_quotes(value) {
+      if (length(value) >= 2) {
+        first = substr(value, 1, 1)
+        last = substr(value, length(value), 1)
+        if ((first == "\"" && last == "\"") || (first == "'"'"'" && last == "'"'"'")) {
+          return substr(value, 2, length(value) - 2)
+        }
+      }
+      return value
+    }
+    function parse_bind_shorthand(value, marker_index) {
+      value = strip_quotes(value)
+      marker_index = index(value, ":/app/data")
+      if (marker_index > 1) {
+        current_type = "bind"
+        current_source = substr(value, 1, marker_index - 1)
+        current_target = "/app/data"
+      }
+    }
+    function flush_record() {
+      if (current_type == "bind" && current_source != "" && current_target != "") {
+        print current_source "\t" current_target
+      }
+      current_type = ""
+      current_source = ""
+      current_target = ""
+    }
+    /^services:$/ { in_services = 1; next }
+    in_services && /^  backend:$/ { in_backend = 1; next }
+    in_backend && /^  [^[:space:]][^:]*:$/ && $0 != "  backend:" {
+      flush_record()
+      in_backend = 0
+      in_volumes = 0
+    }
+    in_backend && /^    volumes:$/ { in_volumes = 1; next }
+    in_backend && in_volumes && /^    [^[:space:]-][^:]*:/ {
+      flush_record()
+      in_volumes = 0
+    }
+    in_backend && in_volumes {
+      if ($0 ~ /^      - /) {
+        flush_record()
+        value = $0
+        sub(/^      - /, "", value)
+        if (match(value, /type: ([^[:space:]]+)/, match_parts)) {
+          current_type = match_parts[1]
+        } else {
+          parse_bind_shorthand(value)
+        }
+        next
+      }
+      if ($0 ~ /^        type: /) {
+        sub(/^        type: /, "", $0)
+        current_type = $0
+        next
+      }
+      if ($0 ~ /^        source: /) {
+        sub(/^        source: /, "", $0)
+        current_source = $0
+        next
+      }
+      if ($0 ~ /^        target: /) {
+        sub(/^        target: /, "", $0)
+        current_target = $0
+        next
+      }
+    }
+    END { flush_record() }
+  '
+}
+
+assert_no_risky_wal_bind_mounts() {
+  local env_file="$1"
+  if ! docker_env_requests_wal "${env_file}"; then
+    return 0
+  fi
+  local bind_mounts
+  bind_mounts="$(collect_backend_bind_mounts_from_compose_config "${env_file}")" || return 1
+  if [[ -z "${bind_mounts}" ]]; then
+    return 0
+  fi
+
+  local line source_path target_path normalized_source probe_path fs_type
+  while IFS=$'\t' read -r source_path target_path; do
+    [[ -n "${source_path}" && -n "${target_path}" ]] || continue
+    target_path="$(trim_wrapping_quotes "${target_path}")"
+    if ! target_affects_runtime_database "${target_path}"; then
+      continue
+    fi
+
+    normalized_source="$(normalize_bind_source_path "${source_path}")"
+    if is_probable_network_bind_source "${normalized_source}"; then
+      echo "[wal-guard] Refusing to start Docker deployment: backend /app/data is bind-mounted from network path '${normalized_source}' while WAL is enabled." >&2
+      echo "[wal-guard] Use the default Docker named volume, or set MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete." >&2
+      return 1
+    fi
+
+    probe_path="$(resolve_existing_probe_path "${normalized_source}" || true)"
+    if [[ -z "${probe_path}" ]]; then
+      continue
+    fi
+    fs_type="$(detect_filesystem_type "${probe_path}" || true)"
+    if filesystem_type_is_network_risky "${fs_type}"; then
+      echo "[wal-guard] Refusing to start Docker deployment: backend /app/data bind source '${normalized_source}' resolves to risky filesystem '${fs_type}' with WAL enabled." >&2
+      echo "[wal-guard] Use the default Docker named volume, or set MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete." >&2
+      return 1
+    fi
+  done <<< "${bind_mounts}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
@@ -693,6 +987,8 @@ compose_env_file_args=()
 if [[ -n "${env_file}" ]]; then
   compose_env_file_args=(--env-file "${env_file}")
 fi
+
+assert_no_risky_wal_bind_mounts "${env_file}"
 
 # Force recreate to avoid stale network attachment causing frontend->backend 502.
 if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml down --remove-orphans >/dev/null 2>&1; then

@@ -222,6 +222,8 @@ The real problem is still only whether that path points into the container.
 
    If this doesn't work, prioritize troubleshooting processes and ports; if it already returns `{"status":"ok","service":"memory-palace-sse"}`, continue checking authentication or sessions for `/sse` and `/messages`.
 
+   One more small boundary: the frontend proxy still treats `/sse` as the canonical path. If a client accidentally uses `/sse/`, the frontend now redirects it back to `/sse` automatically. So keep writing `/sse` in docs and client configs; a trailing slash is no longer a reason by itself to assume the proxy is broken.
+
 3. Change the port (`run_sse.py` tries `8000` first; use `8010` explicitly when needed):
 
    ```bash
@@ -437,9 +439,48 @@ If this command can normally output the version number, starting `mcp_server.py`
    If the script finds that the port you specified is also occupied, it will continue to automatically switch to a nearby free port.
    At this point, please rely on the `Frontend` / `Backend API` addresses printed at the end of the script, and do not continue to focus on the port you initially entered.
 
-4. If image build fails, check if the Dockerfile is complete:
+4. If the script aborts before startup and the error mentions:
+   - `backend /app/data`
+   - `WAL`
+   - `NFS` / `CIFS` / `SMB`
+
+   this is usually not a false alarm. It means the new **pre-start safety guard** is working:
+
+   - the repository only treats **Docker named volume + WAL** as a supported path
+   - if backend `/app/data` is changed to a bind mount on a network filesystem while WAL stays enabled, SQLite can be damaged
+   - `docker_one_click.sh/.ps1` now rejects that combination before `docker compose up`
+
+   You have only two supported fixes:
+
+   ```bash
+   # Option A: go back to the repository default named-volume path (recommended)
+   unset MEMORY_PALACE_DATA_VOLUME
+   ```
+
+   or:
+
+   ```bash
+   # Option B: if you must use an NFS/CIFS/SMB bind mount, disable WAL explicitly
+   export MEMORY_PALACE_DOCKER_WAL_ENABLED=false
+   export MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete
+   ```
+
+   If you bypass the one-click script and run `docker compose up` manually, this guard will not run for you; you still need to enforce the same rule yourself.
+
+5. If image build fails, check if the Dockerfile is complete:
    - `deploy/docker/Dockerfile.backend` — Based on `python:3.11-slim`
    - `deploy/docker/Dockerfile.frontend` — Based on `node:22-alpine` (build) + `nginxinc/nginx-unprivileged:1.27-alpine` (run)
+
+6. If the frontend container exits almost immediately and the logs mention:
+   - `MCP_API_KEY contains unsupported control characters`
+
+   this usually means the `MCP_API_KEY` written into the Docker env file contains a newline or carriage return.
+
+   Common ways this happens:
+   - the key was copied from a password manager or chat window with the trailing newline still attached
+   - `.env.docker` was edited manually and the key ended up spanning multiple lines
+
+   The fix is simple: rewrite `MCP_API_KEY` as a **single-line** plain-text value, then restart. Do not guess at proxy, SSE, or browser-cache issues first; clean up the key itself before troubleshooting anything else.
 
 > 💡 Windows users can use `scripts/docker_one_click.ps1` (PowerShell version).
 

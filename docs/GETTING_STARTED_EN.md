@@ -110,6 +110,8 @@ bash scripts/apply_profile.sh macos b
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >
+> If you are running `apply_profile.ps1` from PowerShell on Linux / WSL, `-Platform linux` is now accepted as well; it maps to the same local template family as `macos`. On native Windows, keep using `-Platform windows`.
+>
 > In addition, `profile c/d` now fail-closed at the script stage when endpoint/key/model placeholders are still unresolved. If values such as `PORT`, `replace-with-your-key`, or `your-embedding-model-id` are still present, the script stops immediately instead of carrying an obviously broken config into later startup steps.
 >
 > Note: **The profile-b `.env` generated locally for macOS / Windows will not automatically fill in `MCP_API_KEY`**. If you are about to open the Dashboard, or directly call `/browse` / `/review` / `/maintenance`, `/sse`, or `/messages`, please supplement `MCP_API_KEY` yourself, or set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local loopback debugging only. Only the `docker` platform profile script will automatically generate a local key if the key is empty.
@@ -338,6 +340,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Currently, Docker Compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before treating the frontend as truly ready. In practice, when the container first shows `running`, the page may still take a few more seconds to become truly available, which is normal.
 >
+> Keep the WAL safety boundary in mind as well: the repository defaults only treat **Docker named volume + WAL** as a supported path. If you replace backend `/app/data` with a bind mount to NFS/CIFS/SMB or another network filesystem, explicitly switch back to `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` and `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`. `docker_one_click.sh/.ps1` now performs that preflight check before `docker compose up` and aborts on the risky combination; manual `docker compose up` / `docker compose -f docker-compose.ghcr.yml up` does not do that validation for you.
+>
 > The Docker frontend also serves `/index.html` with `Cache-Control: no-store, no-cache, must-revalidate` to reduce the chance that a browser keeps an old entry page after a frontend update. If you still see an obviously old page right after upgrading the image, first confirm the new container is actually running, then refresh the page once. Only continue checking cache behavior if you also put your own reverse proxy or corporate cache in front of it.
 >
 > Docker also persists two runtime data paths by default: the database volume is isolated per compose project as `<compose-project>_data` (container path `/app/data`), and the Review snapshots volume is isolated as `<compose-project>_snapshots` (container path `/app/snapshots`). If you intentionally want to reuse an old shared volume, set `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` explicitly. If you execute `docker compose down -v` or manually delete these volumes, both parts are cleared together.
@@ -354,8 +358,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 2. Defaults to not reading current process environment variables to override template strategy keys (avoiding implicit profile changes); injects API address/key/model fields and explicit retrieval parameters such as `RETRIEVAL_EMBEDDING_DIM` only when the injection toggle is explicitly enabled.
 > 3. Detects port conflicts and automatically finds available ports.
 > 4. Parses and injects Docker persistent volumes: by default the script isolates them per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); it only reuses an old volume when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
-> 5. Locks concurrent deployments for the same checkout to avoid multiple `docker_one_click` instances overwriting each other.
-> 6. Builds and starts containers via `docker compose`.
+> 5. Fails fast before startup if backend `/app/data` has been changed to a bind mount on NFS/CIFS/SMB or another network filesystem while WAL would still be enabled.
+> 6. Locks concurrent deployments for the same checkout to avoid multiple `docker_one_click` instances overwriting each other.
+> 7. Builds and starts containers via `docker compose`.
 
 Default access addresses:
 

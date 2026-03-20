@@ -284,6 +284,7 @@ def get_session_id() -> str:
 
 # Regex pattern for URI: domain://path
 _URI_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)://(.*)$")
+_WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def parse_uri(uri: str) -> Tuple[str, str]:
@@ -305,6 +306,12 @@ def parse_uri(uri: str) -> Tuple[str, str]:
         ValueError: If the URI format is invalid or domain is unknown
     """
     uri = uri.strip()
+
+    if _WINDOWS_DRIVE_PATH_PATTERN.match(uri):
+        raise ValueError(
+            "Filesystem paths like 'C:/...' are not valid memory URIs. "
+            "Use a memory URI such as 'core://path/to/memory' instead."
+        )
 
     match = _URI_PATTERN.match(uri)
     if match:

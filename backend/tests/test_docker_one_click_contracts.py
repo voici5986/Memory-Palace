@@ -121,6 +121,8 @@ def test_compose_waits_for_healthy_sse_service() -> None:
     assert "http://127.0.0.1:8000/health" in backend_block
     assert 'host.docker.internal:host-gateway' in backend_block
     assert "HOST: 0.0.0.0" in backend_block
+    assert "# Docker defaults to WAL for the repository's named-volume deployment path." in backend_block
+    assert "# If you replace these volumes with NFS/CIFS bind mounts, override both values." in backend_block
     assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in backend_block
     assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in backend_block
     assert "\n  sse:\n" not in compose_text
@@ -146,6 +148,43 @@ def test_local_compose_uses_stable_image_names_for_no_build_reuse() -> None:
     assert "$frontendImage = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_FRONTEND_IMAGE')" in ps1_text
     assert '$env:MEMORY_PALACE_BACKEND_IMAGE = $backendImage' in ps1_text
     assert '$env:MEMORY_PALACE_FRONTEND_IMAGE = $frontendImage' in ps1_text
+
+
+def test_shell_port_probe_falls_back_to_python_socket_bind() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'socket.socket(socket.AF_INET, socket.SOCK_STREAM)' in shell_text
+    assert 'sock.bind(("0.0.0.0", port))' in shell_text
+    assert (
+        "neither lsof/nc nor a usable python socket probe is available; "
+        "fail-closed port probing is enabled."
+    ) in shell_text
+
+
+def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'docker_env_requests_wal()' in shell_text
+    assert 'collect_backend_bind_mounts_from_compose_config()' in shell_text
+    assert 'filesystem_type_is_network_risky()' in shell_text
+    assert 'assert_no_risky_wal_bind_mounts "${env_file}"' in shell_text
+    assert "backend /app/data" in shell_text
+    assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in shell_text
+    assert "nfs|nfs4|cifs|smbfs" in shell_text
+
+    assert "function Assert-BackendDataBindMountWalSafety" in ps1_text
+    assert "function Get-BackendDataBindMountSourcesFromComposeConfig" in ps1_text
+    assert "function Test-NetworkFilesystemSignal" in ps1_text
+    assert "Assert-BackendDataBindMountWalSafety -ComposeProjectName $composeProjectName -EnvFile $envFile" in ps1_text
+    assert "backend /app/data bind mount" in ps1_text
+    assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in ps1_text
 
 
 def test_pull_based_ghcr_release_artifacts_exist() -> None:

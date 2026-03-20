@@ -55,11 +55,47 @@ read_env_value() {
   local parsed_value=""
   for parser_candidate in "${parser_candidates[@]}"; do
     parsed_value="$("${parser_candidate}" - "${file_path}" "${key}" <<'PY' 2>/dev/null || true
-from dotenv import dotenv_values
 import sys
 
 file_path, key = sys.argv[1], sys.argv[2]
-value = dotenv_values(file_path).get(key)
+try:
+    from dotenv import dotenv_values  # type: ignore
+except Exception:
+    dotenv_values = None
+
+
+def fallback_read_env(path: str, target_key: str):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+
+    last_value = None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        current_key, current_value = line.split("=", 1)
+        if current_key.strip() != target_key:
+            continue
+        value = current_value.strip()
+        if len(value) >= 2 and value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+            value = value[1:-1]
+        last_value = value
+    return last_value
+
+
+value = None
+if dotenv_values is not None:
+    try:
+        value = dotenv_values(file_path).get(key)
+    except Exception:
+        value = None
+
+if value is None:
+    value = fallback_read_env(file_path, key)
+
 if value is not None:
     print(value, end="")
 PY

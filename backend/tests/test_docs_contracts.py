@@ -96,3 +96,44 @@ def test_docs_describe_platform_specific_repo_local_mcp_wrappers_and_setup_auto_
     assert "macOS / Linux / Git Bash / WSL：`bash scripts/run_memory_palace_mcp_stdio.sh`" in zh_getting_started
     assert "native Windows: `python backend/mcp_wrapper.py`" in en_getting_started
     assert "macOS / Linux / Git Bash / WSL: `bash scripts/run_memory_palace_mcp_stdio.sh`" in en_getting_started
+
+
+def test_docs_keep_wal_network_bind_mount_safety_boundary_consistent() -> None:
+    readme_en = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
+    zh_getting_started = (PROJECT_ROOT / "docs" / "GETTING_STARTED.md").read_text(
+        encoding="utf-8"
+    )
+    en_getting_started = (
+        PROJECT_ROOT / "docs" / "GETTING_STARTED_EN.md"
+    ).read_text(encoding="utf-8")
+    zh_profiles = (PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES.md").read_text(
+        encoding="utf-8"
+    )
+    en_profiles = (
+        PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES_EN.md"
+    ).read_text(encoding="utf-8")
+    zh_troubleshooting = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING.md"
+    ).read_text(encoding="utf-8")
+    en_troubleshooting = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING_EN.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (readme_en, en_getting_started, en_profiles, en_troubleshooting):
+        assert "named volume" in text or "named-volume" in text
+        assert "NFS/CIFS/SMB" in text
+        assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false" in text
+        assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in text
+        assert (
+            "manual `docker compose up`" in text
+            or "run `docker compose up` manually" in text
+            or "bypass the one-click script" in text
+        )
+
+    for text in (readme_zh, zh_getting_started, zh_profiles, zh_troubleshooting):
+        assert "named volume" in text
+        assert "NFS/CIFS/SMB" in text
+        assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false" in text
+        assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in text
+        assert "手动 `docker compose up`" in text or "绕过一键脚本" in text

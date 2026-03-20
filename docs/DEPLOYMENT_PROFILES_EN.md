@@ -330,6 +330,8 @@ cd <project-root>
 
 > `apply_profile.ps1` now performs a unified deduplication of **all duplicate env keys**, keeping the last value, instead of just handling `DATABASE_URL`.
 >
+> If you are running `apply_profile.ps1` from PowerShell on Linux / WSL, `-Platform linux` is now accepted too; it maps to the same local template family as `macos`. On native Windows, keep using `-Platform windows`.
+>
 > For native Windows / `pwsh`, it is still recommended to run it separately in the target environment; these steps are for deployment verification and are not intended for beginner-level reading.
 >
 > `docker_one_click.sh/.ps1` will generate an independent temporary Docker env file for each run by default and pass it to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`. It will only reuse a specified path if that environment variable is explicitly set, rather than always sharing `.env.docker`.
@@ -339,6 +341,8 @@ cd <project-root>
 > The current compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before the frontend is considered ready. If you see the container has just started but the browser isn't connecting, wait a few seconds first; do not immediately judge it as a deployment failure.
 >
 > Concurrent one-click deployments under the same checkout will be serialized by a deployment lock to prevent shared compose projects/env files from overwriting each other.
+>
+> WAL safety boundary: the repository defaults only treat **named volume + WAL** as a supported Docker path. If you replace backend `/app/data` with a bind mount on NFS/CIFS/SMB or another network filesystem, explicitly switch back to `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` and `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`. `docker_one_click.sh/.ps1` now performs that preflight before `docker compose up` and aborts on the risky combination; if you bypass the one-click script and run `docker compose up` manually, you need to enforce the same rule yourself.
 >
 > If you enable `--allow-runtime-env-injection` for `profile c/d`, the script switches that run to explicit API mode and additionally forces `RETRIEVAL_EMBEDDING_BACKEND=api`. The current injection path also carries:
 >
@@ -365,8 +369,9 @@ cd <project-root>
 2.  Disables runtime environment injection by default to avoid implicit template overwriting; parameters are only overridden when injection is explicitly enabled. For `profile c/d`, the injection mode additionally forces `RETRIEVAL_EMBEDDING_BACKEND=api` for local debugging; if explicit `RETRIEVAL_*` is not provided, it prioritizes reusing `ROUTER_API_BASE/ROUTER_API_KEY` as a fallback for the embedding / reranker API base+key, while also passing through explicit retrieval parameters such as `RETRIEVAL_EMBEDDING_DIM` and the optional `INTENT_LLM_*`.
 3.  Automatically detects port conflicts; if the default port is occupied, it automatically increments to find an idle port.
 4.  Detects and injects Docker persistent volumes: by default they are isolated per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); old volumes are reused only when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
-5.  Adds a deployment lock to concurrent deployments under the same checkout to prevent multiple `docker_one_click` instances from overwriting each other.
-6.  Uses `docker compose` to build and start the backend, SSE, and frontend containers.
+5.  Fails fast before startup if backend `/app/data` has been changed to a bind mount on NFS/CIFS/SMB or another network filesystem while WAL would still be enabled.
+6.  Adds a deployment lock to concurrent deployments under the same checkout to prevent multiple `docker_one_click` instances from overwriting each other.
+7.  Uses `docker compose` to build and start the backend, SSE, and frontend containers.
 
 ### Security Notes
 

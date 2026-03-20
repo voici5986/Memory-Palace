@@ -54,6 +54,8 @@ writer://chapter_1/scene  ← Hierarchical path under the writer domain
 system://boot             ← Built-in system URI (read-only)
 ```
 
+The URI here means a **Memory Palace memory address**, not an operating-system file path. Windows file paths such as `C:/notes.txt` or `C:\notes.txt` are now explicitly rejected; if you mean a memory, use `core://...` rather than passing a local disk path into an MCP tool.
+
 **Common Domains:**
 
 - `core` — Core memories (Personality, preferences, key facts)

@@ -98,7 +98,7 @@
 
 四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本。当前最完整的大链路验证仍是 `macOS + Docker`；原生 Windows 现在已有通过 `backend/mcp_wrapper.py` 的 repo-local stdio 路径，但远程场景和 GUI 宿主组合仍建议按目标环境再复核一次。
 
-如果你走的是仓库自带的 Docker / GHCR compose 路径，compose 现在会默认强制打开 WAL，减少共享 SQLite 数据卷上的 `database is locked` 这类并发写冲突。
+如果你走的是仓库自带的 Docker / GHCR compose 路径，compose 现在会默认在仓库的 **named volume 默认部署路径** 上强制打开 WAL，减少共享 SQLite 数据卷上的 `database is locked` 这类并发写冲突。但这个默认值**不适用于**把 `/app/data` 改成 NFS/CIFS/SMB 之类网络文件系统 bind mount 的场景；如果你这么改，必须显式切回 `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` 和 `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`。repo-local 的 `docker_one_click.sh/.ps1` 现在会在检测到这类高风险组合时直接 fail-fast；手动 `docker compose up` 仍然属于你自己负责预检查的路径。
 
 ### 📊 内置可观测性仪表盘
 
@@ -515,7 +515,7 @@ python run_sse.py
 > - 原生 Windows：优先 `backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL：优先 `scripts/run_memory_palace_mcp_stdio.sh`
 >
-> 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
+> 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。repo-local `stdio` wrapper 现在也不再只依赖 `python-dotenv` 才能读取 `.env`；如果本地启动仍然失败，更常见的原因已经变成 `.env` 内容或路径本身有问题，而不是少装了这个额外包。
 >
 > 再补一个这轮实测过的细节：如果某个客户端 / IDE host 把 `DATABASE_URL` 传成了空字符串，这两条 wrapper 也会把它当成“没设置”，继续回退到当前仓库 `.env` 里的有效值；不会因为“变量名存在但值为空”就把 repo-local 启动误判成缺配置。
 >
@@ -551,6 +551,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，**受保护请求通常已经能直接用**；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。这不一定代表配置坏了；只有当受保护数据也一起报 `401` 或空态时，才需要继续排查 env / 代理配置。
 >
 > 也请把这个 Docker 前端端口当成可信操作员 / 管理入口。只要有人能直接访问 `http://<你的主机>:3000`，他就能使用 Dashboard 以及被代理的受保护接口，所以不要把这个端口当成“有 `MCP_API_KEY` 就等于终端用户鉴权”的公网入口；若要给受信范围之外的人访问，请先在前面加你自己的 VPN、反向代理鉴权或网络访问控制。
+>
+> WAL 安全边界：仓库默认仍假定 backend 数据库放在 Docker **named volume** 挂载的 `/app/data` 里。如果你有意把它替换成 NFS/CIFS/SMB 或其它网络文件系统 bind mount，就**不要继续开着 WAL**。`docker_one_click.sh/.ps1` 现在会在 `docker compose up` 前做预检查，一旦发现这类高风险组合就直接拒绝启动；如果你绕过一键脚本，自己手动跑 `docker compose up`，就需要自己遵守同一条规则。
 >
 > Windows 复核说明（2026 年 3 月 19 日）：这条 repo-local `docker compose -f docker-compose.yml` 路径，已经在原生 Windows 上重新做过端到端验证。`http://127.0.0.1:3000/sse` 会返回 `HTTP 200`，并给出 `/messages/?session_id=...`；`Claude` 和 `Gemini` 也都已经通过这个前端代理 SSE 入口完成过真实的 `read_memory(system://boot)` 调用。
 >

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('macos', 'windows', 'docker')]
+    [ValidateSet('macos', 'linux', 'windows', 'docker')]
     [string]$Platform = 'windows',
 
     [ValidateSet('a', 'b', 'c', 'd', 'A', 'B', 'C', 'D')]
@@ -10,6 +10,8 @@ param(
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
+$Platform = $Platform.ToLowerInvariant()
+if ($Platform -eq 'linux') { $Platform = 'macos' }
 $profileLower = $Profile.ToLower()
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 

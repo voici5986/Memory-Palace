@@ -326,6 +326,8 @@ cd <project-root>
 
 > `apply_profile.ps1` 现已对 **所有重复 env key** 做“保留最后值”的统一去重，不再只处理 `DATABASE_URL`。
 >
+> 如果你是在 Linux / WSL 里的 PowerShell 环境运行 `apply_profile.ps1`，`-Platform linux` 现在也已可用；它会映射到和 `macos` 相同的本地模板。原生 Windows 继续使用 `-Platform windows` 即可。
+>
 > 原生 Windows / `pwsh` 仍建议在目标环境单独补跑一次；这些步骤面向部署补验，不建议和新手入口文档混在一起读。
 >
 > `docker_one_click.sh/.ps1` 默认会为每次运行生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定路径，而不是固定共享 `.env.docker`。
@@ -335,6 +337,8 @@ cd <project-root>
 > 当前 compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，frontend 才算真正 ready。看到容器刚启动但浏览器还没通时，优先先等几秒，不要急着误判成部署失败。
 >
 > 同一 checkout 下的并发一键部署会被 deployment lock 串行化，避免共享 compose project / env 文件互相覆盖。
+>
+> WAL 安全边界：仓库默认只把 **named volume + WAL** 当成受支持的 Docker 路径。如果你把 backend `/app/data` 改成 NFS/CIFS/SMB 或其它网络文件系统 bind mount，就必须显式切回 `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` 与 `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`。`docker_one_click.sh/.ps1` 现在会在 `docker compose up` 前做这层 preflight，并在发现高风险组合时直接拒绝启动；如果你绕过一键脚本，自己手动跑 `docker compose up`，则需要自己执行同样的检查。
 >
 > 如果你对 `profile c/d` 开启 `--allow-runtime-env-injection`，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当前这条注入链路会一起覆盖：
 >
@@ -361,8 +365,9 @@ cd <project-root>
 2. 默认禁用运行时环境注入，避免隐式覆盖模板；仅在显式开关注入时才覆盖运行参数。对 `profile c/d`，注入模式会额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api` 用于本地联调；若显式 `RETRIEVAL_*` 未提供，则优先复用 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底来源，并同步透传显式的 `RETRIEVAL_EMBEDDING_DIM` 与可选的 `INTENT_LLM_*`。
 3. 自动检测端口占用，若默认端口被占用则自动递增寻找空闲端口
 4. 检测并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，snapshot `<compose-project>_snapshots`）；如需复用旧卷，必须显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`
-5. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
-6. 使用 `docker compose` 构建并启动后端、SSE、前端三个容器
+5. 若 backend `/app/data` 被改成 NFS/CIFS/SMB 等网络文件系统 bind mount，且本次配置仍会启用 WAL，则在启动前直接 fail-fast
+6. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
+7. 使用 `docker compose` 构建并启动后端、SSE、前端三个容器
 
 ### 安全说明
 

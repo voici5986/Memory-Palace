@@ -220,6 +220,8 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
    如果这里都不通，优先排查进程和端口；如果这里已经返回 `{"status":"ok","service":"memory-palace-sse"}`，再继续看 `/sse` 和 `/messages` 的鉴权或 session。
 
+   再补一个小边界：当前前端代理路径仍以 `/sse` 为标准写法；如果某个客户端误用了 `/sse/`，前端现在会自动重定向回 `/sse`。所以文档和客户端配置里仍然优先写 `/sse`，看到尾部斜杠也不必单独怀疑代理挂了。
+
 3. 更换端口（`run_sse.py` 会优先尝试 `8000`，必要时可显式切到 `8010`）：
 
    ```bash
@@ -435,9 +437,48 @@ cd backend
    如果脚本发现你指定的端口也被占用，会继续自动换到附近空闲端口。
    这时请以脚本最后打印出来的 `Frontend` / `Backend API` 地址为准，不要继续死盯你最初输入的端口。
 
-4. 镜像构建失败时，检查 Dockerfile 是否完整：
+4. 如果脚本在真正启动前就直接失败，并且错误里提到：
+   - `backend /app/data`
+   - `WAL`
+   - `NFS` / `CIFS` / `SMB`
+
+   这通常不是脚本误报，而是新的**启动前保护**在生效：
+
+   - 仓库默认只把 **Docker named volume + WAL** 当成受支持路径
+   - 如果你把 backend 的 `/app/data` 改成网络文件系统 bind mount，再继续开 `WAL`，SQLite 存在损坏风险
+   - `docker_one_click.sh/.ps1` 现在会在 `docker compose up` 前直接拒绝这类组合
+
+   处理方式只有两类：
+
+   ```bash
+   # 方案 A：回到仓库默认 named volume 路径（推荐）
+   unset MEMORY_PALACE_DATA_VOLUME
+   ```
+
+   或：
+
+   ```bash
+   # 方案 B：如果你必须用 NFS/CIFS/SMB bind mount，就显式关闭 WAL
+   export MEMORY_PALACE_DOCKER_WAL_ENABLED=false
+   export MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete
+   ```
+
+   如果你绕过一键脚本，自己手动执行 `docker compose up`，这条保护不会自动替你执行；你需要自己遵守同一条规则。
+
+5. 镜像构建失败时，检查 Dockerfile 是否完整：
    - `deploy/docker/Dockerfile.backend` — 基于 `python:3.11-slim`
    - `deploy/docker/Dockerfile.frontend` — 基于 `node:22-alpine`（构建）+ `nginxinc/nginx-unprivileged:1.27-alpine`（运行）
+
+6. 如果 frontend 容器启动很快就退出，日志里出现：
+   - `MCP_API_KEY contains unsupported control characters`
+
+   这通常说明你写进 Docker env 文件的 `MCP_API_KEY` 带了换行或回车。
+
+   常见场景是：
+   - 从密码管理器或聊天窗口复制 key 时，把结尾换行一起带进去了
+   - 手工编辑 `.env.docker` 时把 key 写成了多行
+
+   处理方式很简单：把 `MCP_API_KEY` 改成**单行**纯文本，再重新启动。这里不需要猜测代理、SSE 或浏览器缓存问题，先把 key 本身清干净。
 
 > 💡 Windows 用户可使用 `scripts/docker_one_click.ps1`（PowerShell 版本）。
 

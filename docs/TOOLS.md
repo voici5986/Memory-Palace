@@ -54,6 +54,8 @@ writer://chapter_1/scene  ← 写作域下的层级路径
 system://boot             ← 系统内置 URI（只读）
 ```
 
+这里的 URI 指的是 **Memory Palace 记忆地址**，不是操作系统文件路径。像 `C:/notes.txt`、`C:\notes.txt` 这类 Windows 文件路径现在会被明确拒绝；如果你要访问记忆，请写成 `core://...`，不要把本机磁盘路径传进 MCP 工具。
+
 **常用域（Domain）：**
 
 - `core` — 核心记忆（人格、偏好、关键事实）

@@ -45,6 +45,12 @@ const compareLocaleTrees = (left, right, path = 'translation') => {
   }
 
   if (!isPlainObject(left) || !isPlainObject(right)) {
+    if (typeof left === 'string' && left.trim() === '') {
+      differences.push(`${path}: en locale must not be empty`);
+    }
+    if (typeof right === 'string' && right.trim() === '') {
+      differences.push(`${path}: zh-CN locale must not be empty`);
+    }
     return differences;
   }
 

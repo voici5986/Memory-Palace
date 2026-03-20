@@ -469,6 +469,367 @@ function Assert-ProfileExternalSettingsReady {
     }
 }
 
+function Get-ResolvedEnvValue {
+    param(
+        [string]$EnvFile,
+        [string]$Key,
+        [string]$DefaultValue = ''
+    )
+
+    $runtimeValue = [System.Environment]::GetEnvironmentVariable($Key)
+    if (-not [string]::IsNullOrWhiteSpace($runtimeValue)) {
+        return $runtimeValue
+    }
+
+    $fileValue = Get-EnvValueFromFile -FilePath $EnvFile -Key $Key
+    if (-not [string]::IsNullOrWhiteSpace($fileValue)) {
+        return $fileValue
+    }
+
+    return $DefaultValue
+}
+
+function Get-ComposeConfigText {
+    param(
+        [string]$ComposeProjectName = '',
+        [string]$EnvFile = ''
+    )
+
+    $previousComposeProjectName = $env:COMPOSE_PROJECT_NAME
+    $effectiveComposeArgs = @()
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($ComposeProjectName)) {
+            $env:COMPOSE_PROJECT_NAME = $ComposeProjectName
+        }
+        if (-not [string]::IsNullOrWhiteSpace($EnvFile)) {
+            $effectiveComposeArgs += @('--env-file', $EnvFile)
+        }
+        $effectiveComposeArgs += @('-f', 'docker-compose.yml', 'config')
+
+        if ($script:UseComposePlugin) {
+            $composeOutput = & docker compose @effectiveComposeArgs 2>&1
+        }
+        else {
+            $composeOutput = & docker-compose @effectiveComposeArgs 2>&1
+        }
+    }
+    finally {
+        if ([string]::IsNullOrWhiteSpace($previousComposeProjectName)) {
+            Remove-Item Env:COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:COMPOSE_PROJECT_NAME = $previousComposeProjectName
+        }
+    }
+
+    $detail = ($composeOutput | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker compose config failed: $($effectiveComposeArgs -join ' ')`n$($detail.Trim())"
+    }
+
+    return $detail
+}
+
+function Normalize-ComposeScalar {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ''
+    }
+
+    return $Value.Trim().Trim([char[]]@([char]39, [char]34))
+}
+
+function Get-BindSourceFromVolumeShorthand {
+    param([string]$RawEntry)
+
+    if ([string]::IsNullOrWhiteSpace($RawEntry)) {
+        return ''
+    }
+
+    $candidate = $RawEntry.Trim()
+    foreach ($targetMarker in @(':/app/data:', ':/app/data')) {
+        $markerIndex = $candidate.LastIndexOf($targetMarker, [System.StringComparison]::Ordinal)
+        if ($markerIndex -gt 0) {
+            return $candidate.Substring(0, $markerIndex)
+        }
+    }
+
+    return ''
+}
+
+function Get-BackendDataBindMountSourcesFromComposeConfig {
+    param(
+        [string]$ComposeProjectName = '',
+        [string]$EnvFile = ''
+    )
+
+    $configText = Get-ComposeConfigText -ComposeProjectName $ComposeProjectName -EnvFile $EnvFile
+    $lines = $configText -split "`r?`n"
+    $sources = New-Object System.Collections.Generic.List[string]
+    $inBackend = $false
+    $inVolumes = $false
+    $entryType = ''
+    $entrySource = ''
+    $entryTarget = ''
+
+    foreach ($line in $lines) {
+        if (-not $inBackend) {
+            if ($line -match '^\s{2}backend:\s*$') {
+                $inBackend = $true
+            }
+            continue
+        }
+
+        if ($line -match '^\s{2}[A-Za-z0-9_-]+:\s*$') {
+            if (
+                $entryTarget -eq '/app/data' -and
+                $entryType -eq 'bind' -and
+                -not [string]::IsNullOrWhiteSpace($entrySource)
+            ) {
+                [void]$sources.Add($entrySource)
+            }
+            break
+        }
+
+        if (-not $inVolumes) {
+            if ($line -match '^\s{4}volumes:\s*$') {
+                $inVolumes = $true
+            }
+            continue
+        }
+
+        if ($line -match '^\s{4}[A-Za-z0-9_-]+:\s*$') {
+            if (
+                $entryTarget -eq '/app/data' -and
+                $entryType -eq 'bind' -and
+                -not [string]::IsNullOrWhiteSpace($entrySource)
+            ) {
+                [void]$sources.Add($entrySource)
+            }
+            $entryType = ''
+            $entrySource = ''
+            $entryTarget = ''
+            $inVolumes = $false
+            continue
+        }
+
+        if ($line -match '^\s{6}-\s*(.+?)\s*$') {
+            if (
+                $entryTarget -eq '/app/data' -and
+                $entryType -eq 'bind' -and
+                -not [string]::IsNullOrWhiteSpace($entrySource)
+            ) {
+                [void]$sources.Add($entrySource)
+            }
+            $entryType = ''
+            $entrySource = ''
+            $entryTarget = ''
+            $volumeValue = Normalize-ComposeScalar -Value $Matches[1]
+            if ($volumeValue -match '^type:\s*(.+?)\s*$') {
+                $entryType = (Normalize-ComposeScalar -Value $Matches[1]).ToLowerInvariant()
+            }
+            else {
+                $bindSource = Get-BindSourceFromVolumeShorthand -RawEntry $volumeValue
+                if (-not [string]::IsNullOrWhiteSpace($bindSource)) {
+                    $entryType = 'bind'
+                    $entrySource = Normalize-ComposeScalar -Value $bindSource
+                    $entryTarget = '/app/data'
+                }
+            }
+            continue
+        }
+
+        if ($line -match '^\s{8}type:\s*(.+?)\s*$') {
+            $entryType = (Normalize-ComposeScalar -Value $Matches[1]).ToLowerInvariant()
+            continue
+        }
+
+        if ($line -match '^\s{8}source:\s*(.+?)\s*$') {
+            $entrySource = Normalize-ComposeScalar -Value $Matches[1]
+            continue
+        }
+
+        if ($line -match '^\s{8}target:\s*(.+?)\s*$') {
+            $entryTarget = Normalize-ComposeScalar -Value $Matches[1]
+            continue
+        }
+    }
+
+    if (
+        $entryTarget -eq '/app/data' -and
+        $entryType -eq 'bind' -and
+        -not [string]::IsNullOrWhiteSpace($entrySource)
+    ) {
+        [void]$sources.Add($entrySource)
+    }
+    return $sources
+}
+
+function Resolve-ExistingPathForFilesystemProbe {
+    param([string]$PathValue)
+
+    $candidate = Normalize-ComposeScalar -Value $PathValue
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        return ''
+    }
+
+    $candidate = [System.Environment]::ExpandEnvironmentVariables($candidate)
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $candidate))
+    }
+
+    while (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+
+        $parent = Split-Path -Parent $candidate
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $candidate) {
+            break
+        }
+        $candidate = $parent
+    }
+
+    return ''
+}
+
+function Get-FilesystemProbeSignal {
+    param([string]$PathValue)
+
+    $normalizedPath = Normalize-ComposeScalar -Value $PathValue
+    if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+        return ''
+    }
+
+    $normalizedPath = [System.Environment]::ExpandEnvironmentVariables($normalizedPath)
+    if ($normalizedPath -match '^(\\\\|//)') {
+        return 'unc'
+    }
+
+    $probePath = Resolve-ExistingPathForFilesystemProbe -PathValue $normalizedPath
+    if ([string]::IsNullOrWhiteSpace($probePath)) {
+        return ''
+    }
+
+    $isWindowsHost = $false
+    if ($PSVersionTable.PSVersion.Major -lt 6 -or $env:OS -eq 'Windows_NT') {
+        $isWindowsHost = $true
+    }
+
+    if ($isWindowsHost) {
+        try {
+            $root = [System.IO.Path]::GetPathRoot($probePath)
+            if (-not [string]::IsNullOrWhiteSpace($root)) {
+                $driveInfo = [System.IO.DriveInfo]::new($root)
+                if ($driveInfo.DriveType -eq [System.IO.DriveType]::Network) {
+                    return 'network'
+                }
+            }
+        }
+        catch {
+        }
+
+        if ($probePath -match '^([A-Za-z]):') {
+            $driveName = $Matches[1]
+            $psDrive = Get-PSDrive -Name $driveName -PSProvider FileSystem -ErrorAction SilentlyContinue
+            if ($psDrive -and -not [string]::IsNullOrWhiteSpace($psDrive.DisplayRoot)) {
+                return 'network'
+            }
+        }
+
+        return ''
+    }
+
+    try {
+        $bsdStat = & stat -f %T $probePath 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($bsdStat)) {
+            return ($bsdStat | Out-String).Trim()
+        }
+    }
+    catch {
+    }
+
+    try {
+        $gnuStat = & stat -f -L -c %T $probePath 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gnuStat)) {
+            return ($gnuStat | Out-String).Trim()
+        }
+    }
+    catch {
+    }
+
+    return ''
+}
+
+function Test-NetworkFilesystemSignal {
+    param(
+        [string]$SourcePath,
+        [string]$FilesystemSignal
+    )
+
+    $normalizedPath = Normalize-ComposeScalar -Value $SourcePath
+    if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+        return $false
+    }
+
+    if ($normalizedPath -match '^(\\\\|//)') {
+        return $true
+    }
+
+    if ($normalizedPath -match '(^|[\\/])(nfs|cifs|smb|smbfs)([\\/]|$)') {
+        return $true
+    }
+
+    $normalizedSignal = Normalize-ComposeScalar -Value $FilesystemSignal
+    if ([string]::IsNullOrWhiteSpace($normalizedSignal)) {
+        return $false
+    }
+
+    $normalizedSignal = $normalizedSignal.ToLowerInvariant()
+    if ($normalizedSignal -eq 'network') {
+        return $true
+    }
+
+    return ($normalizedSignal -match '(?<![a-z])(nfs|nfs4|cifs|smb|smbfs)(?![a-z])')
+}
+
+function Assert-BackendDataBindMountWalSafety {
+    param(
+        [string]$ComposeProjectName,
+        [string]$EnvFile
+    )
+
+    $walEnabledRaw = Get-ResolvedEnvValue -EnvFile $EnvFile -Key 'MEMORY_PALACE_DOCKER_WAL_ENABLED' -DefaultValue 'true'
+    $journalModeRaw = Get-ResolvedEnvValue -EnvFile $EnvFile -Key 'MEMORY_PALACE_DOCKER_JOURNAL_MODE' -DefaultValue 'wal'
+    $walEnabled = Test-TruthyValue -Value $walEnabledRaw
+    $requestedJournalMode = if ([string]::IsNullOrWhiteSpace($journalModeRaw)) {
+        'wal'
+    }
+    else {
+        $journalModeRaw.Trim().ToLowerInvariant()
+    }
+    $effectiveJournalMode = if ($walEnabled -and $requestedJournalMode -eq 'wal') {
+        'wal'
+    }
+    else {
+        'delete'
+    }
+
+    if ($effectiveJournalMode -ne 'wal') {
+        return
+    }
+
+    $bindSources = Get-BackendDataBindMountSourcesFromComposeConfig -ComposeProjectName $ComposeProjectName -EnvFile $EnvFile
+    foreach ($bindSource in $bindSources) {
+        $filesystemSignal = Get-FilesystemProbeSignal -PathValue $bindSource
+        if (Test-NetworkFilesystemSignal -SourcePath $bindSource -FilesystemSignal $filesystemSignal) {
+            throw "[compose-preflight] Refusing to start Memory Palace with WAL enabled on backend /app/data bind mount '$bindSource' (signal=$filesystemSignal). Use a Docker named volume instead, or disable WAL with MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete before retrying."
+        }
+    }
+}
+
 function Invoke-Compose {
     param(
         [string[]]$ComposeArgs,
@@ -851,6 +1212,7 @@ try {
     $env:NOCTURNE_BACKEND_PORT = "$BackendPort"
     $env:NOCTURNE_DATA_VOLUME = "$dataVolume"
     $env:NOCTURNE_SNAPSHOTS_VOLUME = "$snapshotsVolume"
+    Assert-BackendDataBindMountWalSafety -ComposeProjectName $composeProjectName -EnvFile $envFile
 
     try {
         Invoke-Compose -ComposeArgs @('-f', 'docker-compose.yml', 'down', '--remove-orphans') -ComposeProjectName $composeProjectName -EnvFile $envFile

@@ -5,6 +5,8 @@ services:
     env_file:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     environment:
+      # Docker defaults to WAL for the repository's named-volume deployment path.
+      # If you replace these volumes with NFS/CIFS bind mounts, override both values.
       RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}
       RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}
     volumes:

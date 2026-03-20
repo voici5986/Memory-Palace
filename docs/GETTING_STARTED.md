@@ -110,6 +110,8 @@ bash scripts/apply_profile.sh macos b
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
+> 如果你是在 Linux / WSL 环境里用 PowerShell 跑 `apply_profile.ps1`，`-Platform linux` 现在也已经可用；它会映射到和 `macos` 相同的本地模板。原生 Windows 仍然继续使用 `-Platform windows`。
+>
 > 另外，`profile c/d` 现在也会在脚本阶段直接拦截未替换的 endpoint / key / model 占位值；如果你还留着示例里的 `PORT`、`replace-with-your-key`、`your-embedding-model-id` 这类占位内容，脚本会先报错，而不是等到后面启动时再用一份明显错误的配置继续往下跑。
 >
 > 但要注意：**macOS / Windows 本地生成的 profile-b `.env` 不会自动补 `MCP_API_KEY`**。如果你接下来就要打开 Dashboard，或者直接调 `/browse` / `/review` / `/maintenance`、`/sse`、`/messages`，请再自行补 `MCP_API_KEY`，或仅在本机回环调试时设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`。只有 `docker` 平台的 profile 脚本会在 key 为空时自动生成一把本地 key。
@@ -337,6 +339,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 当前 Docker Compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，才把 frontend 视为真正 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
+> WAL 风险边界也请一起记住：仓库默认只把“Docker **named volume** + WAL”当成受支持路径。如果你把 backend 的 `/app/data` 改成 NFS/CIFS/SMB 或其它网络文件系统 bind mount，就必须显式切回 `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` 和 `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`。当前 `docker_one_click.sh/.ps1` 已经会在 `docker compose up` 前做这层 preflight，并在发现高风险组合时直接拒绝启动；但手动 `docker compose up` / `docker compose -f docker-compose.ghcr.yml up` 不会代你做这一步。
+>
 > 当前 Docker 前端还会对 `/index.html` 返回 `Cache-Control: no-store, no-cache, must-revalidate`，尽量减少“前端已经更新，但浏览器还拿着旧入口页面”的情况。如果你刚升级完镜像仍看到明显旧页面，先确认容器已经是新版本，再手动刷新一次页面；只有在你额外接了自己的反向代理或企业缓存层时，才需要继续检查这些中间层是否改写了缓存头。
 >
 > Docker 默认还会分别持久化两类运行期数据：数据库卷会按 compose project 隔离为 `<compose-project>_data`（容器内 `/app/data`），Review snapshots 会隔离为 `<compose-project>_snapshots`（容器内 `/app/snapshots`）。如果你确实要复用旧的共享卷，请显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`。如果你执行 `docker compose down -v` 或手动删除这些卷，这两部分都会一起清空。
@@ -353,8 +357,9 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 2. 默认不读取当前进程环境变量覆盖模板策略键（避免隐式改档）；仅在显式开启注入开关时注入 API 地址/密钥/模型字段，以及 `RETRIEVAL_EMBEDDING_DIM` 这类显式检索参数
 > 3. 检测端口占用并自动寻找可用端口
 > 4. 解析并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，Review snapshots `<compose-project>_snapshots`）；只有显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` 时才复用旧卷
-> 5. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖
-> 6. 通过 `docker compose` 构建并启动容器
+> 5. 若 backend `/app/data` 被改成 NFS/CIFS/SMB 等网络文件系统 bind mount，且本次配置仍会启用 WAL，则在启动前直接 fail-fast
+> 6. 对同一 checkout 的并发部署加锁，避免多次 `docker_one_click` 互相覆盖
+> 7. 通过 `docker compose` 构建并启动容器
 
 默认访问地址：
 
