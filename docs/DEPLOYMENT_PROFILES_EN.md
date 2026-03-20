@@ -424,11 +424,11 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> Script Logic: Copies `.env.example` to the generated env file, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. For local platforms, the default target remains `.env`; if you run the `docker` variant without an explicit target, the default target is now `.env.docker`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
+> Script Logic: Copies `.env.example` to the generated env file, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. For local platforms, the default target remains `.env`; if you run the `docker` variant without an explicit target, the default target is now `.env.docker`. On the shell path, `apply_profile.sh` also rewrites the common local `DATABASE_URL` placeholder for the current checkout, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates env keys after generation to prevent inconsistent behavior across different parsers for keys that appear multiple times.
 >
-> Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.env` files to copy by hand. For example, the macOS templates intentionally keep a placeholder `DATABASE_URL` first, then let `apply_profile.*` rewrite it for the current checkout. If the generated result still leaves placeholder segments such as `<...>` or `__REPLACE_ME__` inside `DATABASE_URL`, the script/backend now fail closed instead of continuing with a broken sqlite path. In particular, do not copy Docker template values like `sqlite+aiosqlite:////app/data/...`, or any `/data/...`-style container-only sqlite path, into a local `.env`; that is a container path, and the repo-local stdio wrapper treats it as a misconfiguration and refuses to start.
+> Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.env` files to copy by hand. For example, the local shell templates intentionally keep a placeholder `DATABASE_URL` first, then let `apply_profile.*` rewrite it for the current checkout. If the generated result still leaves placeholder segments such as `<...>` or `__REPLACE_ME__` inside `DATABASE_URL`, the script/backend now fail closed instead of continuing with a broken sqlite path. In particular, do not copy Docker template values like `sqlite+aiosqlite:////app/data/...`, or any `/data/...`-style container-only sqlite path, into a local `.env`; that is a container path, and the repo-local stdio wrapper treats it as a misconfiguration and refuses to start.
 >
 > If you are just running the repository manually for the first time, Profile B is the safest start; switch to Profile C only when the embedding / reranker links are available.
 
@@ -603,11 +603,15 @@ curl -fsS http://127.0.0.1:18000/health
 ```bash
 curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping"}'
+  -H "Authorization: Bearer <RETRIEVAL_EMBEDDING_API_KEY>" \
+  -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping","dimensions":<RETRIEVAL_EMBEDDING_DIM>}'
 curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <RETRIEVAL_RERANKER_API_KEY>" \
   -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
 ```
+
+> If your local service does not require an API key, drop the `Authorization` header. If the embedding provider rejects `dimensions`, the runtime retries once without that field, but the final vector size still needs to match `RETRIEVAL_EMBEDDING_DIM`.
 
 3.  If troubleshooting only on the current machine, you can temporarily change to `RETRIEVAL_EMBEDDING_BACKEND=api` and directly configure embedding / reranker / llm; restore the target environment's `router` config and re-verify once before going live.
 

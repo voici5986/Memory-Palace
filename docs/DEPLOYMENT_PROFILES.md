@@ -420,7 +420,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> 脚本执行逻辑：复制 `.env.example` 为生成后的环境文件，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。对本地平台，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...` 做预览。
+> 脚本执行逻辑：复制 `.env.example` 为生成后的环境文件，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。对本地平台，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 还会按当前 checkout 自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...` 做预览。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
 >
@@ -594,11 +594,15 @@ curl -fsS http://127.0.0.1:18000/health
 ```bash
 curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping"}'
+  -H "Authorization: Bearer <RETRIEVAL_EMBEDDING_API_KEY>" \
+  -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping","dimensions":<RETRIEVAL_EMBEDDING_DIM>}'
 curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <RETRIEVAL_RERANKER_API_KEY>" \
   -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
 ```
+
+> 如果你的本地服务本身不要求 API key，就把 `Authorization` 这一行去掉。若 embedding provider 明确拒绝 `dimensions`，运行时会自动重试一次不带这个字段的旧请求，但最终返回的向量维度仍然要和 `RETRIEVAL_EMBEDDING_DIM` 保持一致。
 
 3. 如果只是当前机器排障，可以临时改成 `RETRIEVAL_EMBEDDING_BACKEND=api` 并分别直配 embedding / reranker / llm；上线前再恢复到目标环境的 `router` 配置并复验一次。
 

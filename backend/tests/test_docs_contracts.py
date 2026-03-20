@@ -22,14 +22,14 @@ def test_getting_started_section_four_numbers_are_unique_and_ordered() -> None:
     ) == ["4.1", "4.2", "4.3", "4.4"]
 
 
-def test_getting_started_notes_macos_and_windows_database_autofill() -> None:
+def test_getting_started_notes_local_shell_database_autofill() -> None:
     zh_text = (PROJECT_ROOT / "docs" / "GETTING_STARTED.md").read_text(encoding="utf-8")
     en_text = (PROJECT_ROOT / "docs" / "GETTING_STARTED_EN.md").read_text(
         encoding="utf-8"
     )
 
-    assert "macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`" in zh_text
-    assert "For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`" in en_text
+    assert "包括 `/Users/...` 和 `/home/...`" in zh_text
+    assert "including `/Users/...` and `/home/...`" in en_text
 
 
 def test_readme_benchmark_reproduction_note_matches_repo_layout() -> None:
@@ -96,6 +96,46 @@ def test_docs_describe_platform_specific_repo_local_mcp_wrappers_and_setup_auto_
     assert "macOS / Linux / Git Bash / WSL：`bash scripts/run_memory_palace_mcp_stdio.sh`" in zh_getting_started
     assert "native Windows: `python backend/mcp_wrapper.py`" in en_getting_started
     assert "macOS / Linux / Git Bash / WSL: `bash scripts/run_memory_palace_mcp_stdio.sh`" in en_getting_started
+
+
+def test_docs_describe_shell_wrapper_utf8_defaults() -> None:
+    readme_en = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
+    troubleshooting_en = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING_EN.md"
+    ).read_text(encoding="utf-8")
+    troubleshooting_zh = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING.md"
+    ).read_text(encoding="utf-8")
+
+    assert "PYTHONIOENCODING=utf-8" in readme_en
+    assert "PYTHONUTF8=1" in readme_en
+    assert "PYTHONIOENCODING=utf-8" in readme_zh
+    assert "PYTHONUTF8=1" in readme_zh
+    assert "PYTHONIOENCODING=utf-8" in troubleshooting_en
+    assert "PYTHONUTF8=1" in troubleshooting_en
+    assert "PYTHONIOENCODING=utf-8" in troubleshooting_zh
+    assert "PYTHONUTF8=1" in troubleshooting_zh
+
+
+def test_docs_keep_direct_api_smoke_examples_aligned_with_auth_and_dimensions() -> None:
+    zh_profiles = (PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES.md").read_text(
+        encoding="utf-8"
+    )
+    en_profiles = (
+        PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES_EN.md"
+    ).read_text(encoding="utf-8")
+    zh_troubleshooting = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING.md"
+    ).read_text(encoding="utf-8")
+    en_troubleshooting = (
+        PROJECT_ROOT / "docs" / "TROUBLESHOOTING_EN.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (zh_profiles, en_profiles, zh_troubleshooting, en_troubleshooting):
+        assert 'Authorization: Bearer <RETRIEVAL_EMBEDDING_API_KEY>' in text
+        assert '"dimensions":<RETRIEVAL_EMBEDDING_DIM>' in text
+        assert 'Authorization: Bearer <RETRIEVAL_RERANKER_API_KEY>' in text
 
 
 def test_docs_keep_wal_network_bind_mount_safety_boundary_consistent() -> None:

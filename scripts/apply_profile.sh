@@ -368,7 +368,7 @@ cp "${base_env}" "${staged_file}"
 chmod 600 "${staged_file}" 2>/dev/null || true
 
 if [[ "${platform}" == "macos" || "${platform}" == "linux" ]]; then
-  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////Users/[^/]+/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${staged_file}"; then
+  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////(Users|home)/[^/]+/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${staged_file}"; then
     db_path="${PROJECT_ROOT}/demo.db"
     set_env_value "${staged_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"
     log_info "[auto-fill] DATABASE_URL set to ${db_path}"

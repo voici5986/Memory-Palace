@@ -115,6 +115,8 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
 真正的问题仍然只是：它是不是容器内路径。
 
+对 shell wrapper 这条路径（`macOS / Linux / Git Bash / WSL`）来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 默认编码不是 UTF-8，本地 stdio 也更不容易因为编码问题翻车。
+
 **处理方式**：
 
 1. 打开仓库根目录 `.env`
@@ -518,11 +520,15 @@ cd backend
    # 用实际调用端点做健康检查更准确：
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
      -H "Content-Type: application/json" \
-     -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping"}'
+     -H "Authorization: Bearer <RETRIEVAL_EMBEDDING_API_KEY>" \
+     -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping","dimensions":<RETRIEVAL_EMBEDDING_DIM>}'
    curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
      -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <RETRIEVAL_RERANKER_API_KEY>" \
      -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
    ```
+
+   > 如果你的本地服务本身不要求 API key，就把 `Authorization` 这一行去掉。若 embedding provider 明确拒绝 `dimensions`，运行时会自动重试一次不带这个字段的旧请求，但最终返回的向量维度仍然要和 `RETRIEVAL_EMBEDDING_DIM` 保持一致。
 
    > **排障顺序建议**：
    > - 先确认你当前使用的是 `router` 方案，还是分别直配 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。

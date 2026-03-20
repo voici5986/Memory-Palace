@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。对本地 `macos` / `windows`，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
+> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 也会自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
@@ -342,6 +342,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 
 > 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当前注入链路会一起带上显式的 `RETRIEVAL_EMBEDDING_*`（包括 `RETRIEVAL_EMBEDDING_DIM`）、`RETRIEVAL_RERANKER_*` 和可选的 `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。
 >
+> 如果你只是想先做一轮快速 smoke check，先直接打真实的 `/embeddings` 和 `/rerank` 端点，带上你准备实际使用的 model 和 key，通常会比一上来先跑完整 backend 更快。
+>
 > 但要注意：`--runtime-env-mode` / `--runtime-env-file` **不是** `docker_one_click.sh/.ps1` 的参数。如果你把这两个参数直接传给一键脚本，命令会报 `Unknown argument`。公开仓用户做 `profile c/d` 本地联调时，继续使用上面这条显式注入命令即可；如果你还要做更严格的发布复验，请回到你实际部署时会使用的 `.env` / router 配置，再单独跑那条验证路径。
 
 > `docker_one_click.sh/.ps1` 默认会为**每次运行**生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定文件，而不是固定共享 `.env.docker`。
@@ -559,6 +561,8 @@ python mcp_server.py
 > - macOS / Linux / Git Bash / WSL：`bash scripts/run_memory_palace_mcp_stdio.sh`
 >
 > 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
+>
+> 对 shell wrapper 这条路径来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 不是 UTF-8 默认环境，本地 stdio 也更不容易因为编码问题出错。
 
 ### 6.2 SSE 模式
 

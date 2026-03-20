@@ -115,6 +115,8 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
 The real problem is still only whether that path points into the container.
 
+On the shell-wrapper path (`macOS / Linux / Git Bash / WSL`), `run_memory_palace_mcp_stdio.sh` also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before starting Python. In plain language: a non-UTF-8 locale is less likely to break local stdio traffic.
+
 **How to fix it**:
 
 1. Open the repository-root `.env`
@@ -520,11 +522,15 @@ If this command can normally output the version number, starting `mcp_server.py`
    # It is more accurate to do a health check using the actual call endpoint:
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
      -H "Content-Type: application/json" \
-     -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping"}'
+     -H "Authorization: Bearer <RETRIEVAL_EMBEDDING_API_KEY>" \
+     -d '{"model":"<RETRIEVAL_EMBEDDING_MODEL>","input":"ping","dimensions":<RETRIEVAL_EMBEDDING_DIM>}'
    curl -fsS -X POST <RETRIEVAL_RERANKER_API_BASE>/rerank \
      -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <RETRIEVAL_RERANKER_API_KEY>" \
      -d '{"model":"<RETRIEVAL_RERANKER_MODEL>","query":"ping","documents":["pong"]}'
    ```
+
+   > If your local service does not require an API key, drop the `Authorization` header. If the embedding provider rejects `dimensions`, the runtime retries once without that field, but the final vector size still needs to match `RETRIEVAL_EMBEDDING_DIM`.
 
    > **Suggested troubleshooting order**:
    > - First confirm if you are currently using the `router` solution, or directly configuring `RETRIEVAL_EMBEDDING_*`, `RETRIEVAL_RERANKER_*`, `WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` separately.

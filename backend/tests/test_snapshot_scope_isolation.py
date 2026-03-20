@@ -1,6 +1,7 @@
 import logging
 import json
 import threading
+import ctypes as stdlib_ctypes
 from pathlib import Path
 
 import pytest
@@ -206,18 +207,23 @@ def test_snapshot_manager_windows_pid_check_uses_win32_api(
             return 1
 
     fake_kernel32 = _FakeKernel32()
+    class _FakeCtypes:
+        c_ulong = stdlib_ctypes.c_ulong
+        byref = staticmethod(stdlib_ctypes.byref)
+
+        @staticmethod
+        def WinDLL(*_args, **_kwargs):
+            return fake_kernel32
+
+        @staticmethod
+        def get_last_error():
+            return 0
+
     monkeypatch.setattr(snapshot_module.os, "name", "nt", raising=False)
     monkeypatch.setattr(
-        snapshot_module.ctypes,
-        "WinDLL",
-        lambda *_args, **_kwargs: fake_kernel32,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        snapshot_module.ctypes,
-        "get_last_error",
-        lambda: 0,
-        raising=False,
+        snapshot_module,
+        "_get_ctypes_module",
+        lambda: _FakeCtypes,
     )
     monkeypatch.setattr(
         snapshot_module.os,
@@ -230,6 +236,30 @@ def test_snapshot_manager_windows_pid_check_uses_win32_api(
 
     assert SnapshotManager._pid_is_alive(4242) is True
     assert fake_kernel32.closed_handles == [99]
+
+
+def test_snapshot_manager_sanitize_resource_id_uses_sha256_hash_suffix(
+    monkeypatch,
+) -> None:
+    class _FakeSha256:
+        def hexdigest(self) -> str:
+            return "deadbeef" * 8
+
+    def _fake_sha256(payload: bytes) -> _FakeSha256:
+        assert payload == b"core://a/b"
+        return _FakeSha256()
+
+    monkeypatch.setattr(
+        snapshot_module.hashlib,
+        "md5",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("md5 should not be used")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(snapshot_module.hashlib, "sha256", _fake_sha256)
+
+    assert SnapshotManager._sanitize_resource_id("core://a/b") == "core__a_b_deadbeef"
 
 
 def test_snapshot_manager_maps_file_lock_timeout_to_timeout_error(

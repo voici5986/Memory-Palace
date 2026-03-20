@@ -106,7 +106,7 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` files are input templates for the scripts, not the final `.env` files we recommend you copy directly. For the user path, keep using `apply_profile.sh/.ps1`; it is the safer path because it also fills paths automatically and deduplicates repeated keys.
 
-> The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, the default target remains `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
+> The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. Local shell runs (`macos` / `linux`) and native Windows still default to `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. On the shell path, `apply_profile.sh` also automatically rewrites the common local `DATABASE_URL` placeholder, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
 >
@@ -343,6 +343,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 
 > If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. The current injection path also carries explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_*`, and optional `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` values. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template.
 >
+> If you only want a fast smoke check first, hit the real `/embeddings` and `/rerank` endpoints with the same model and key you plan to use. That is usually quicker than starting from a full backend run.
+>
 > Note that `--runtime-env-mode` / `--runtime-env-file` are **not** arguments of `docker_one_click.sh/.ps1`. If you pass them directly to the one-click script, the command fails with `Unknown argument`. For public-repo `profile c/d` local debugging, keep using the explicit injection switches shown above. If you also need a stricter release-style verification, switch back to the actual `.env` / router configuration you plan to deploy and re-run that validation path separately.
 
 > `docker_one_click.sh/.ps1` defaults to generating an independent temporary Docker env file for **each run**, passed to `docker compose` via `MEMORY_PALACE_DOCKER_ENV_FILE`; it only reuses a specific file if that environment variable is explicitly set, rather than sharing a fixed `.env.docker`.
@@ -560,6 +562,8 @@ python mcp_server.py
 > - macOS / Linux / Git Bash / WSL: `bash scripts/run_memory_palace_mcp_stdio.sh`
 >
 > These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db` or a `/data/...` variant, they refuse to start on purpose. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
+>
+> On the shell-wrapper path, `run_memory_palace_mcp_stdio.sh` also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before it starts Python. In plain language: a non-UTF-8 locale is less likely to break local stdio traffic.
 
 ### 6.2 SSE Mode
 

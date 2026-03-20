@@ -27,7 +27,6 @@ import shutil
 import stat
 import tempfile
 import time
-import ctypes
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -46,6 +45,12 @@ _SQLITE_URL_PREFIXES = ("sqlite+aiosqlite:///", "sqlite:///")
 _SESSION_LOCK_WAIT_SECONDS = 5.0
 logger = logging.getLogger(__name__)
 _SCOPE_MARKER_FILENAME = ".scope.json"
+
+
+def _get_ctypes_module():
+    import ctypes
+
+    return ctypes
 
 
 def _resolve_current_database_scope() -> Dict[str, str]:
@@ -182,7 +187,9 @@ class SnapshotManager:
         """
         # Calculate hash of the ORIGINAL resource_id for uniqueness
         # This prevents "core://a/b" and "core://a_b" from colliding regardless of sanitization
-        id_hash = hashlib.md5(resource_id.encode()).hexdigest()[:8]
+        id_hash = hashlib.sha256(
+            resource_id.encode("utf-8", errors="ignore")
+        ).hexdigest()[:8]
 
         # Replace problematic characters
         # 1. Handle protocol separator specifically for better readability
@@ -234,6 +241,7 @@ class SnapshotManager:
         if pid <= 0:
             return False
         if os.name == "nt":
+            ctypes = _get_ctypes_module()
             process_query_limited_information = 0x1000
             error_access_denied = 5
             still_active = 259

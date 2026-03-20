@@ -181,6 +181,42 @@ def test_apply_profile_shell_linux_keeps_local_template_selection_but_writes_hos
     assert database_url == f"sqlite+aiosqlite:///{expected_db_path}"
 
 
+def test_apply_profile_shell_linux_rewrites_home_style_database_url_placeholder(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////home/tester/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "linux", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    database_url = dotenv_values(project_root / ".env.generated").get("DATABASE_URL")
+    assert isinstance(database_url, str)
+    expected_db_path = (project_root / "demo.db").as_posix()
+    assert database_url == f"sqlite+aiosqlite:///{expected_db_path}"
+
+
 def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
     tmp_path: Path,
 ) -> None:
@@ -756,6 +792,38 @@ def test_repo_local_stdio_wrapper_normalizes_double_slash_default_database_path(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "sqlite+aiosqlite:////tmp/memory-palace/demo.db"
+
+
+def test_repo_local_stdio_wrapper_exports_utf8_python_defaults(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    _copy_script(PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh", script_path)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.write_text(
+        "#!/usr/bin/env bash\nprintf '%s|%s' \"${PYTHONIOENCODING:-missing}\" \"${PYTHONUTF8:-missing}\"\n",
+        encoding="utf-8",
+    )
+    backend_python.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"DATABASE_URL", "PYTHONIOENCODING", "PYTHONUTF8"}
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "utf-8|1"
 
 
 def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -> None:

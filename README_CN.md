@@ -57,7 +57,7 @@
 - **审查回滚现在更保守了**：如果同一个 URI 已经在另一条 review session 里留下了更晚的内容快照，旧快照的 rollback 会直接拒绝，不再默默把较新的改动回滚掉。
 - **高干扰检索在当前基准集里表现更稳**：对照旧版本时，`s8,d200` 与 `s100,d200` 这类更容易被干扰的场景，C/D 档位显示出更好的召回。
 - **前端语言切换更直接了**：前端现在会先恢复浏览器里已保存的语言；如果还没有保存值，常见中文浏览器语言会自动归并到 `zh-CN`，其他首次访问场景则回退到英文。右上角仍然可以一键中英切换，浏览器也会记住你的选择。
-- **本地 operator 路径也更稳了**：repo-local stdio wrapper 现在会继续复用 `.env` 里的 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，stdio 转发也改成了分块而不是逐字节，Observability 搜索和活力清理确认这类长请求还会给浏览器更长的等待时间。
+- **本地 operator 路径也更稳了**：repo-local stdio wrapper 现在会继续复用 `.env` 里的 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，stdio 转发也改成了分块而不是逐字节，shell wrapper 这条路径还会先补上 UTF-8 默认编码，Observability 搜索和活力清理确认这类长请求也会给浏览器更长的等待时间。
 - **一些容易卡住的小边界也补齐了**：搜索结果最后一轮会优先批量校验当前 path 状态，Windows 风格宿主如果误把 `backend/mcp_wrapper.py` 跑在 `Git Bash / MSYS / Cygwin` 下也更容易选中正确的 `.venv` 解释器，Docker 前端代理 key 里像制表符这类 ASCII 控制字符现在也会被直接拦下。
 - **公开口径更保守了**：文档现在已经补上原生 Windows 的 repo-local `python-wrapper` 路径，但你自己的远程环境 / GUI 宿主环境仍建议按目标环境再复核一次。
 - **客户端边界写清楚了**：`Claude/Codex/OpenCode/Gemini` 走文档里的 CLI 路径；`Cursor / Windsurf / VSCode-host / Antigravity` 走 `AGENTS.md + MCP 配置片段`；`Gemini live` 和 GUI 宿主验证仍保留边界说明。
@@ -397,13 +397,13 @@ bash scripts/apply_profile.sh macos b
 .\scripts\apply_profile.ps1 -Platform windows -Profile b
 ```
 
-脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的环境文件**。对本地 `macos` / `windows`，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，`apply_profile.sh/.ps1` 现在会默认写到 `.env.docker`。
+脚本会根据平台从 `deploy/profiles/{macos,windows,docker}/profile-b.env` 模板生成一份 **基于档位 B 的环境文件**。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，`apply_profile.sh/.ps1` 现在会默认写到 `.env.docker`。
 
 把 `deploy/profiles/*/*.env` 理解成 **Profile 模板输入**，不要直接手抄某个模板文件当成最终 `.env`。有些模板值会先保留占位路径，再由 `apply_profile.*` 按当前仓库位置自动改写。
 
 对于 `profile c/d`，`apply_profile.sh/.ps1` 现在也会对未替换的 endpoint / key / model 占位值直接 fail-closed。简单说：先把示例里的 `PORT`、key 和 model id 换成真实值，再继续走 Docker 启动或本地 C/D 调试。
 
-`DATABASE_URL` 现在也走同样的保护逻辑。本地模板里的常见占位路径会先由 `apply_profile.*` 按当前 checkout 自动改写；如果生成结果里还残留 `<...>` 或 `__REPLACE_ME__` 这类占位段，脚本或后端都会直接拦下，不再静默带着一条坏的 sqlite 路径继续往后跑。
+`DATABASE_URL` 现在也走同样的保护逻辑。对本地 shell 路径，`apply_profile.sh` 会先按当前 checkout 自动改写常见占位路径，包括 `/Users/...` 和 `/home/...`；如果生成结果里还残留 `<...>` 或 `__REPLACE_ME__` 这类占位段，脚本或后端都会直接拦下，不再静默带着一条坏的 sqlite 路径继续往后跑。
 
 在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。Windows PowerShell 现在也支持同样的预览方式：`.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`。如果你只是想先看脚本用法，可以直接运行 `.\scripts\apply_profile.ps1 -Help`。
 
@@ -535,6 +535,8 @@ python run_sse.py
 >
 > 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。repo-local `stdio` wrapper 现在也不再只依赖 `python-dotenv` 才能读取 `.env`；如果本地启动仍然失败，更常见的原因已经变成 `.env` 内容或路径本身有问题，而不是少装了这个额外包。
 >
+> 对 shell wrapper 这条路径（`macOS / Linux / Git Bash / WSL`）来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：就算当前 shell 默认编码不太友好，本地 stdio 也更不容易因为编码问题变成乱码或直接报错。
+>
 > 在原生 Windows 或其它更依赖 wrapper 的宿主路径里，repo-local stdio launcher 现在也会按块转发 stdin/stdout，而不是逐字节转发。说人话就是：遇到更大的 MCP 响应时，体感会比以前顺一些，但原来的 CRLF 清理规则不变。
 >
 > 再补一个这轮实测过的细节：如果某个客户端 / IDE host 把 `DATABASE_URL` 传成了空字符串，这两条 wrapper 也会把它当成“没设置”，继续回退到当前仓库 `.env` 里的有效值；不会因为“变量名存在但值为空”就把 repo-local 启动误判成缺配置。
@@ -654,6 +656,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 >
 > 如果你的 provider 对 Embedding / Reranker 使用的是带命名空间的 model id（例如 `Qwen/...`），请填写你自己的 provider 实际 model id，不要把示例值原样照抄到别的环境。
 > 如果你本地用的是 Ollama 这类 OpenAI-compatible 入口，也优先走 `/v1/embeddings` 这条路径；只有在模型本身确实返回 1024 维向量时，再显式设置 `dimensions=1024`。
+> 如果你只是想先做一轮本地 smoke test，通常先直接打真实的 `/embeddings` 和 `/rerank` 端点，比一上来先怀疑后端更快。具体 `curl` 例子可以直接看排障文档。
 > 如果你后面要用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，这些示例 model id 也会被当成未解析占位符；在换成真实值之前，脚本会直接在 `docker compose` 前 fail-closed。
 >
 > **推荐口径（重要）**：
