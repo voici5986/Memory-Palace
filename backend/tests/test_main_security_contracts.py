@@ -114,7 +114,20 @@ def test_health_returns_detailed_payload_for_authenticated_remote_request(
         _ = ensure_runtime_started
         return None
 
+    class _FakeClient:
+        async def get_index_status(self):
+            return {"index_available": True, "degraded": False}
+
+    async def _lane_status():
+        return {"pending": 0}
+
+    async def _worker_status():
+        return {"running": True}
+
     module.initialize_backend_runtime = _noop_initialize_backend_runtime
+    monkeypatch.setattr(module, "get_sqlite_client", lambda: _FakeClient())
+    monkeypatch.setattr(module.runtime_state.write_lanes, "status", _lane_status)
+    monkeypatch.setattr(module.runtime_state.index_worker, "status", _worker_status)
 
     with TestClient(
         module.app,
