@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -233,13 +234,30 @@ def backup_file(path: Path, *, dry_run: bool) -> None:
     shutil.copy2(path, backup_path)
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.tmp.",
+        dir=str(path.parent),
+        text=True,
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
 def write_json_file(path: Path, payload: dict, *, dry_run: bool) -> None:
     print(f"[json] write -> {path}")
     if dry_run:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path, dry_run=dry_run)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def write_text_file(path: Path, content: str, *, dry_run: bool) -> None:
@@ -248,7 +266,103 @@ def write_text_file(path: Path, content: str, *, dry_run: bool) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path, dry_run=dry_run)
-    path.write_text(content, encoding="utf-8")
+    _atomic_write_text(path, content)
+
+
+def _remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    shutil.rmtree(path)
+
+
+def _build_regular_skill_tree(
+    *,
+    target_name: str,
+    source: Path,
+    destination_dir: Path,
+    mode: str,
+) -> None:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    if mode == "symlink":
+        if target_name == "gemini":
+            skill_target = destination_dir / "SKILL.md"
+            skill_target.parent.mkdir(parents=True, exist_ok=True)
+            skill_target.symlink_to(gemini_variant_file(source))
+            return
+        for relative_path in SKILL_RELATIVE_FILES:
+            link_path = destination_dir / relative_path
+            link_path.parent.mkdir(parents=True, exist_ok=True)
+            link_path.symlink_to(source / relative_path)
+        return
+
+    if target_name == "gemini":
+        shutil.copy2(gemini_variant_file(source), destination_dir / "SKILL.md")
+        return
+
+    for relative_path in SKILL_RELATIVE_FILES:
+        source_file = source / relative_path
+        target_file = destination_dir / relative_path
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+
+
+def _install_regular_skill_target_atomically(
+    *,
+    target_name: str,
+    source: Path,
+    destination_root: Path,
+    destination_dir: Path,
+    mode: str,
+    force: bool,
+) -> None:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    if destination_dir.exists() or destination_dir.is_symlink():
+        if not force:
+            raise SystemExit(
+                f"Target already exists: {destination_dir} (use --force to replace it)"
+            )
+
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=f".{SKILL_NAME}.staging.", dir=str(destination_root))
+    )
+    backup_root: Path | None = None
+    backup_path: Path | None = None
+
+    try:
+        _build_regular_skill_tree(
+            target_name=target_name,
+            source=source,
+            destination_dir=staging_dir,
+            mode=mode,
+        )
+
+        if destination_dir.exists() or destination_dir.is_symlink():
+            backup_root = Path(
+                tempfile.mkdtemp(prefix=f".{SKILL_NAME}.backup.", dir=str(destination_root))
+            )
+            backup_path = backup_root / destination_dir.name
+            os.replace(destination_dir, backup_path)
+
+        os.replace(staging_dir, destination_dir)
+        staging_dir = destination_dir
+
+        if backup_root is not None:
+            shutil.rmtree(backup_root)
+            backup_root = None
+
+    except Exception:
+        if backup_path is not None and backup_path.exists() and not destination_dir.exists():
+            os.replace(backup_path, destination_dir)
+        raise
+    finally:
+        if backup_root is not None and backup_root.exists():
+            shutil.rmtree(backup_root)
+        if staging_dir.exists() and staging_dir != destination_dir:
+            _remove_path(staging_dir)
 
 
 def _normalized(value: object) -> str:
@@ -470,43 +584,17 @@ def install_target(
             install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
         return
 
-    destination_root.mkdir(parents=True, exist_ok=True)
-
-    if destination_dir.exists() or destination_dir.is_symlink():
-        if not force:
-            raise SystemExit(
-                f"Target already exists: {destination_dir} (use --force to replace it)"
-            )
-        if destination_dir.is_symlink() or destination_dir.is_file():
-            destination_dir.unlink()
-        else:
-            shutil.rmtree(destination_dir)
-
-    destination_dir.mkdir(parents=True, exist_ok=True)
-
-    if mode == "symlink":
-        if target_name == "gemini":
-            skill_target = destination_dir / "SKILL.md"
-            skill_target.parent.mkdir(parents=True, exist_ok=True)
-            skill_target.symlink_to(gemini_variant_file(source))
-            install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
-            return
-        for relative_path in SKILL_RELATIVE_FILES:
-            link_path = destination_dir / relative_path
-            link_path.parent.mkdir(parents=True, exist_ok=True)
-            link_path.symlink_to(source / relative_path)
-        return
+    _install_regular_skill_target_atomically(
+        target_name=target_name,
+        source=source,
+        destination_root=destination_root,
+        destination_dir=destination_dir,
+        mode=mode,
+        force=force,
+    )
 
     if target_name == "gemini":
-        shutil.copy2(gemini_variant_file(source), destination_dir / "SKILL.md")
         install_gemini_policy(source=source, base_dir=base_dir, mode=mode, dry_run=dry_run)
-        return
-
-    for relative_path in SKILL_RELATIVE_FILES:
-        source_file = source / relative_path
-        target_file = destination_dir / relative_path
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_file)
 
 
 def install_mcp_binding(target_name: str, *, scope: str, dry_run: bool) -> None:

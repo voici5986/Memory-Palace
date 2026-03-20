@@ -157,7 +157,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - it only targets the local checkout `.env`
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
-- only the Dashboard `MCP_API_KEY` may be stored in browser localStorage; embedding / reranker / LLM provider keys are not stored in the browser
+- only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend only migrates it forward once and clears the old copy.
 
 **New validation anchors:**
 

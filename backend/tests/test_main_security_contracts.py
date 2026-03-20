@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import main as main_module
 
@@ -77,3 +78,46 @@ def test_env_example_documents_sse_message_rate_limit_knobs() -> None:
     assert "SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS=120" in env_example
     assert "SSE_MESSAGE_MAX_BODY_BYTES=1048576" in env_example
     assert "SSE_MESSAGE_RATE_LIMIT_MAX_KEYS" not in env_example
+
+
+def test_health_returns_shallow_payload_for_unauthenticated_remote_request() -> None:
+    module = _reload_main_module()
+
+    with TestClient(
+        module.app,
+        client=("203.0.113.10", 50000),
+        base_url="http://memory-palace.example",
+    ) as client:
+        response = client.get("/health", headers={"Host": "memory-palace.example"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert "timestamp" in payload
+    assert "index" not in payload
+    assert "runtime" not in payload
+
+
+def test_health_returns_detailed_payload_for_authenticated_remote_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "health-secret")
+    module = _reload_main_module()
+
+    with TestClient(
+        module.app,
+        client=("203.0.113.10", 50000),
+        base_url="http://memory-palace.example",
+    ) as client:
+        response = client.get(
+            "/health",
+            headers={
+                "Host": "memory-palace.example",
+                "X-MCP-API-Key": "health-secret",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "index" in payload
+    assert "runtime" in payload

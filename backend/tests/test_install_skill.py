@@ -339,3 +339,59 @@ def test_wrapper_binding_ok_accepts_python_wrapper_paths(
         ["python", "backend/mcp_wrapper.py"],
         allow_relative=True,
     )
+
+
+def test_install_target_force_keeps_existing_skill_when_copying_new_tree_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    source = project_root / "docs" / "skills" / "memory-palace"
+    destination_base = tmp_path / "home"
+    destination_dir = destination_base / ".claude" / "skills" / "memory-palace"
+
+    for relative_path, content in {
+        Path("SKILL.md"): "new skill\n",
+        Path("agents/openai.yaml"): "new agent\n",
+        Path("references/mcp-workflow.md"): "new workflow\n",
+        Path("references/trigger-samples.md"): "new triggers\n",
+    }.items():
+        path = source / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    for relative_path, content in {
+        Path("SKILL.md"): "old skill\n",
+        Path("agents/openai.yaml"): "old agent\n",
+        Path("references/mcp-workflow.md"): "old workflow\n",
+        Path("references/trigger-samples.md"): "old triggers\n",
+    }.items():
+        path = destination_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    original_copy2 = module.shutil.copy2
+    copy_count = {"value": 0}
+
+    def flaky_copy2(src, dst, *args, **kwargs):
+        copy_count["value"] += 1
+        if copy_count["value"] == 2:
+            raise OSError("simulated copy failure")
+        return original_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(module.shutil, "copy2", flaky_copy2)
+
+    with pytest.raises(OSError, match="simulated copy failure"):
+        module.install_target(
+            "claude",
+            source=source,
+            base_dir=destination_base,
+            mode="copy",
+            force=True,
+            dry_run=False,
+        )
+
+    assert (destination_dir / "SKILL.md").read_text(encoding="utf-8") == "old skill\n"
+    assert (destination_dir / "agents" / "openai.yaml").read_text(encoding="utf-8") == "old agent\n"
+    assert not list((destination_base / ".claude" / "skills").glob(".memory-palace.staging.*"))
+    assert not list((destination_base / ".claude" / "skills").glob(".memory-palace.backup.*"))

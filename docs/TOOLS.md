@@ -336,7 +336,8 @@ search_memory(
 | `query_preprocess` | 查询预处理信息 |
 | `intent` | 意图分类：`factual` / `exploratory` / `temporal` / `causal` / `unknown` |
 | `mode_applied` | 实际使用的检索模式 |
-| `results` | 搜索结果列表 |
+| `results` | 搜索结果列表；当前返回顺序会和对外暴露的 `results[].score` 保持一致 |
+| `results[].score` | 当前对外可见的排序分数；`results` 默认按这个字段降序返回 |
 | `degrade_reasons` | 降级原因（如有） |
 
 **使用示例：**

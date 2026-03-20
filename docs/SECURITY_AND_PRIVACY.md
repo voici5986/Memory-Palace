@@ -157,7 +157,7 @@ Authorization: Bearer <MCP_API_KEY>
 - 现阶段只允许写本地 checkout 的 `.env`
 - 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
 - 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
-- 浏览器本地只会保存 Dashboard 使用的 `MCP_API_KEY`；embedding / reranker / LLM key 不会保存在浏览器 localStorage
+- 浏览器本地只会把 Dashboard 使用的 `MCP_API_KEY` 放在当前浏览器会话的 `sessionStorage`；embedding / reranker / LLM key 不会保存在浏览器里。若检测到旧版 `localStorage` 值，前端只会做一次迁移并清掉旧值。
 
 **新增测试锚点：**
 

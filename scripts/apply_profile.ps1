@@ -131,6 +131,20 @@ function Get-EnvValueFromFile {
     return ($lastLine -split '=', 2)[1].TrimStart()
 }
 
+function Sync-DockerWalOverrides {
+    param([string]$FilePath)
+
+    $walEnabled = (Get-EnvValueFromFile -FilePath $FilePath -Key 'RUNTIME_WRITE_WAL_ENABLED').Trim()
+    $journalMode = (Get-EnvValueFromFile -FilePath $FilePath -Key 'RUNTIME_WRITE_JOURNAL_MODE').Trim()
+
+    if (-not [string]::IsNullOrWhiteSpace($walEnabled)) {
+        Set-EnvValueInFile -FilePath $FilePath -Key 'MEMORY_PALACE_DOCKER_WAL_ENABLED' -Value $walEnabled
+    }
+    if (-not [string]::IsNullOrWhiteSpace($journalMode)) {
+        Set-EnvValueInFile -FilePath $FilePath -Key 'MEMORY_PALACE_DOCKER_JOURNAL_MODE' -Value $journalMode
+    }
+}
+
 function New-DockerMcpApiKey {
     $bytes = [byte[]]::new(24)
     [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
@@ -234,6 +248,7 @@ if ($Platform -eq 'docker') {
         Set-EnvValueInFile -FilePath $Target -Key 'MCP_API_KEY' -Value $generatedApiKey
         Write-Host "[auto-fill] MCP_API_KEY generated for docker profile"
     }
+    Sync-DockerWalOverrides -FilePath $Target
 }
 
 Dedupe-EnvKeys -FilePath $Target

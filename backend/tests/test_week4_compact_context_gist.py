@@ -338,6 +338,59 @@ async def test_compact_context_write_guard_noop_marks_pending_flushed(
 
 
 @pytest.mark.asyncio
+async def test_compact_context_preserves_gist_degrade_reasons_when_write_guard_dedupes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _GuardNoopFailingGistClient(_FakeCompactClient):
+        async def write_guard(self, **_: Any) -> Dict[str, Any]:
+            return {
+                "action": "NOOP",
+                "method": "embedding",
+                "reason": "duplicate_flush_summary",
+                "target_uri": "notes://agent/auto_flush_existing",
+            }
+
+        async def generate_compact_gist(
+            self,
+            *,
+            summary: str,
+            max_points: int = 3,
+            max_chars: int = 280,
+            degrade_reasons: Optional[List[str]] = None,
+        ) -> Optional[Dict[str, Any]]:
+            _ = summary
+            _ = max_points
+            _ = max_chars
+            _ = degrade_reasons
+            raise RuntimeError("upstream timeout")
+
+    fake_client = _GuardNoopFailingGistClient()
+    fake_tracker = _FakeFlushTracker(
+        "Session compaction notes:\n- summary already exists and should dedupe"
+    )
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", fake_tracker)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _false_async)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    raw = await mcp_server.compact_context(reason="unit_test", force=True, max_lines=5)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["flushed"] is True
+    assert payload["reason"] == "write_guard_deduped"
+    assert "compact_gist_llm_exception:RuntimeError" in payload["degrade_reasons"]
+
+
+def test_safe_int_rejects_bool_inputs() -> None:
+    assert mcp_server._safe_int(True, default=7) == 7
+    assert mcp_server._safe_int(False, default=7) == 7
+    assert mcp_server._safe_int("12", default=0) == 12
+
+
+@pytest.mark.asyncio
 async def test_generate_compact_gist_uses_llm_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COMPACT_GIST_LLM_ENABLED", "true")
     monkeypatch.setenv("COMPACT_GIST_LLM_API_BASE", "http://fake.llm")

@@ -324,7 +324,7 @@ This command will generate a smoke summary locally:
 docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
-If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`.
+If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is reported as `PARTIAL` instead of stalling the whole run.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
 If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 

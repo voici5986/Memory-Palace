@@ -180,6 +180,42 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spac
     assert "ROUTER_API_KEY = replace-with-your-key  # unresolved key" in result.stderr
 
 
+def test_apply_profile_shell_docker_profile_syncs_compose_wal_overrides(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db",
+                "RUNTIME_WRITE_WAL_ENABLED=false",
+                "RUNTIME_WRITE_JOURNAL_MODE=delete",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "docker", "b", ".env.docker"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    values = dotenv_values(project_root / ".env.docker")
+    assert values.get("MEMORY_PALACE_DOCKER_WAL_ENABLED") == "false"
+    assert values.get("MEMORY_PALACE_DOCKER_JOURNAL_MODE") == "delete"
+
+
 def test_repo_local_stdio_wrapper_resolves_real_project_root_through_symlink(
     tmp_path: Path,
 ) -> None:
@@ -297,6 +333,41 @@ def test_repo_local_stdio_wrapper_reads_env_without_python_dotenv(
     assert result.stdout == "37"
 
 
+def test_repo_local_stdio_wrapper_normalizes_double_slash_default_database_path(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    _copy_script(PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh", script_path)
+    script_path.write_text(
+        script_path.read_text(encoding="utf-8").replace(
+            'DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"',
+            'DEFAULT_DB_PATH="//tmp/memory-palace/demo.db"',
+        ),
+        encoding="utf-8",
+    )
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.write_text(
+        "#!/usr/bin/env bash\nprintf '%s' \"${DATABASE_URL:-missing}\"\n",
+        encoding="utf-8",
+    )
+    backend_python.chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        env={key: value for key, value in os.environ.items() if key != "DATABASE_URL"},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "sqlite+aiosqlite:////tmp/memory-palace/demo.db"
+
+
 def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -> None:
     script_text = (
         PROJECT_ROOT / "scripts" / "apply_profile.ps1"
@@ -308,9 +379,33 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
     assert "[System.Text.UTF8Encoding]::new($false)" in script_text
     assert "function Write-LinesUtf8" in script_text
     assert "function Assert-ResolvedProfilePlaceholders" in script_text
+    assert "function Sync-DockerWalOverrides" in script_text
+    assert "MEMORY_PALACE_DOCKER_WAL_ENABLED" in script_text
+    assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE" in script_text
     assert "$line -match '^\\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\\s*=\\s*.*:PORT/'" in script_text
     assert "$line -match '=\\s*replace-with-your-key(\\s+#.*)?\\s*$'" in script_text
     assert "$line -match '=\\s*your-embedding-model-id(\\s+#.*)?\\s*$'" in script_text
     assert "$line -match '=\\s*your-reranker-model-id(\\s+#.*)?\\s*$'" in script_text
     assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text
     assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:///C:/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text
+
+
+def test_docker_profiles_align_wal_defaults_with_compose_runtime_env() -> None:
+    compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert (
+        "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}"
+        in compose_text
+    )
+    assert (
+        "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}"
+        in compose_text
+    )
+
+    for profile_name in ("profile-a.env", "profile-b.env", "profile-c.env", "profile-d.env"):
+        profile_text = (
+            PROJECT_ROOT / "deploy" / "profiles" / "docker" / profile_name
+        ).read_text(encoding="utf-8")
+        assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=true" in profile_text
+        assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE=wal" in profile_text
+        assert "RUNTIME_WRITE_WAL_ENABLED=true" in profile_text
+        assert "RUNTIME_WRITE_JOURNAL_MODE=wal" in profile_text

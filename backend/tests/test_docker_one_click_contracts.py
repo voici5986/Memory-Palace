@@ -259,6 +259,9 @@ def test_frontend_nginx_template_disables_index_html_caching() -> None:
         encoding="utf-8"
     )
 
+    assert 'Content-Security-Policy "default-src \'self\'' in template_text
+    assert "object-src 'none'" in template_text
+    assert "frame-ancestors 'none'" in template_text
     assert 'location = /index.html {' in template_text
     assert 'Cache-Control "no-store, no-cache, must-revalidate" always' in template_text
     assert "try_files /index.html =404;" in template_text

@@ -9,16 +9,20 @@ if (typeof window !== 'undefined') {
     configurable: true,
   });
 
-  const existingStorage = window.localStorage;
-  if (
-    !existingStorage ||
-    typeof existingStorage.getItem !== 'function' ||
-    typeof existingStorage.setItem !== 'function' ||
-    typeof existingStorage.removeItem !== 'function' ||
-    typeof existingStorage.clear !== 'function'
-  ) {
+  const ensureStorage = (name) => {
+    const existingStorage = window[name];
+    if (
+      existingStorage &&
+      typeof existingStorage.getItem === 'function' &&
+      typeof existingStorage.setItem === 'function' &&
+      typeof existingStorage.removeItem === 'function' &&
+      typeof existingStorage.clear === 'function'
+    ) {
+      return;
+    }
+
     const storage = new Map();
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, name, {
       value: {
         getItem: (key) => (storage.has(key) ? storage.get(key) : null),
         setItem: (key, value) => {
@@ -34,7 +38,10 @@ if (typeof window !== 'undefined') {
       writable: true,
       configurable: true,
     });
-  }
+  };
+
+  ensureStorage('localStorage');
+  ensureStorage('sessionStorage');
 }
 
 afterEach(() => {

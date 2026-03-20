@@ -46,7 +46,7 @@ If the Dashboard shell opens but protected data does not load, the usual fix is:
 
 > If you set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local development, protected data can load automatically without entering a key, as long as the request is a direct loopback request.
 
-> **Save dashboard key only** stores the Dashboard key in the current browser until you clear it manually. The assistant's `Profile C/D` presets follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode.
+> **Save dashboard key only** stores the Dashboard key in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode.
 
 > If you choose **Save local `.env` settings** and also fill a Dashboard key, remember that the `.env` write and the browser key save are two separate steps. If the browser blocks local storage, the assistant now shows a save failure instead of a false success. In practice that usually means the `.env` change may already be written, but the browser-side auth is still not ready yet.
 

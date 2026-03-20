@@ -16,6 +16,13 @@ const describeType = (value) => {
 const isPlainObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const extractInterpolations = (value) =>
+  typeof value === 'string'
+    ? [...value.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)]
+        .map((match) => match[1])
+        .sort()
+    : [];
+
 const compareLocaleTrees = (left, right, path = 'translation') => {
   const differences = [];
   const leftType = describeType(left);
@@ -50,6 +57,17 @@ const compareLocaleTrees = (left, right, path = 'translation') => {
     }
     if (typeof right === 'string' && right.trim() === '') {
       differences.push(`${path}: zh-CN locale must not be empty`);
+    }
+    if (typeof left === 'string' && typeof right === 'string') {
+      const leftInterpolations = extractInterpolations(left);
+      const rightInterpolations = extractInterpolations(right);
+      if (
+        JSON.stringify(leftInterpolations) !== JSON.stringify(rightInterpolations)
+      ) {
+        differences.push(
+          `${path}: interpolation mismatch (${leftInterpolations.join(', ')} vs ${rightInterpolations.join(', ')})`
+        );
+      }
     }
     return differences;
   }

@@ -46,7 +46,7 @@
 
 > 如果你在本地调试时设置了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，并且请求是直连 loopback 地址，页面也可以不手动输入密钥就直接显示受保护数据。
 
-> **只保存 Dashboard 密钥** 会把这把 key 保存在当前浏览器里，直到你手动清除。向导里的 `Profile C/D` 预设现在按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式。
+> **只保存 Dashboard 密钥** 会把这把 key 保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的 `Profile C/D` 预设现在按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式。
 
 > 如果你选择的是 **保存到本地 `.env`**，并且同时填了 Dashboard key，要记住 `.env` 写入和浏览器 key 保存是两步。现在只要浏览器本地存储失败，向导就会明确提示保存失败，不再给出误导性的成功提示。实际使用时，这通常意味着 `.env` 可能已经写进去了，但浏览器侧鉴权还没准备好。
 

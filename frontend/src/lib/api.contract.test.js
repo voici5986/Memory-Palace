@@ -52,6 +52,7 @@ describe('api contract regression', () => {
     delete window.__MEMORY_PALACE_RUNTIME__;
     delete window.__MCP_RUNTIME_CONFIG__;
     window.localStorage?.removeItem?.('memory-palace.dashboardAuth');
+    window.sessionStorage?.removeItem?.('memory-palace.dashboardAuth');
   });
 
   it('normalizes memory node gist fields from backend payload', async () => {
@@ -229,7 +230,7 @@ describe('api contract regression', () => {
 
   it('falls back to stored maintenance key when runtime config is absent', () => {
     const interceptor = interceptorRef.current;
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       'memory-palace.dashboardAuth',
       JSON.stringify({
         maintenanceApiKey: 'stored-key',
@@ -249,7 +250,7 @@ describe('api contract regression', () => {
 
   it('treats setup endpoints as protected and injects stored auth headers', () => {
     const interceptor = interceptorRef.current;
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       'memory-palace.dashboardAuth',
       JSON.stringify({
         maintenanceApiKey: 'stored-key',
@@ -268,7 +269,7 @@ describe('api contract regression', () => {
 
   it('prefers runtime maintenance key over stored fallback', () => {
     const interceptor = interceptorRef.current;
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       'memory-palace.dashboardAuth',
       JSON.stringify({
         maintenanceApiKey: 'stored-key',
@@ -355,9 +356,30 @@ describe('api contract regression', () => {
     });
   });
 
+  it('migrates legacy localStorage auth into session storage', () => {
+    const interceptor = interceptorRef.current;
+    window.localStorage.setItem(
+      'memory-palace.dashboardAuth',
+      JSON.stringify({
+        maintenanceApiKey: 'legacy-key',
+        maintenanceApiKeyMode: 'header',
+      })
+    );
+
+    const config = interceptor({
+      url: '/maintenance/orphans',
+      headers: {},
+      method: 'get',
+    });
+
+    expect(config.headers['X-MCP-API-Key']).toBe('legacy-key');
+    expect(window.localStorage.getItem('memory-palace.dashboardAuth')).toBeNull();
+    expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toContain('legacy-key');
+  });
+
   it('returns false instead of throwing when saving browser auth hits storage failure', () => {
-    const originalStorage = window.localStorage;
-    Object.defineProperty(window, 'localStorage', {
+    const originalStorage = window.sessionStorage;
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: {
@@ -374,7 +396,7 @@ describe('api contract regression', () => {
     });
 
     expect(saveStoredMaintenanceAuth('stored-key')).toBe(false);
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: originalStorage,
@@ -382,25 +404,25 @@ describe('api contract regression', () => {
   });
 
   it('returns false instead of throwing when clearing browser auth hits storage failure', () => {
-    const originalStorage = window.localStorage;
-    Object.defineProperty(window, 'localStorage', {
+    const originalSessionStorage = window.sessionStorage;
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: {
-        getItem: originalStorage.getItem.bind(originalStorage),
-        setItem: originalStorage.setItem.bind(originalStorage),
+        getItem: originalSessionStorage.getItem.bind(originalSessionStorage),
+        setItem: originalSessionStorage.setItem.bind(originalSessionStorage),
         removeItem: () => {
           throw new Error('quota');
         },
-        clear: originalStorage.clear.bind(originalStorage),
+        clear: originalSessionStorage.clear.bind(originalSessionStorage),
       },
     });
 
     expect(clearStoredMaintenanceAuth()).toBe(false);
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
-      value: originalStorage,
+      value: originalSessionStorage,
     });
   });
 

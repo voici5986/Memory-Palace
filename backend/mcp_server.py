@@ -577,6 +577,8 @@ def _to_json(payload: Dict[str, Any]) -> str:
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1222,6 +1224,35 @@ def _search_result_identity(item: Dict[str, Any]) -> Any:
     )
 
 
+def _search_result_display_score(item: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(item, dict):
+        return None
+    raw_score = item.get("score")
+    if raw_score is None:
+        scores_obj = item.get("scores")
+        if isinstance(scores_obj, dict):
+            raw_score = scores_obj.get("final")
+    try:
+        return float(raw_score)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sort_search_results_for_response(
+    results: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    indexed = list(enumerate(results))
+
+    def _sort_key(entry: Tuple[int, Dict[str, Any]]) -> Tuple[int, float, int]:
+        index, item = entry
+        score = _search_result_display_score(item)
+        if score is None:
+            return (1, 0.0, index)
+        return (0, -score, index)
+
+    return [item for _, item in sorted(indexed, key=_sort_key)]
+
+
 async def _revalidate_search_results(
     *,
     client: Any,
@@ -1561,6 +1592,13 @@ async def _flush_session_summary_to_memory(
             guard_target_uri = guard_decision.get("target_uri")
             if isinstance(guard_target_uri, str) and guard_target_uri.strip():
                 payload["uri"] = guard_target_uri
+            gist_degrade_reasons = gist_payload.get("degrade_reasons")
+            if isinstance(gist_degrade_reasons, list):
+                payload["degrade_reasons"] = [
+                    str(reason).strip()
+                    for reason in gist_degrade_reasons
+                    if isinstance(reason, str) and reason.strip()
+                ]
             return payload
 
         payload: Dict[str, Any] = {
@@ -1568,11 +1606,23 @@ async def _flush_session_summary_to_memory(
             "reason": "write_guard_blocked",
             **_guard_fields(guard_decision),
         }
+        gist_degrade_reasons = gist_payload.get("degrade_reasons")
+        if isinstance(gist_degrade_reasons, list):
+            payload["degrade_reasons"] = [
+                str(reason).strip()
+                for reason in gist_degrade_reasons
+                if isinstance(reason, str) and reason.strip()
+            ]
         if bool(guard_decision.get("degraded")):
             payload["degraded"] = True
             degrade_reasons = guard_decision.get("degrade_reasons")
             if isinstance(degrade_reasons, list) and degrade_reasons:
-                payload["degrade_reasons"] = list(dict.fromkeys(degrade_reasons))
+                payload["degrade_reasons"] = list(
+                    dict.fromkeys(
+                        list(payload.get("degrade_reasons") or [])
+                        + [item for item in degrade_reasons if isinstance(item, str) and item]
+                    )
+                )
         return payload
     if defer_index_override is None:
         defer_index = await _should_defer_index_on_write()
@@ -4402,8 +4452,9 @@ async def search_memory(
             client=client,
             results=merged_results,
         )
+        ordered_results = _sort_search_results_for_response(revalidated_results)
         session_first_metrics.update(revalidation_metrics)
-        final_results = revalidated_results[:resolved_max_results]
+        final_results = ordered_results[:resolved_max_results]
         session_before = int(session_first_metrics.get("session_contributed") or 0)
         global_before = int(session_first_metrics.get("global_contributed") or 0)
         merged_before = int(session_first_metrics.get("merged_candidates") or 0)

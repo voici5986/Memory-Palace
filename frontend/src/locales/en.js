@@ -104,13 +104,13 @@ const en = {
         'This part controls protected dashboard requests such as /browse, /review, /maintenance, and /setup.',
       apiKeyLabel: 'MCP API key',
       apiKeyHint:
-        'If your backend uses MCP_API_KEY, enter the same value here so the browser can call protected routes immediately.',
+        'If your backend uses MCP_API_KEY, enter the same value here so the browser can call protected routes immediately. Browser-only save keeps this key in the current browser session, so avoid shared or untrusted browsers.',
       apiKeyPlaceholder: 'Enter MCP_API_KEY',
       insecureLocalLabel: 'Allow insecure local access',
       insecureLocalHint:
         'Maps to MCP_API_KEY_ALLOW_INSECURE_LOCAL=true. Use only for loopback debugging on your own machine.',
       browserScope:
-        'Only the dashboard API key is stored in the browser. Provider keys entered below are sent once to the backend setup API and are not written into browser storage.',
+        'Only the dashboard API key is stored in the current browser session. Provider keys entered below are sent once to the backend setup API and are not written into browser storage. Avoid saving this key in shared browsers or profiles you do not control.',
     },
     retrieval: {
       title: 'Retrieval profile',
@@ -201,7 +201,7 @@ const en = {
       intent: 'Intent LLM',
       restartHint: 'Restart required for full effect: {{targets}}.',
       browserOnlyHint:
-        'Saving the dashboard key to the browser keeps it in this browser until you clear it, and does not rewrite backend runtime settings.',
+        'Saving the dashboard key to the browser keeps it in the current browser session until you clear it or that session ends, and does not rewrite backend runtime settings. Avoid shared or untrusted browsers.',
     },
     actions: {
       nextTitle: 'Apply changes',
@@ -215,7 +215,7 @@ const en = {
     messages: {
       statusUnavailable: 'Unable to load setup status.',
       browserOnlyRequiresKey: 'Enter an MCP API key before saving browser-only auth.',
-      browserOnlySaved: 'Dashboard key saved in this browser until cleared.',
+      browserOnlySaved: 'Dashboard key saved in the current browser session until cleared or that session ends.',
       serverSaved: 'Saved local setup to {{target}}.',
       saveFailed: 'Failed to save setup.',
     },

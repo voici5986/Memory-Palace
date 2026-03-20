@@ -245,3 +245,9 @@ def test_get_session_id_falls_back_when_context_unavailable(
 
     monkeypatch.setattr(mcp_server.mcp, "get_context", _raise_context_error)
     assert mcp_server.get_session_id() == mcp_server._SESSION_ID
+
+
+def test_safe_int_rejects_bool_values() -> None:
+    assert mcp_server._safe_int(True, default=7) == 7
+    assert mcp_server._safe_int(False, default=7) == 7
+    assert mcp_server._safe_int("12", default=7) == 12

@@ -227,14 +227,14 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 
 - `docs/DASHBOARD_GUIDE_EN.md`
 
-> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Clicking this button now opens the **first-run setup assistant**, which can either save the Dashboard key in the current browser or, when you are running against a non-Docker local checkout, write the common runtime fields into `.env`. The assistant also has its own language toggle in the upper right corner, so you do not need to close it first just to switch to Chinese. Section 5 will explain local validation.
+> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Clicking this button now opens the **first-run setup assistant**, which can either save the Dashboard key in the current browser session or, when you are running against a non-Docker local checkout, write the common runtime fields into `.env`. The assistant also has its own language toggle in the upper right corner, so you do not need to close it first just to switch to Chinese. Section 5 will explain local validation.
 >
 > Small UI detail rechecked against the current code path: if the assistant shows interpolated labels that contain characters like `&` or `<...>`, they now render as normal text instead of showing HTML entities literally.
 
 > If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key in the assistant. If you only want the Dashboard to authenticate first, prefer the browser-only save path.
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
 
-> If you choose **Save dashboard key only**, that key stays in the current browser until you clear it manually. The assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
+> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
 
 > The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
@@ -444,7 +444,7 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`.
+The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is now reported as `PARTIAL` instead of stalling the whole run.
 If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first.
 If you just cloned the GitHub repository, it is normal if you don't see these two files yet; they are local artifacts generated after running the scripts.
 
@@ -481,6 +481,8 @@ Expected return (from the `/health` endpoint in `main.py`):
 }
 ```
 
+> This detailed payload with `index` / `runtime` is returned by default only for local loopback requests, or for requests carrying a valid `MCP_API_KEY`. Unauthenticated remote `/health` probes intentionally receive only a shallow payload such as `status` and `timestamp`.
+>
 > `status` as `"ok"` indicates the system is normal; if the index is unavailable or an error occurs, `status` will become `"degraded"`.
 
 ### 5.2 Browsing Memory Tree

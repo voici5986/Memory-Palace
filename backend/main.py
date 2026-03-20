@@ -2,12 +2,13 @@ import inspect
 import os
 import sqlite3
 import stat
+import hmac
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -24,6 +25,11 @@ def _load_project_dotenv(project_root: Optional[Path] = None) -> Optional[Path]:
 _load_project_dotenv()
 
 from api import review_router, browse_router, maintenance_router, setup_router
+from api.maintenance import (
+    _extract_bearer_token,
+    _get_configured_mcp_api_key,
+    _is_direct_loopback_request,
+)
 from db import get_sqlite_client, close_sqlite_client
 from runtime_state import runtime_state
 from run_sse import create_embedded_sse_apps
@@ -38,6 +44,27 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _health_request_allows_details(
+    request: Optional[Request],
+    *,
+    x_mcp_api_key: Optional[str],
+    authorization: Optional[str],
+) -> bool:
+    if request is None:
+        return True
+    if _is_direct_loopback_request(request):
+        return True
+
+    configured_key = _get_configured_mcp_api_key()
+    if not configured_key:
+        return False
+
+    provided_key = str(x_mcp_api_key or "").strip()
+    if not provided_key:
+        provided_key = str(_extract_bearer_token(authorization) or "").strip()
+    return bool(provided_key) and hmac.compare_digest(configured_key, provided_key)
 
 
 _DEFAULT_CORS_ALLOW_ORIGINS: tuple[str, ...] = (
@@ -253,15 +280,26 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+async def health(
+    request: Request = None,
+    x_mcp_api_key: Optional[str] = Header(default=None, alias="X-MCP-API-Key"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """健康检查"""
     payload: Dict[str, Any] = {
         "status": "ok",
         "timestamp": _utc_iso_now(),
     }
+    include_details = _health_request_allows_details(
+        request,
+        x_mcp_api_key=x_mcp_api_key,
+        authorization=authorization,
+    )
 
     try:
         sqlite_client = get_sqlite_client()
+        if not include_details:
+            return payload
         index_payload: Optional[Dict[str, Any]] = None
 
         for method_name in (
@@ -320,6 +358,8 @@ async def health():
     except Exception as exc:
         error_type = type(exc).__name__
         payload["status"] = "degraded"
+        if not include_details:
+            return payload
         payload["index"] = {
             "index_available": False,
             "degraded": True,

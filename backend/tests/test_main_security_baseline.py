@@ -7,6 +7,7 @@ import types
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 import main
 
@@ -180,6 +181,66 @@ async def test_health_hides_internal_exception_details(
     assert payload["runtime"]["write_lanes"]["reason"] == "internal_error"
     assert payload["runtime"]["index_worker"]["reason"] == "internal_error"
     assert "boom-secret-detail" not in serialized
+
+
+def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StartupClient:
+        async def init_db(self) -> None:
+            return None
+
+    async def _noop_ensure_started(_factory=None) -> None:
+        return None
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setattr(main, "get_sqlite_client", lambda: _StartupClient())
+    monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
+
+    with TestClient(main.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "timestamp": response.json()["timestamp"],
+    }
+
+
+def test_health_endpoint_keeps_detailed_payload_when_api_key_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeClient:
+        async def init_db(self) -> None:
+            return None
+
+        async def get_index_status(self):
+            return {"index_available": True, "degraded": False}
+
+    async def _noop_ensure_started(_factory=None) -> None:
+        return None
+
+    async def _lane_status():
+        return {"pending": 0}
+
+    async def _worker_status():
+        return {"running": True}
+
+    monkeypatch.setenv("MCP_API_KEY", "health-secret")
+    monkeypatch.setattr(main, "get_sqlite_client", lambda: _FakeClient())
+    monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
+    monkeypatch.setattr(main.runtime_state.write_lanes, "status", _lane_status)
+    monkeypatch.setattr(main.runtime_state.index_worker, "status", _worker_status)
+
+    with TestClient(main.app) as client:
+        response = client.get("/health", headers={"X-MCP-API-Key": "health-secret"})
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["status"] == "ok"
+    assert payload["index"]["index_available"] is True
+    assert payload["runtime"]["write_lanes"] == {"pending": 0}
+    assert payload["runtime"]["index_worker"] == {"running": True}
 
 
 def test_main_script_binds_loopback_by_default(

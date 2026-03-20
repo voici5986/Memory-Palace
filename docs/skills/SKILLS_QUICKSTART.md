@@ -437,7 +437,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 默认建议把它们当成你自己机器上的复核产物，不把它们当成主入口文档；这两份文件默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。
 如果你在并行 review 或 CI 里想隔离输出，可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把报告改写到别的本地路径。
 
-补一句体验口径：`evaluate_memory_palace_skill.py` 会串行调多个 CLI，完整跑完往往要几分钟；如果你机器上这几种客户端都装了，看到它跑一阵子没新输出，先别急着判定为卡死。
+补一句体验口径：`evaluate_memory_palace_skill.py` 会串行调多个 CLI，完整跑完往往要几分钟；如果你机器上这几种客户端都装了，看到它跑一阵子没新输出，先别急着判定为卡死。当前 `codex` 这一项如果只是 `codex exec` 在 smoke 超时前没产出结构化输出，会直接记成 `PARTIAL`，而不是把整轮卡死。
 再补一句副作用口径：这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
 如果当前机器根本没有 `Antigravity` 宿主 runtime，`evaluate_memory_palace_skill.py` 里的 Antigravity 项更适合看成“待目标宿主手工补验”，不要先把它理解成仓库主链路坏了。
 如果这条报告里只有 `mcp_bindings` 失败，优先先重跑一次统一的 `user-scope` 安装，再重新执行 smoke：

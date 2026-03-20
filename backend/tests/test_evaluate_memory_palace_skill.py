@@ -33,7 +33,8 @@ def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
     assert 'if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
     assert 'if [[ -f "${DOCKER_ENV_FILE}" ]]; then' in wrapper_text
     assert "connect your client to the Docker /sse endpoint instead." in wrapper_text
-    assert 'export DATABASE_URL="sqlite+aiosqlite:////${DEFAULT_DB_PATH#/}"' in wrapper_text
+    assert 'format_sqlite_absolute_url()' in wrapper_text
+    assert 'export DATABASE_URL="$(format_sqlite_absolute_url "${DEFAULT_DB_PATH}")"' in wrapper_text
 
 
 def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url(
@@ -397,6 +398,42 @@ def test_smoke_codex_accepts_output_file_when_cli_times_out(
     assert result.status == "PASS"
     assert result.summary == "Codex smoke 通过"
     assert "mcp_servers.playwright.startup_timeout_sec=45" not in seen_cmd
+
+
+def test_smoke_codex_returns_partial_when_cli_times_out_without_output_file(
+    monkeypatch,
+) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/codex"
+    )
+
+    def _fake_runner(cmd, *, cwd, output_path, input_text=None, timeout=120):
+        _ = cmd, cwd, output_path, input_text, timeout
+        return evaluate_memory_palace_skill.CommandCapture(
+            returncode=-9,
+            stdout="",
+            stderr="",
+            timed_out=True,
+        )
+
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill,
+        "_run_command_capture_until_output_file",
+        _fake_runner,
+    )
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill,
+        "CODEX_SMOKE_TIMEOUT_SEC",
+        17,
+    )
+
+    result = evaluate_memory_palace_skill.smoke_codex()
+
+    assert result.status == "PARTIAL"
+    assert "Codex smoke 超时" in result.summary
+    assert ">17s" in result.summary
 
 
 def test_coalesce_structured_text_prefers_joined_field_values() -> None:

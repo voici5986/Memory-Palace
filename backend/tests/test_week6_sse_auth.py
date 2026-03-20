@@ -741,6 +741,87 @@ async def test_sse_rate_limit_state_is_cleared_when_session_closes() -> None:
 
 
 @pytest.mark.anyio
+async def test_sse_transport_uses_zero_buffer_memory_streams_for_backpressure(
+    monkeypatch,
+) -> None:
+    buffer_sizes: list[int] = []
+
+    class _FakeSendStream:
+        async def send(self, _value) -> None:
+            return None
+
+        async def aclose(self) -> None:
+            return None
+
+    class _FakeReceiveStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            return None
+
+    def _fake_create_memory_object_stream(max_buffer_size, *args, **kwargs):
+        _ = args, kwargs
+        buffer_sizes.append(int(max_buffer_size))
+        return _FakeSendStream(), _FakeReceiveStream()
+
+    class _FakeSecurity:
+        async def validate_request(self, request, is_post=False):
+            _ = request, is_post
+            return None
+
+    class _FakeTaskGroup:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            _ = exc_type, exc, tb
+            return False
+
+        def start_soon(self, func, *args):
+            _ = func, args
+            return None
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def _send(_message):
+        return None
+
+    monkeypatch.setattr(
+        run_sse.anyio,
+        "create_memory_object_stream",
+        _fake_create_memory_object_stream,
+    )
+    monkeypatch.setattr(run_sse.anyio, "create_task_group", lambda: _FakeTaskGroup())
+
+    transport = run_sse.MemoryPalaceSseServerTransport(
+        "/messages", security_settings=None
+    )
+    monkeypatch.setattr(transport, "_security", _FakeSecurity())
+
+    scope = {
+        "type": "http",
+        "path": "/sse",
+        "root_path": "",
+        "headers": [],
+        "client": ("127.0.0.1", 50000),
+        "method": "GET",
+        "scheme": "http",
+        "query_string": b"",
+        "server": ("127.0.0.1", 8000),
+    }
+
+    async with transport.connect_sse(scope, _receive, _send):
+        pass
+
+    assert buffer_sizes == [0, 0, 0]
+
+
+@pytest.mark.anyio
 async def test_sse_cancelled_run_propagates_after_transport_cleanup(monkeypatch) -> None:
     events: list[object] = []
 

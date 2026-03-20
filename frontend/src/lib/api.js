@@ -20,6 +20,15 @@ const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
 // Handle URI encoding for resource IDs which might contain special chars
 const encodeId = (id) => encodeURIComponent(id);
 
+const getBrowserStorage = (kind) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window[kind] ?? null;
+  } catch (_error) {
+    return null;
+  }
+};
+
 const normalizeMaintenanceAuth = (runtimeConfig) => {
   if (!runtimeConfig || typeof runtimeConfig !== 'object') return null;
   const rawKey = runtimeConfig.maintenanceApiKey ?? runtimeConfig.mcpApiKey;
@@ -41,15 +50,58 @@ const readWindowRuntimeMaintenanceAuth = () => {
   return normalizeMaintenanceAuth(runtimeConfig);
 };
 
-const readStoredMaintenanceAuth = () => {
-  if (typeof window === 'undefined') return null;
+const readStoredMaintenanceAuthFrom = (storage) => {
+  if (!storage) return null;
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
+    const raw = storage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
     if (!raw) return null;
     return normalizeMaintenanceAuth(JSON.parse(raw));
   } catch (_error) {
     return null;
   }
+};
+
+const removeStoredMaintenanceAuthFrom = (storage) => {
+  if (!storage) return true;
+  try {
+    storage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+};
+
+const readStoredMaintenanceAuth = () => {
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  const localStorage = getBrowserStorage('localStorage');
+
+  const sessionAuth = readStoredMaintenanceAuthFrom(sessionStorage);
+  if (sessionAuth) {
+    return sessionAuth;
+  }
+
+  const legacyAuth = readStoredMaintenanceAuthFrom(localStorage);
+  if (!legacyAuth) {
+    return null;
+  }
+
+  // Migrate older localStorage persistence to sessionStorage when available.
+  if (sessionStorage) {
+    try {
+      sessionStorage.setItem(
+        DASHBOARD_AUTH_STORAGE_KEY,
+        JSON.stringify({
+          maintenanceApiKey: legacyAuth.key,
+          maintenanceApiKeyMode: legacyAuth.mode,
+        })
+      );
+      removeStoredMaintenanceAuthFrom(localStorage);
+    } catch (_error) {
+      // Keep the legacy auth readable for the current session when migration fails.
+    }
+  }
+
+  return legacyAuth;
 };
 
 export const getMaintenanceAuthState = () => {
@@ -67,20 +119,22 @@ export const getMaintenanceAuthState = () => {
 };
 
 export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
-  if (typeof window === 'undefined') return null;
   const normalized = normalizeMaintenanceAuth({
     maintenanceApiKey: key,
     maintenanceApiKeyMode: mode,
   });
   if (!normalized) return null;
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  if (!sessionStorage) return false;
   try {
-    window.localStorage.setItem(
+    sessionStorage.setItem(
       DASHBOARD_AUTH_STORAGE_KEY,
       JSON.stringify({
         maintenanceApiKey: normalized.key,
         maintenanceApiKeyMode: normalized.mode,
       })
     );
+    removeStoredMaintenanceAuthFrom(getBrowserStorage('localStorage'));
   } catch (_error) {
     return false;
   }
@@ -88,13 +142,11 @@ export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
 };
 
 export const clearStoredMaintenanceAuth = () => {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(DASHBOARD_AUTH_STORAGE_KEY);
-    return true;
-  } catch (_error) {
-    return false;
-  }
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  const localStorage = getBrowserStorage('localStorage');
+  const sessionCleared = removeStoredMaintenanceAuthFrom(sessionStorage);
+  const legacyCleared = removeStoredMaintenanceAuthFrom(localStorage);
+  return sessionCleared && legacyCleared;
 };
 
 const readRuntimeMaintenanceAuth = () => {

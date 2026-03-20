@@ -48,6 +48,7 @@ describe('App routing', () => {
   beforeEach(async () => {
     memoryMountCounter.current = 0;
     window.localStorage?.removeItem?.('memory-palace.dashboardAuth');
+    window.sessionStorage?.removeItem?.('memory-palace.dashboardAuth');
     window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
     window.localStorage?.setItem?.('memory-palace.setupAssistantDismissed', '1');
     delete window.__MEMORY_PALACE_RUNTIME__;
@@ -113,7 +114,7 @@ describe('App routing', () => {
     );
     await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
 
-    expect(window.localStorage.getItem('memory-palace.dashboardAuth')).toContain('stored-key');
+    expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toContain('stored-key');
     expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
   });
 
@@ -139,9 +140,21 @@ describe('App routing', () => {
     expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
   });
 
+  it('shows a browser-storage risk warning inside the setup assistant', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    expect(
+      await screen.findByText(/Avoid saving this key in shared browsers or profiles you do not control\./i)
+    ).toBeInTheDocument();
+  });
+
   it('shows an error instead of crashing when browser storage rejects the API key write', async () => {
     const user = userEvent.setup();
-    const originalStorage = window.localStorage;
+    const originalStorage = window.sessionStorage;
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -152,7 +165,7 @@ describe('App routing', () => {
       within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
       'stored-key'
     );
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: {
@@ -169,7 +182,7 @@ describe('App routing', () => {
     });
 
     await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: originalStorage,
@@ -182,7 +195,7 @@ describe('App routing', () => {
 
   it('shows an error instead of a false success when server save succeeds but browser auth persistence fails', async () => {
     const user = userEvent.setup();
-    const originalStorage = window.localStorage;
+    const originalStorage = window.sessionStorage;
     window.history.pushState({}, '', '/memory');
     setupApi.saveSetupConfig.mockResolvedValueOnce({
       ok: true,
@@ -199,7 +212,7 @@ describe('App routing', () => {
       'stored-key'
     );
 
-    Object.defineProperty(window, 'localStorage', {
+    Object.defineProperty(window, 'sessionStorage', {
       configurable: true,
       writable: true,
       value: {
@@ -221,10 +234,10 @@ describe('App routing', () => {
       expect((await screen.findAllByText(i18n.t('setup.messages.saveFailed'))).length).toBeGreaterThan(0);
       expect(screen.queryByText(i18n.t('setup.messages.serverSaved', { target: '.env' }))).not.toBeInTheDocument();
       expect(screen.getByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();
-      expect(window.localStorage.getItem('memory-palace.dashboardAuth')).toBeNull();
+      expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toBeNull();
       expect(setupApi.saveSetupConfig).toHaveBeenCalledTimes(1);
     } finally {
-      Object.defineProperty(window, 'localStorage', {
+      Object.defineProperty(window, 'sessionStorage', {
         configurable: true,
         writable: true,
         value: originalStorage,

@@ -391,6 +391,8 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
             await error_response(scope, receive, send)
             raise ValueError("Request validation failed")
 
+        # Keep all internal channels zero-buffered so slow SSE clients apply
+        # backpressure instead of building an unbounded user-space queue.
         read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
         write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
 

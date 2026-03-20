@@ -122,6 +122,14 @@ normalize_database_url() {
   printf '%s' "${value}"
 }
 
+format_sqlite_absolute_url() {
+  local absolute_path="${1:-}"
+  while [[ "${absolute_path}" == /* ]]; do
+    absolute_path="${absolute_path#/}"
+  done
+  printf 'sqlite+aiosqlite:////%s' "${absolute_path}"
+}
+
 is_docker_internal_database_url() {
   local value
   value="$(normalize_database_url "${1:-}")"
@@ -177,7 +185,7 @@ if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]
     echo "Create a local .env for the SQLite file you want, or connect your client to the Docker /sse endpoint instead." >&2
     exit 1
   fi
-  export DATABASE_URL="sqlite+aiosqlite:////${DEFAULT_DB_PATH#/}"
+  export DATABASE_URL="$(format_sqlite_absolute_url "${DEFAULT_DB_PATH}")"
 fi
 
 runtime_remote_timeout="$(normalize_database_url "${RETRIEVAL_REMOTE_TIMEOUT_SEC:-}")"

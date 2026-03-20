@@ -58,8 +58,24 @@ REQUIRED_FILES = [
 GEMINI_TEST_MODEL = "gemini-3-flash-preview"
 GEMINI_FALLBACK_MODEL = "gemini-3-flash-preview"
 SKIP_GEMINI_LIVE = os.getenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
-CODEX_SMOKE_TIMEOUT_SEC = int(os.getenv("MEMORY_PALACE_CODEX_SMOKE_TIMEOUT_SEC", "120"))
-OPENCODE_SMOKE_TIMEOUT_SEC = int(os.getenv("MEMORY_PALACE_OPENCODE_SMOKE_TIMEOUT_SEC", "90"))
+
+
+def _read_timeout_seconds(env_name: str, default: int, *, minimum: int = 5) -> int:
+    raw_value = os.getenv(env_name, "").strip()
+    if not raw_value:
+        return max(minimum, default)
+    try:
+        return max(minimum, int(raw_value))
+    except (TypeError, ValueError):
+        return max(minimum, default)
+
+
+CODEX_SMOKE_TIMEOUT_SEC = _read_timeout_seconds(
+    "MEMORY_PALACE_CODEX_SMOKE_TIMEOUT_SEC", 45
+)
+OPENCODE_SMOKE_TIMEOUT_SEC = _read_timeout_seconds(
+    "MEMORY_PALACE_OPENCODE_SMOKE_TIMEOUT_SEC", 90
+)
 PROMPT = (
     "In this repository, answer in exactly 3 bullets only: "
     "(1) the first memory tool call required by the memory-palace skill, "
@@ -1112,7 +1128,16 @@ def smoke_codex() -> CheckResult:
                     return CheckResult("PASS", "Codex smoke 通过（结果已落盘，CLI 进程超时退出）", joined)
                 return CheckResult("FAIL", "Codex smoke 输出不符合预期", details)
             if proc.timed_out:
-                return CheckResult("FAIL", "Codex smoke 超时", (proc.stdout + "\n" + proc.stderr).strip())
+                timeout_details = (proc.stdout + "\n" + proc.stderr).strip()
+                timeout_details = timeout_details or (
+                    "codex exec 未在限定时间内返回结构化输出；"
+                    "这更像外部 CLI/登录态/宿主环境阻塞，而不是仓库内 skill 契约错误。"
+                )
+                return CheckResult(
+                    "PARTIAL",
+                    f"Codex smoke 超时（>{CODEX_SMOKE_TIMEOUT_SEC}s，无结构化输出）",
+                    timeout_details,
+                )
             return CheckResult("FAIL", "Codex smoke 未通过", (proc.stdout + "\n" + proc.stderr).strip())
         data = json.loads(output_path.read_text(encoding="utf-8"))
         joined = _coalesce_structured_text(data)

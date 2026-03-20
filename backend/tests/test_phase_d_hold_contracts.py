@@ -127,8 +127,6 @@ def test_phase_d_hold_default_flags_off_in_env_and_profiles() -> None:
         "RETRIEVAL_SQLITE_VEC_EXTENSION_PATH": "",
         "RETRIEVAL_VECTOR_ENGINE": "legacy",
         "RETRIEVAL_SQLITE_VEC_READ_RATIO": "0",
-        "RUNTIME_WRITE_WAL_ENABLED": "false",
-        "RUNTIME_WRITE_JOURNAL_MODE": "delete",
         "RUNTIME_WRITE_WAL_SYNCHRONOUS": "normal",
         "RUNTIME_WRITE_BUSY_TIMEOUT_MS": "5000",
         "RUNTIME_WRITE_WAL_AUTOCHECKPOINT": "1000",
@@ -162,6 +160,32 @@ def test_phase_d_hold_default_flags_off_in_env_and_profiles() -> None:
         for key, expected in expected_defaults.items():
             assert pairs[key] == expected, (
                 f"{contract_file} expects {key}={expected}, got {pairs[key]!r}"
+            )
+        if "/deploy/profiles/docker/" in str(contract_file).replace("\\", "/"):
+            assert pairs["MEMORY_PALACE_DOCKER_WAL_ENABLED"] == "true", (
+                f"{contract_file} expects MEMORY_PALACE_DOCKER_WAL_ENABLED=true, "
+                f"got {pairs['MEMORY_PALACE_DOCKER_WAL_ENABLED']!r}"
+            )
+            assert pairs["MEMORY_PALACE_DOCKER_JOURNAL_MODE"] == "wal", (
+                f"{contract_file} expects MEMORY_PALACE_DOCKER_JOURNAL_MODE=wal, "
+                f"got {pairs['MEMORY_PALACE_DOCKER_JOURNAL_MODE']!r}"
+            )
+            assert pairs["RUNTIME_WRITE_WAL_ENABLED"] == "true", (
+                f"{contract_file} expects RUNTIME_WRITE_WAL_ENABLED=true, "
+                f"got {pairs['RUNTIME_WRITE_WAL_ENABLED']!r}"
+            )
+            assert pairs["RUNTIME_WRITE_JOURNAL_MODE"] == "wal", (
+                f"{contract_file} expects RUNTIME_WRITE_JOURNAL_MODE=wal, "
+                f"got {pairs['RUNTIME_WRITE_JOURNAL_MODE']!r}"
+            )
+        else:
+            assert pairs["RUNTIME_WRITE_WAL_ENABLED"] == "false", (
+                f"{contract_file} expects RUNTIME_WRITE_WAL_ENABLED=false, "
+                f"got {pairs['RUNTIME_WRITE_WAL_ENABLED']!r}"
+            )
+            assert pairs["RUNTIME_WRITE_JOURNAL_MODE"] == "delete", (
+                f"{contract_file} expects RUNTIME_WRITE_JOURNAL_MODE=delete, "
+                f"got {pairs['RUNTIME_WRITE_JOURNAL_MODE']!r}"
             )
 
 

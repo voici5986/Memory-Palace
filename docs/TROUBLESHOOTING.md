@@ -25,7 +25,7 @@
    curl -fsS http://127.0.0.1:8000/health
    ```
 
-   > 后端健康检查端点 `GET /health` 会返回 `status`、`index`、`runtime` 等字段（参见 `backend/main.py` 中 `health()` 函数）。
+   > 后端健康检查端点 `GET /health` 对本机 loopback 或带有效 `MCP_API_KEY` 的请求会返回 `status`、`index`、`runtime` 等详细字段；未鉴权的远端请求只返回浅健康信息（参见 `backend/main.py` 中 `health()` 函数）。
 
 2. 确认**前端代理目标正确**：
 

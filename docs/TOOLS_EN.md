@@ -336,7 +336,8 @@ search_memory(
 | `query_preprocess` | Query preprocessing info |
 | `intent` | Intent classification: `factual` / `exploratory` / `temporal` / `causal` / `unknown` |
 | `mode_applied` | Actual retrieval mode used |
-| `results` | List of search results |
+| `results` | List of search results; the returned order now matches the exposed `results[].score` field |
+| `results[].score` | The visible ranking score; `results` are returned in descending order of this field by default |
 | `degrade_reasons` | Degradation reasons (if any) |
 
 **Usage Examples:**

@@ -104,13 +104,13 @@ const zhCN = {
         '这一部分控制 /browse、/review、/maintenance、/setup 等受保护接口的访问。',
       apiKeyLabel: 'MCP API 密钥',
       apiKeyHint:
-        '如果后端启用了 MCP_API_KEY，请在这里输入同一把 key，这样浏览器就能立刻访问受保护页面。',
+        '如果后端启用了 MCP_API_KEY，请在这里输入同一把 key，这样浏览器就能立刻访问受保护页面。仅浏览器保存会把这把 key 留在当前浏览器会话里，因此不要在共享或不受信任的浏览器中使用。',
       apiKeyPlaceholder: '输入 MCP_API_KEY',
       insecureLocalLabel: '允许本地不安全访问',
       insecureLocalHint:
         '对应 MCP_API_KEY_ALLOW_INSECURE_LOCAL=true。只建议在你自己机器的回环地址调试时开启。',
       browserScope:
-        '只有 Dashboard API key 会保存在浏览器里。下面填写的 provider key 只会发送一次到后端 setup API，并不会写入浏览器本地存储。',
+        '只有 Dashboard API key 会保存在当前浏览器会话里。下面填写的 provider key 只会发送一次到后端 setup API，并不会写入浏览器本地存储。不要在共享浏览器或你无法控制的浏览器配置里保存这把 key。',
     },
     retrieval: {
       title: '检索配置',
@@ -201,7 +201,7 @@ const zhCN = {
       intent: '意图 LLM',
       restartHint: '完全生效前需要重启：{{targets}}。',
       browserOnlyHint:
-        '只保存浏览器密钥时，会把 Dashboard 密钥保存在当前浏览器里，直到你手动清除；不会改写后端运行参数。',
+        '只保存浏览器密钥时，会把 Dashboard 密钥保存在当前浏览器会话里，直到你手动清除或这次浏览器会话结束；不会改写后端运行参数。不要在共享或不受信任的浏览器中使用。',
     },
     actions: {
       nextTitle: '应用改动',
@@ -215,7 +215,7 @@ const zhCN = {
     messages: {
       statusUnavailable: '加载 setup 状态失败。',
       browserOnlyRequiresKey: '请先输入 MCP API 密钥，再执行仅浏览器保存。',
-      browserOnlySaved: 'Dashboard 密钥已保存到当前浏览器，除非你手动清除。',
+      browserOnlySaved: 'Dashboard 密钥已保存到当前浏览器会话中，除非你手动清除或这次浏览器会话结束。',
       serverSaved: '本地配置已写入 {{target}}。',
       saveFailed: '保存配置失败。',
     },

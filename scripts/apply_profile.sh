@@ -142,6 +142,28 @@ get_env_value() {
   printf '%s\n' "${raw_value%$'\r'}"
 }
 
+trim_env_value() {
+  local value="${1:-}"
+  value="${value%$'\r'}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "${value}"
+}
+
+sync_docker_wal_overrides() {
+  local file_path="$1"
+  local wal_enabled
+  local journal_mode
+  wal_enabled="$(trim_env_value "$(get_env_value "${file_path}" "RUNTIME_WRITE_WAL_ENABLED")")"
+  journal_mode="$(trim_env_value "$(get_env_value "${file_path}" "RUNTIME_WRITE_JOURNAL_MODE")")"
+  if [[ -n "${wal_enabled}" ]]; then
+    set_env_value "${file_path}" "MEMORY_PALACE_DOCKER_WAL_ENABLED" "${wal_enabled}"
+  fi
+  if [[ -n "${journal_mode}" ]]; then
+    set_env_value "${file_path}" "MEMORY_PALACE_DOCKER_JOURNAL_MODE" "${journal_mode}"
+  fi
+}
+
 resolve_windows_db_path() {
   local db_path="${PROJECT_ROOT}/demo.db"
   if command -v cygpath >/dev/null 2>&1; then
@@ -258,6 +280,7 @@ if [[ "${platform}" == "docker" ]]; then
     set_env_value "${target_file}" "MCP_API_KEY" "${generated_mcp_api_key}"
     echo "[auto-fill] MCP_API_KEY generated for docker profile"
   fi
+  sync_docker_wal_overrides "${target_file}"
 fi
 
 dedupe_env_keys "${target_file}"
