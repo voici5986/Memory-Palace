@@ -480,14 +480,24 @@ export default function ObservabilityPage() {
         (normalizedDetail.includes('already') && normalizedDetail.includes('final'));
       if (statusCode === 404) {
         if (isJobNotFound) {
-          setRebuildMessage(t('observability.messages.cancelSkipped', { job: jobId, detail: 'job not found' }));
+          setRebuildMessage(
+            t('observability.messages.cancelSkipped', {
+              job: jobId,
+              detail: t('observability.messages.cancelJobNotFoundDetail'),
+            })
+          );
           await loadSummary();
         } else {
           setRebuildMessage(t('observability.messages.cancelFailed', { job: jobId, detail }));
         }
       } else if (statusCode === 409) {
         if (isAlreadyFinalized) {
-          setRebuildMessage(t('observability.messages.cancelSkipped', { job: jobId, detail: 'already finalized' }));
+          setRebuildMessage(
+            t('observability.messages.cancelSkipped', {
+              job: jobId,
+              detail: t('observability.messages.cancelAlreadyFinalizedDetail'),
+            })
+          );
           await loadSummary();
         } else {
           setRebuildMessage(t('observability.messages.cancelFailed', { job: jobId, detail }));

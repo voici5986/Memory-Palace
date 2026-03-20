@@ -106,9 +106,11 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。
+> apply_profile 脚本会将 `.env.example` 复制到 `.env`（或你指定的目标文件），然后追加对应 Profile 的覆盖配置。macOS / Windows 本地模板都会自动检测并填充 `DATABASE_URL`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
+>
+> 如果你只是想先看最终会生成什么内容，macOS / Linux 下可以直接用 `bash scripts/apply_profile.sh --dry-run ...`。这条路径只打印最终结果，不会真正写目标文件。
 >
 > 本地 `profile c/d` 现在也会默认保留 `RUNTIME_AUTO_FLUSH_ENABLED=true`，所以只要你没有手工覆盖，生成出来的 `.env` 会继续沿用和 A/B 一致的 auto-flush 默认值。
 >
@@ -239,7 +241,7 @@ VITE v7.x.x  ready in xxx ms
 
 > 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要你改的是 embedding / reranker / write_guard / intent 这类后端运行参数，保存后仍然需要重启 `backend` / `sse`（Docker 路径则继续建议用 profile 脚本重启容器）。
 
-> 当前前端默认英文；如果你更习惯中文，直接点右上角语言按钮即可切换，浏览器会记住你的选择。
+> 前端会先恢复浏览器里已保存的语言；如果还没有保存值，常见中文浏览器语言（例如 `zh`、`zh-TW`、`zh-HK` 和其他 `zh-*`）会自动归并到 `zh-CN`，其他首次访问场景则回退到英文。如果你想手动切换，直接点右上角语言按钮即可，浏览器也会记住你的选择。
 
 > 前端开发服务器通过 `vite.config.js` 中配置的 proxy 将 `/api` 代理到 `MEMORY_PALACE_API_PROXY_TARGET`（默认 `http://127.0.0.1:8000`）。
 >

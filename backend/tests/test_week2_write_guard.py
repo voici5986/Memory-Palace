@@ -283,6 +283,10 @@ async def test_create_memory_is_fail_closed_when_guard_unavailable(
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
     assert payload["guard_method"] == "exception"
+    assert payload["retryable"] is True
+    assert "Retry" in payload["retry_hint"]
+    assert payload["degraded"] is True
+    assert payload["degrade_reasons"] == ["write_guard_exception"]
     assert fake_client.create_called is False
 
 
@@ -315,6 +319,7 @@ async def test_create_memory_invalid_guard_action_is_fail_closed(
     assert payload["ok"] is False
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
+    assert payload["guard_invalid_action"] is True
     assert "invalid_guard_action" in str(payload.get("guard_reason") or "")
     assert fake_client.create_called is False
 
@@ -342,6 +347,7 @@ async def test_create_memory_missing_guard_action_is_fail_closed(
     assert payload["ok"] is False
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
+    assert payload["guard_invalid_action"] is True
     assert "invalid_guard_action:MISSING" in str(payload.get("guard_reason") or "")
     assert fake_client.create_called is False
 
@@ -370,6 +376,7 @@ async def test_create_memory_guard_bypass_action_is_fail_closed(
     assert payload["ok"] is False
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
+    assert payload["guard_invalid_action"] is True
     assert "invalid_guard_action:BYPASS" in str(payload.get("guard_reason") or "")
     assert fake_client.create_called is False
 

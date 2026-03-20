@@ -50,9 +50,9 @@ backend/
 ### 核心模块说明
 
 - **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复、退出前 best-effort drain pending auto-flush summary）、CORS 配置、路由注册（`review`、`browse`、`maintenance`、`setup`）和健康检查。当前 `/health` 对本机 loopback 或带有效 `MCP_API_KEY` 的请求会返回索引状态、write lane 与 index worker 的详细运行时信息；未鉴权的远端探活只返回浅健康结果，避免把内部状态直接暴露出去。如果这类详细健康检查已经进入降级态，HTTP 状态码也会直接变成 `503`，方便 Docker healthcheck 和运维探活按“未就绪”处理。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。
-- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。
+- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。`create_memory` 在 write guard 临时异常或降级导致 fail-closed 时，当前返回里也会明确标出 `retryable` / `retry_hint`，避免调用方把“临时不可用”误读成“永远不能创建”。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。当前 session-first 检索缓存与 flush tracker 都采用“**单 session 限长 + 总 session 数上限**”的进程内边界，避免长时间运行后按 session 数无限增长；session-first 命中缓存还会惰性清理过期条目，避免旧命中长期占着容量。
-- **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。它现在还会在受信代理链路下优先按 `X-Forwarded-For` / `X-Real-IP` 识别真实客户端地址来做 `/messages` burst limit，并默认发送 15 秒 heartbeat ping。仓库当前保留两种使用方式：本地可独立运行 `run_sse.py` 做 standalone 调试；Docker 默认路径则把同一套 SSE 入口直接挂进 `main.py` 的 backend 进程，通过前端代理暴露。
+- **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。它现在还会在受信代理链路下优先按 `X-Forwarded-For` / `X-Real-IP` 识别真实客户端地址来做 `/messages` burst limit，并默认发送 15 秒 heartbeat ping。传输层的 host/origin 校验现在默认保留本机回环 allowlist；如果你确实需要远程 hostname / origin 通过校验，可以显式补 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是依赖非回环监听地址去“自动放开”。仓库当前保留两种使用方式：本地可独立运行 `run_sse.py` 做 standalone 调试；Docker 默认路径则把同一套 SSE 入口直接挂进 `main.py` 的 backend 进程，通过前端代理暴露。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。
 - **`db/migration_runner.py`**：负责发现和执行 SQL migration，并记录版本与 checksum。当前 checksum 归一化不仅会处理 `CRLF/LF`，也会剥离 UTF-8 BOM，所以同一份 migration 只是被 Windows/Notepad 改了文件头，不会被误判成 schema drift。
 
@@ -221,7 +221,7 @@ frontend/src/
 
 补充说明：
 
-- 当前版本的前端默认英文；应用壳层右上角同时提供语言切换入口与统一鉴权入口
+- 当前版本的前端会先恢复浏览器里已保存的语言；如果没有保存值，常见中文浏览器语言（`zh`、`zh-TW`、`zh-HK` 和其他 `zh-*`）会统一归并到 `zh-CN`，其他首次访问场景则回退到英文。应用壳层右上角同时提供语言切换入口与统一鉴权入口
 - 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`

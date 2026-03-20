@@ -16,14 +16,18 @@ def _reload_mcp_server():
     return importlib.reload(mcp_server_module)
 
 
-def test_remote_host_disables_dns_rebinding_protection(monkeypatch) -> None:
+def test_remote_host_keeps_loopback_transport_security_by_default(monkeypatch) -> None:
     monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+    monkeypatch.delenv("MCP_ALLOWED_ORIGINS", raising=False)
 
     module = _reload_mcp_server()
 
     assert module.mcp.settings.host == "0.0.0.0"
     assert module.mcp.settings.transport_security is not None
-    assert module.mcp.settings.transport_security.enable_dns_rebinding_protection is False
+    assert module.mcp.settings.transport_security.enable_dns_rebinding_protection is True
+    assert "127.0.0.1:*" in module.mcp.settings.transport_security.allowed_hosts
+    assert "http://localhost:*" in module.mcp.settings.transport_security.allowed_origins
 
 
 def test_loopback_host_keeps_dns_rebinding_protection(monkeypatch) -> None:
@@ -35,6 +39,29 @@ def test_loopback_host_keeps_dns_rebinding_protection(monkeypatch) -> None:
     assert module.mcp.settings.transport_security is not None
     assert module.mcp.settings.transport_security.enable_dns_rebinding_protection is True
     assert "127.0.0.1:*" in module.mcp.settings.transport_security.allowed_hosts
+
+
+def test_transport_security_appends_explicit_allowlists(monkeypatch) -> None:
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "memory.example.com:443, api.example.com:*")
+    monkeypatch.setenv(
+        "MCP_ALLOWED_ORIGINS",
+        "https://memory.example.com,https://console.example.com",
+    )
+
+    module = _reload_mcp_server()
+
+    assert module.mcp.settings.transport_security is not None
+    assert "memory.example.com:443" in module.mcp.settings.transport_security.allowed_hosts
+    assert "api.example.com:*" in module.mcp.settings.transport_security.allowed_hosts
+    assert (
+        "https://memory.example.com"
+        in module.mcp.settings.transport_security.allowed_origins
+    )
+    assert (
+        "https://console.example.com"
+        in module.mcp.settings.transport_security.allowed_origins
+    )
 
 
 def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:

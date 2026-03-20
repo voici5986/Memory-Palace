@@ -106,9 +106,11 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` files are input templates for the scripts, not the final `.env` files we recommend you copy directly. For the user path, keep using `apply_profile.sh/.ps1`; it is the safer path because it also fills paths automatically and deduplicates repeated keys.
 
-> The `apply_profile` script copies `.env.example` to `.env` (or your specified target file) and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`.
+> The `apply_profile` script copies `.env.example` to `.env` (or your specified target file) and then appends the override configuration for the corresponding Profile. For local macOS / Windows templates, it also automatically detects and fills in `DATABASE_URL`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
+>
+> If you only want to preview the generated output first, on macOS / Linux you can run `bash scripts/apply_profile.sh --dry-run ...`. That path prints the final env content without writing the target file.
 >
 > Local `profile c/d` now also keeps `RUNTIME_AUTO_FLUSH_ENABLED=true` by default, so unless you override it yourself, the generated `.env` keeps the same auto-flush default as A/B.
 >
@@ -240,7 +242,7 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 
 > The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
-> The frontend defaults to English; if you prefer Chinese, click the language button in the top right to switch, and the browser will remember your choice.
+> The frontend restores the stored language first. If there is no stored choice yet, common Chinese browser locales (`zh`, `zh-TW`, `zh-HK`, and similar `zh-*`) are normalized to `zh-CN`; other first-visit cases fall back to English. If you want to switch manually, use the language button in the top right, and the browser will remember your choice.
 
 > The frontend dev server proxies `/api` to `MEMORY_PALACE_API_PROXY_TARGET` (default: `http://127.0.0.1:8000`) via `vite.config.js`.
 >

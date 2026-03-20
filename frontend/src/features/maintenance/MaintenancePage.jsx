@@ -19,6 +19,7 @@ import {
 import { formatDateTime } from '../../lib/format';
 
 const VITALITY_PREPARE_MAX_SELECTIONS = 100;
+const DEFAULT_VITALITY_REVIEWER = 'maintenance_dashboard';
 
 const formatDateTimeOrUnknown = (value, lng, fallback) => {
   const parsed = new Date(value);
@@ -57,7 +58,7 @@ export default function MaintenancePage() {
   const [vitalityLimit, setVitalityLimit] = useState(80);
   const [vitalityDomain, setVitalityDomain] = useState('');
   const [vitalityPathPrefix, setVitalityPathPrefix] = useState('');
-  const [vitalityReviewer, setVitalityReviewer] = useState('maintenance_dashboard');
+  const [vitalityReviewer, setVitalityReviewer] = useState(DEFAULT_VITALITY_REVIEWER);
   const [vitalityProcessing, setVitalityProcessing] = useState(false);
   const [vitalityPreparedReview, setVitalityPreparedReview] = useState(null);
   const [vitalityLastResult, setVitalityLastResult] = useState(null);
@@ -316,7 +317,7 @@ export default function MaintenancePage() {
     try {
       const payload = await prepareVitalityCleanup({
         action: normalizedAction,
-        reviewer: vitalityReviewer.trim() || 'maintenance_dashboard',
+        reviewer: vitalityReviewer.trim() || DEFAULT_VITALITY_REVIEWER,
         selections: reviewRows.map(item => ({
           memory_id: item.memory_id,
           state_hash: item.state_hash,
@@ -829,7 +830,9 @@ export default function MaintenancePage() {
                     }}
                     disabled={vitalityProcessing}
                     className="w-36 rounded border border-stone-700 bg-stone-900 px-2 py-1 text-stone-200"
-                    placeholder="maintenance_dashboard"
+                    placeholder={t('maintenance.vitality.reviewerPlaceholder', {
+                      value: DEFAULT_VITALITY_REVIEWER,
+                    })}
                   />
                 </label>
                 <button

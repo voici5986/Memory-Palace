@@ -422,7 +422,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> Script Logic: Copies `.env.example` to `.env`, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`.
+> Script Logic: Copies `.env.example` to `.env`, then appends the override parameters from `deploy/profiles/<platform>/profile-<x>.env`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file; if you only want to preview the final result first, use `bash scripts/apply_profile.sh --dry-run ...`.
 >
 > `apply_profile.sh/.ps1` currently deduplicates env keys after generation to prevent inconsistent behavior across different parsers for keys that appear multiple times.
 >
@@ -563,7 +563,7 @@ When using **Docker one-click deployment**, you don't need to write the key into
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection.
+> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection. If your remote hostname / origin should also pass MCP transport-security host/origin checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
 >
 > In Docker / Compose, SSE is now served directly by the `backend` process and then reached through the frontend proxy; there is no separate `sse` container in the default topology anymore.
 

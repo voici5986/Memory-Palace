@@ -77,8 +77,10 @@ def _stub_post_json(response: Optional[Dict[str, Any]]) -> Any:
         endpoint: str,
         payload: Dict[str, Any],
         api_key: str = "",
+        error_sink: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         _ = api_key
+        _ = error_sink
         assert base == "http://fake.write-guard/v1"
         assert endpoint == "/chat/completions"
         assert payload["model"] == "fake-write-guard-model"
@@ -141,6 +143,50 @@ async def test_write_guard_llm_request_failed_records_degrade_reason(
     )
     assert decision["action"] == "ADD"
     assert decision["degrade_reasons"] == ["write_guard_llm_request_failed"]
+
+
+@pytest.mark.asyncio
+async def test_write_guard_llm_model_unavailable_records_specific_degrade_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_write_guard_env(monkeypatch)
+    monkeypatch.setenv("WRITE_GUARD_LLM_ENABLED", "true")
+    monkeypatch.setenv("WRITE_GUARD_LLM_API_BASE", "http://fake.write-guard/v1")
+    monkeypatch.setenv("WRITE_GUARD_LLM_MODEL", "missing-write-guard-model")
+
+    client = SQLiteClient(_SQLITE_MEMORY_URL)
+    monkeypatch.setattr(client, "search_advanced", _stub_search_advanced())
+
+    async def _failing_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+        error_sink: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        _ = api_key
+        assert base == "http://fake.write-guard/v1"
+        assert endpoint == "/chat/completions"
+        assert payload["model"] == "missing-write-guard-model"
+        if error_sink is not None:
+            error_sink.update(
+                {
+                    "category": "http_status",
+                    "status_code": 404,
+                    "body": "model missing-write-guard-model not found",
+                }
+            )
+        return None
+
+    monkeypatch.setattr(client, "_post_json", _failing_post_json)
+
+    try:
+        decision = await client.write_guard(content="incoming content", domain="core")
+    finally:
+        await client.close()
+
+    assert decision["action"] == "ADD"
+    assert decision["degrade_reasons"] == ["write_guard_llm_model_unavailable"]
 
 
 @pytest.mark.asyncio

@@ -2244,6 +2244,7 @@ class SQLiteClient:
         endpoint: str,
         payload: Dict[str, Any],
         api_key: str = "",
+        error_sink: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         if not base:
             return None
@@ -2266,8 +2267,75 @@ class SQLiteClient:
             if isinstance(parsed, dict):
                 return parsed
             return {"data": parsed}
-        except (httpx.HTTPError, httpx.InvalidURL, ValueError, TypeError):
+        except httpx.HTTPStatusError as exc:
+            if error_sink is not None:
+                response = exc.response
+                error_sink.update(
+                    {
+                        "category": "http_status",
+                        "status_code": response.status_code if response is not None else None,
+                        "body": (
+                            response.text[:1000]
+                            if response is not None and isinstance(response.text, str)
+                            else ""
+                        ),
+                    }
+                )
             return None
+        except httpx.RequestError as exc:
+            if error_sink is not None:
+                error_sink.update(
+                    {
+                        "category": "request_error",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                )
+            return None
+        except httpx.InvalidURL as exc:
+            if error_sink is not None:
+                error_sink.update(
+                    {
+                        "category": "invalid_url",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                )
+            return None
+        except (ValueError, TypeError) as exc:
+            if error_sink is not None:
+                error_sink.update(
+                    {
+                        "category": "response_parse_error",
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                )
+            return None
+
+    @staticmethod
+    def _looks_like_model_unavailable_error(error_info: Dict[str, Any]) -> bool:
+        if not isinstance(error_info, dict):
+            return False
+        status_code = error_info.get("status_code")
+        body = str(error_info.get("body") or error_info.get("message") or "").lower()
+        if not body:
+            return False
+        mentions_model = "model" in body
+        unavailable_markers = (
+            "not found",
+            "does not exist",
+            "unknown",
+            "unavailable",
+            "unsupported",
+            "invalid model",
+            "model_not_found",
+        )
+        if not mentions_model:
+            return False
+        if any(marker in body for marker in unavailable_markers):
+            return True
+        return status_code in {400, 404} and "model" in body
 
     async def _fetch_remote_embedding(
         self, content: str, degrade_reasons: Optional[List[str]] = None
@@ -4694,14 +4762,23 @@ class SQLiteClient:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        error_info: Dict[str, Any] = {}
         response = await self._post_json(
             llm_api_base,
             "/chat/completions",
             payload,
             llm_api_key,
+            error_sink=error_info,
         )
         if response is None:
-            self._append_degrade_reason(degrade_reasons, "write_guard_llm_request_failed")
+            if self._looks_like_model_unavailable_error(error_info):
+                self._append_degrade_reason(
+                    degrade_reasons, "write_guard_llm_model_unavailable"
+                )
+            else:
+                self._append_degrade_reason(
+                    degrade_reasons, "write_guard_llm_request_failed"
+                )
             return None
 
         message_text = self._extract_chat_message_text(response)

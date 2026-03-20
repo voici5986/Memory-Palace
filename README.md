@@ -59,7 +59,7 @@ If you want the AI to guide installation step by step, start with the standalone
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **Write-path recovery is tighter**: same-session snapshots now use file locks, transient SQLite lock conflicts get a small bounded retry, and background index jobs share the same write gate as foreground writes.
 - **High-noise retrieval looks stronger in the current benchmark set**: compared with the old project, the C/D profiles show better recall in harder `s8,d200` and `s100,d200` style scenarios.
-- **Dashboard language is now easier to control**: the frontend defaults to English and adds a one-click English / Chinese toggle in the top-right corner, with the selection remembered in the browser.
+- **Dashboard language is now easier to control**: the frontend restores the stored language first; if there is no stored choice yet, common Chinese browser locales fall back to `zh-CN`, otherwise it falls back to English. You can still switch between English and Chinese from the top-right corner, and the browser remembers the choice.
 - **Local operator paths are less brittle**: repo-local stdio wrappers now reuse `.env` `RETRIEVAL_REMOTE_TIMEOUT_SEC`, forward stdio in chunks instead of one byte at a time, and longer-running Dashboard observability / vitality confirmation actions get a longer client-side timeout before the browser gives up.
 - **Public claims stay conservative**: the docs now include a native-Windows repo-local stdio path through `backend/mcp_wrapper.py`, while still asking you to re-check your own remote / GUI-host deployment environment.
 - **Client boundaries are explicit**: `Claude/Codex/OpenCode/Gemini` use the documented CLI path; IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity` use repo-local rules plus an MCP snippet; `Gemini live` and GUI-only host validation still carry explicit caveats.
@@ -116,7 +116,7 @@ On the repository-shipped Docker / GHCR compose paths, compose now forces WAL by
 
 A React-powered dashboard with four views: **Memory Browser**, **Review & Rollback**, **Maintenance**, and **Observability**.
 
-The current frontend now defaults to English. Use the top-right language button to switch between English and Chinese; the browser remembers your choice and applies it to common UI copy, date/number formatting, and common API error hints, including structured validation errors returned by the backend.
+The current frontend first restores the stored language choice. If there is no stored choice yet, common Chinese browser locales (`zh`, `zh-TW`, `zh-HK`, and similar `zh-*`) are normalized to `zh-CN`; other first-visit cases fall back to English. You can still use the top-right language button to switch between English and Chinese, and the browser remembers your choice for common UI copy, date/number formatting, and common API error hints, including structured validation errors returned by the backend.
 
 Longer-running Observability search and vitality cleanup confirmation calls now also wait longer on the client side, so larger local datasets are less likely to show a browser timeout while the backend is still working.
 
@@ -398,6 +398,8 @@ Treat `deploy/profiles/*/*.env` as **Profile template inputs**, not as final `.e
 
 For `profile c/d`, `apply_profile.sh/.ps1` now also fail-closed when the generated file still contains unresolved endpoint/key/model placeholders. In plain language: replace the example `PORT`, key, and model-id values first, then continue to Docker startup or local C/D testing.
 
+On macOS / Linux, `apply_profile.sh` now also backs up an existing target file to `*.bak` before overwrite. If you only want to preview the generated result first, use `bash scripts/apply_profile.sh --dry-run ...`; that prints the final env content without writing the target file.
+
 If you previously generated `.env.docker`, do not simply rename that Docker file to `.env`. The Docker profile uses container-only paths such as `/app/data/...`; if you customized the mount to `/data/...`, that is still container-only. Local `stdio` MCP needs a host-side absolute path instead.
 
 On **macOS / Windows local setup**, the generated file still leaves `MCP_API_KEY` empty by default. If you want the Dashboard, `/browse` / `/review` / `/maintenance`, or `/sse` / `/messages` to work immediately, add either:
@@ -531,7 +533,7 @@ python run_sse.py
 >
 > The same rule now applies when `.env` itself is wrong: if `.env` or an explicit `DATABASE_URL` still points to `/app/...` or `/data/...`, the wrapper refuses to start on purpose. That is a local path configuration error, not an MCP protocol failure.
 >
-> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls.
+> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. This `HOST=127.0.0.1` example is intentionally loopback-only. If you really need remote access, switch `HOST` to `0.0.0.0` (or your bind address). That opens the listener for remote clients, but it does **not** remove the normal safety requirements — you still need your own API key, firewall, reverse proxy, and transport security controls. If your remote hostname / origin should also pass MCP transport-security checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` instead of assuming a non-loopback bind disables those checks.
 
 See [Multi-Client Integration](#-multi-client-integration) for detailed client configuration.
 
@@ -935,7 +937,7 @@ than part of the public user package.
 > 📌 These images are here to help you quickly understand the main dashboard areas.
 >
 > - They show the **typical post-entry dashboard state**
-> - The current frontend defaults to English; the screenshots below show the default English mode
+> - These screenshots show the common English-mode dashboard state; on a first visit without a stored choice, common Chinese browser locales now auto-map to `zh-CN`, and other cases fall back to English
 > - The top bar now provides a unified auth/setup entry (`Set API key` / `Update API key` / `Clear key`; when runtime auth is injected, the page shows `Runtime key active` plus a `Setup` button)
 > - If auth is not configured yet, the page shell still opens, but protected data requests show an auth hint, empty state, or `401` until credentials are available
 

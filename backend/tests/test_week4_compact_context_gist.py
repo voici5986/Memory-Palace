@@ -586,6 +586,42 @@ async def test_compact_context_preserves_gist_degrade_reasons_when_write_guard_d
     assert "compact_gist_llm_exception:RuntimeError" in payload["degrade_reasons"]
 
 
+@pytest.mark.asyncio
+async def test_compact_context_write_guard_update_marks_pending_flushed_as_merged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _GuardUpdateClient(_FakeCompactClient):
+        async def write_guard(self, **_: Any) -> Dict[str, Any]:
+            return {
+                "action": "UPDATE",
+                "method": "embedding",
+                "reason": "flush_summary_should_extend_existing_memory",
+                "target_uri": "notes://agent/auto_flush_existing",
+            }
+
+    fake_client = _GuardUpdateClient()
+    fake_tracker = _FakeFlushTracker(
+        "Session compaction notes:\n- summary should merge into existing memory"
+    )
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", fake_tracker)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _false_async)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    raw = await mcp_server.compact_context(reason="unit_test", force=True, max_lines=5)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["flushed"] is True
+    assert payload["reason"] == "write_guard_merged"
+    assert payload["guard_action"] == "UPDATE"
+    assert payload["uri"] == "notes://agent/auto_flush_existing"
+    assert fake_client.created_payload == {}
+    assert fake_tracker.marked is True
+
+
 def test_safe_int_rejects_bool_inputs() -> None:
     assert mcp_server._safe_int(True, default=7) == 7
     assert mcp_server._safe_int(False, default=7) == 7

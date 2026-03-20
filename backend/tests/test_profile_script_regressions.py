@@ -323,6 +323,85 @@ def test_apply_profile_shell_tightens_generated_env_permissions(
     assert stat.S_IMODE(generated_env.stat().st_mode) == 0o600
 
 
+def test_apply_profile_shell_backs_up_existing_target_before_overwrite(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    existing_target = project_root / ".env.generated"
+    existing_target.write_text("EXISTING_KEY=keep-me\n", encoding="utf-8")
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "macos", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    backup_path = project_root / ".env.generated.bak"
+    assert backup_path.read_text(encoding="utf-8") == "EXISTING_KEY=keep-me\n"
+    assert "EXISTING_KEY=keep-me" not in existing_target.read_text(encoding="utf-8")
+    assert "[backup] Existing .env.generated saved to .env.generated.bak" in result.stdout
+
+
+def test_apply_profile_shell_dry_run_prints_generated_env_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    existing_target = project_root / ".env.generated"
+    original_text = "EXISTING_KEY=keep-me\n"
+    existing_target.write_text(original_text, encoding="utf-8")
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "--dry-run", "macos", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "SEARCH_DEFAULT_MODE=hybrid" in result.stdout
+    assert existing_target.read_text(encoding="utf-8") == original_text
+    assert not (project_root / ".env.generated.bak").exists()
+    assert "Generated .env.generated from" not in result.stdout
+
+
 def test_repo_local_stdio_wrapper_resolves_real_project_root_through_symlink(
     tmp_path: Path,
 ) -> None:

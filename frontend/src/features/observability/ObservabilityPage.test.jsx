@@ -593,6 +593,37 @@ describe('ObservabilityPage', () => {
     expect(await screen.findByText(/Cancel skipped \(job-cancel-finalized\): already finalized/i)).toBeInTheDocument();
   });
 
+  it('localizes cancel-skipped detail text in zh-CN', async () => {
+    const runningJob = {
+      job_id: 'job-cancel-zh',
+      status: 'running',
+      task_type: 'reindex_memory',
+      memory_id: 94,
+      reason: 'cancel-zh',
+    };
+    await i18n.changeLanguage('zh-CN');
+    api.getObservabilitySummary
+      .mockResolvedValueOnce(buildSummary({ recentJobs: [runningJob], timestamp: '2026-01-01T00:00:00Z' }))
+      .mockResolvedValueOnce(buildSummary({ recentJobs: [runningJob], timestamp: '2026-01-01T00:00:01Z' }));
+    api.cancelIndexJob.mockRejectedValueOnce({
+      message: "job 'job-cancel-zh' not found.",
+      response: {
+        status: 404,
+        data: {
+          detail: "job 'job-cancel-zh' not found.",
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<ObservabilityPage />);
+
+    const jobCard = await getJobCardById('job-cancel-zh');
+    await user.click(within(jobCard).getByRole('button', { name: '取消' }));
+
+    expect(await screen.findByText('取消已跳过（job-cancel-zh）：任务不存在')).toBeInTheDocument();
+  });
+
   it('treats unknown 409 conflicts as cancel failure', async () => {
     const runningJob = {
       job_id: 'job-cancel-conflict',

@@ -153,8 +153,9 @@ create_memory(
 
 1. Automatically performs a **Write Guard** check before creation.
 2. If Guard decides `NOOP` / `UPDATE` / `DELETE`, creation is blocked, and `guard_target_uri` is returned as a suggestion.
-3. `title` only allows letters, numbers, underscores, and hyphens (no spaces or special characters).
-4. If `title` is omitted, the system auto-assigns a numeric ID.
+3. If creation is fail-closed because Write Guard is temporarily unavailable or degraded, the response may also include `retryable=true` and `retry_hint`.
+4. `title` only allows letters, numbers, underscores, and hyphens (no spaces or special characters).
+5. If `title` is omitted, the system auto-assigns a numeric ID.
 
 **Usage Examples:**
 

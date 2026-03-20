@@ -4,6 +4,37 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+dry_run="false"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      dry_run="true"
+      shift
+      ;;
+    --help|-h)
+      cat <<'EOF'
+Usage: bash scripts/apply_profile.sh [--dry-run] [platform] [profile] [target-file]
+
+Examples:
+  bash scripts/apply_profile.sh macos b
+  bash scripts/apply_profile.sh --dry-run docker c .env.docker
+EOF
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 platform_input="${1:-macos}"
 profile_input="${2:-b}"
 target_file="${3:-${PROJECT_ROOT}/.env}"
@@ -57,6 +88,22 @@ normalize_cli_path() {
 }
 
 target_file="$(normalize_cli_path "${target_file}")"
+
+log_info() {
+  if [[ "${dry_run}" == "true" ]]; then
+    printf '%s\n' "$*" >&2
+    return 0
+  fi
+  printf '%s\n' "$*"
+}
+
+backup_target_file() {
+  local file_path="$1"
+  local backup_path="${file_path}.bak"
+  cp "${file_path}" "${backup_path}"
+  chmod 600 "${backup_path}" 2>/dev/null || true
+  log_info "[backup] Existing ${file_path} saved to ${backup_path}"
+}
 
 set_env_value() {
   local file_path="$1"
@@ -229,6 +276,7 @@ dedupe_env_keys() {
 validate_profile_placeholders() {
   local file_path="$1"
   local selected_profile="$2"
+  local display_path="${3:-${file_path}}"
   if [[ "${selected_profile}" != "c" && "${selected_profile}" != "d" ]]; then
     return 0
   fi
@@ -249,7 +297,7 @@ validate_profile_placeholders() {
   fi
 
   {
-    echo "Generated ${file_path}, but profile ${selected_profile} still contains unresolved placeholders:"
+    echo "Generated ${display_path}, but profile ${selected_profile} still contains unresolved placeholders:"
     printf '  %s\n' "${unresolved_lines[@]}"
     echo "Fill the placeholder values before using profile ${selected_profile}."
   } >&2
@@ -266,44 +314,65 @@ if [[ ! -f "${override_env}" ]]; then
   exit 1
 fi
 
-cp "${base_env}" "${target_file}"
+staged_file="$(mktemp "${TMPDIR:-/tmp}/${target_file##*/}.staged.XXXXXX")"
+cleanup_staged_file() {
+  if [[ -n "${staged_file:-}" && -f "${staged_file}" ]]; then
+    rm -f "${staged_file}"
+  fi
+}
+trap cleanup_staged_file EXIT
+
+cp "${base_env}" "${staged_file}"
 {
   echo
   echo "# -----------------------------------------------------------------------------"
   echo "# Appended profile overrides (${platform}/profile-${profile})"
   echo "# -----------------------------------------------------------------------------"
   cat "${override_env}"
-} >> "${target_file}"
-chmod 600 "${target_file}" 2>/dev/null || true
+} >> "${staged_file}"
+chmod 600 "${staged_file}" 2>/dev/null || true
 
 if [[ "${platform}" == "macos" || "${platform}" == "linux" ]]; then
-  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${target_file}"; then
+  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${staged_file}"; then
     db_path="${PROJECT_ROOT}/demo.db"
-    set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"
-    echo "[auto-fill] DATABASE_URL set to ${db_path}"
+    set_env_value "${staged_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"
+    log_info "[auto-fill] DATABASE_URL set to ${db_path}"
   fi
 elif [[ "${platform}" == "windows" ]]; then
-  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${target_file}"; then
+  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${staged_file}"; then
     if db_path="$(resolve_windows_db_path)"; then
-      set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:///${db_path}"
-      echo "[auto-fill] DATABASE_URL set to ${db_path}"
+      set_env_value "${staged_file}" "DATABASE_URL" "sqlite+aiosqlite:///${db_path}"
+      log_info "[auto-fill] DATABASE_URL set to ${db_path}"
     fi
   fi
 fi
 
 if [[ "${platform}" == "docker" ]]; then
-  current_mcp_api_key="$(get_env_value "${target_file}" "MCP_API_KEY")"
+  current_mcp_api_key="$(get_env_value "${staged_file}" "MCP_API_KEY")"
   if [[ -z "${current_mcp_api_key}" ]]; then
     generated_mcp_api_key="$(generate_random_mcp_api_key)"
-    set_env_value "${target_file}" "MCP_API_KEY" "${generated_mcp_api_key}"
-    echo "[auto-fill] MCP_API_KEY generated for docker profile"
+    set_env_value "${staged_file}" "MCP_API_KEY" "${generated_mcp_api_key}"
+    log_info "[auto-fill] MCP_API_KEY generated for docker profile"
   fi
-  sync_docker_wal_overrides "${target_file}"
+  sync_docker_wal_overrides "${staged_file}"
 fi
 
-ensure_default_env_value "${target_file}" "RUNTIME_AUTO_FLUSH_ENABLED" "true"
+ensure_default_env_value "${staged_file}" "RUNTIME_AUTO_FLUSH_ENABLED" "true"
 
-dedupe_env_keys "${target_file}"
-validate_profile_placeholders "${target_file}" "${profile}"
+dedupe_env_keys "${staged_file}"
+validate_profile_placeholders "${staged_file}" "${profile}" "${target_file}"
 
-echo "Generated ${target_file} from ${override_env}"
+if [[ "${dry_run}" == "true" ]]; then
+  cat "${staged_file}"
+  exit 0
+fi
+
+if [[ -e "${target_file}" ]]; then
+  backup_target_file "${target_file}"
+fi
+
+mv "${staged_file}" "${target_file}"
+chmod 600 "${target_file}" 2>/dev/null || true
+staged_file=""
+
+log_info "Generated ${target_file} from ${override_env}"

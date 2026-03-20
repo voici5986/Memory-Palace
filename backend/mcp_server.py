@@ -62,18 +62,36 @@ def _read_mcp_port() -> int:
     return value if value > 0 else 8000
 
 
+def _csv_env_values(name: str) -> List[str]:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return []
+    return [item for item in (part.strip() for part in raw.split(",")) if item]
+
+
 def _build_transport_security(host: str) -> TransportSecuritySettings:
-    if host in {"127.0.0.1", "localhost", "::1"}:
-        return TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
-            allowed_origins=[
+    allowed_hosts = list(
+        dict.fromkeys(
+            ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+            + _csv_env_values("MCP_ALLOWED_HOSTS")
+        )
+    )
+    allowed_origins = list(
+        dict.fromkeys(
+            [
                 "http://127.0.0.1:*",
                 "http://localhost:*",
                 "http://[::1]:*",
-            ],
+            ]
+            + _csv_env_values("MCP_ALLOWED_ORIGINS")
         )
-    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    )
+    _ = host
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 # Initialize FastMCP server
@@ -656,8 +674,10 @@ def _normalize_guard_decision(
     valid_actions = {"ADD", "UPDATE", "NOOP", "DELETE"}
     if allow_bypass:
         valid_actions.add("BYPASS")
+    invalid_action = False
     if action not in valid_actions:
         action = "NOOP"
+        invalid_action = True
         marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
         marker = f"invalid_guard_action:{marker_value}"
         reason = marker if not reason else f"{marker}; {reason}"
@@ -682,6 +702,7 @@ def _normalize_guard_decision(
         "target_uri": target_uri,
         "degraded": bool(decision.get("degraded")),
         "degrade_reasons": degrade_reasons,
+        "invalid_action": invalid_action,
     }
 
 
@@ -692,7 +713,31 @@ def _guard_fields(decision: Dict[str, Any]) -> Dict[str, Any]:
         "guard_method": decision.get("method"),
         "guard_target_id": decision.get("target_id"),
         "guard_target_uri": decision.get("target_uri"),
+        "guard_invalid_action": bool(decision.get("invalid_action")),
     }
+
+
+def _guard_block_metadata(
+    decision: Dict[str, Any], *, retry_on_degraded: bool = False
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    degrade_reasons = decision.get("degrade_reasons")
+    if bool(decision.get("degraded")):
+        payload["degraded"] = True
+        if isinstance(degrade_reasons, list) and degrade_reasons:
+            payload["degrade_reasons"] = [
+                item for item in degrade_reasons if isinstance(item, str) and item
+            ]
+    if retry_on_degraded and (
+        bool(decision.get("degraded"))
+        or str(decision.get("method") or "").strip().lower() == "exception"
+    ):
+        payload["retryable"] = True
+        payload["retry_hint"] = (
+            "Write Guard is temporarily unavailable or degraded. Retry after the "
+            "retrieval or LLM dependencies recover."
+        )
+    return payload
 
 
 def _tool_response(*, ok: bool, message: str, **extra: Any) -> str:
@@ -1633,8 +1678,7 @@ async def _flush_session_summary_to_memory(
                 pass
             if guard_blocked:
                 guard_is_degraded = bool(guard_decision.get("degraded"))
-                guard_reason = str(guard_decision.get("reason") or "")
-                guard_is_invalid = guard_reason.startswith("invalid_guard_action:")
+                guard_is_invalid = bool(guard_decision.get("invalid_action"))
                 if (
                     guard_action in {"NOOP", "UPDATE"}
                     and not guard_is_degraded
@@ -1645,9 +1689,14 @@ async def _flush_session_summary_to_memory(
                     await runtime_state.flush_tracker.mark_flushed(
                         session_id=session_id
                     )
+                    dedupe_reason = (
+                        "write_guard_merged"
+                        if guard_action == "UPDATE"
+                        else "write_guard_deduped"
+                    )
                     payload: Dict[str, Any] = {
                         "flushed": True,
-                        "reason": "write_guard_deduped",
+                        "reason": dedupe_reason,
                         **_guard_fields(guard_decision),
                     }
                     guard_target_uri = guard_decision.get("target_uri")
@@ -3608,6 +3657,10 @@ async def create_memory(
                     reason="write_guard_blocked",
                     uri=target_uri,
                     **_guard_fields(guard_decision),
+                    **_guard_block_metadata(
+                        guard_decision,
+                        retry_on_degraded=True,
+                    ),
                 )
 
             result = await client.create_memory(
@@ -3932,6 +3985,9 @@ async def update_memory(
             blocked = False
             if content is not None:
                 if guard_action == "ADD":
+                    # Content updates keep the current URI stable. If the guard thinks the
+                    # new content looks like a fresh memory, we still treat this as an
+                    # in-place revision instead of forcing the caller down create_memory.
                     blocked = False
                 elif guard_action == "UPDATE":
                     target_id = guard_decision.get("target_id")

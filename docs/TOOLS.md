@@ -153,8 +153,9 @@ create_memory(
 
 1. 创建前自动执行 **Write Guard** 检查
 2. 若 Guard 判定为 `NOOP` / `UPDATE` / `DELETE`，创建会被阻止，返回建议目标 `guard_target_uri`
-3. `title` 只允许字母、数字、下划线和连字符（不允许空格和特殊字符）
-4. 若省略 `title`，系统自动分配数字 ID
+3. 若创建是因为 Write Guard 临时异常或降级而被 fail-closed，响应里还会额外带 `retryable=true` 与 `retry_hint`
+4. `title` 只允许字母、数字、下划线和连字符（不允许空格和特殊字符）
+5. 若省略 `title`，系统自动分配数字 ID
 
 **使用示例：**
 

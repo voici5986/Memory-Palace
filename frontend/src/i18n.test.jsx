@@ -80,6 +80,40 @@ describe('i18n bootstrap', () => {
     expect(document.title).toBe('Memory Palace 控制台');
   });
 
+  it('maps zh-TW navigator locale to zh-CN on fresh init when no stored locale exists', async () => {
+    const originalLanguage = window.navigator.language;
+    const originalLanguages = window.navigator.languages;
+
+    Object.defineProperty(window.navigator, 'language', {
+      configurable: true,
+      value: 'zh-TW',
+    });
+    Object.defineProperty(window.navigator, 'languages', {
+      configurable: true,
+      value: ['zh-TW', 'zh'],
+    });
+
+    try {
+      vi.resetModules();
+      const [{ default: freshI18n, LOCALE_STORAGE_KEY }] = await Promise.all([
+        import('./i18n'),
+      ]);
+
+      await waitFor(() => expect(freshI18n.resolvedLanguage).toBe('zh-CN'));
+      expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-CN');
+      expect(document.documentElement.lang).toBe('zh-CN');
+    } finally {
+      Object.defineProperty(window.navigator, 'language', {
+        configurable: true,
+        value: originalLanguage,
+      });
+      Object.defineProperty(window.navigator, 'languages', {
+        configurable: true,
+        value: originalLanguages,
+      });
+    }
+  });
+
   it('renders interpolated html-like values without double-escaping in React', async () => {
     vi.resetModules();
     const [{ default: freshI18n }] = await Promise.all([

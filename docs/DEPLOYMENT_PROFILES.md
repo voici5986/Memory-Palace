@@ -418,7 +418,7 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。
+> 脚本执行逻辑：复制 `.env.example` 为 `.env`，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...` 做预览。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
 >
@@ -554,7 +554,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。若你的远程 hostname / origin 也需要通过 MCP 传输层的 host/origin 校验，请显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
 
 Docker 一键部署时，直接使用：
 
