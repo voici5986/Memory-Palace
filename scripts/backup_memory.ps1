@@ -184,9 +184,18 @@ import sqlite3
 source = os.environ["MEMORY_PALACE_BACKUP_SOURCE"]
 target = os.environ["MEMORY_PALACE_BACKUP_TARGET"]
 
-with sqlite3.connect(source) as source_conn:
-    with sqlite3.connect(target) as target_conn:
-        source_conn.backup(target_conn)
+try:
+    with sqlite3.connect(source, timeout=30.0) as source_conn:
+        source_conn.execute("PRAGMA busy_timeout = 30000")
+        with sqlite3.connect(target, timeout=30.0) as target_conn:
+            target_conn.execute("PRAGMA busy_timeout = 30000")
+            source_conn.backup(target_conn, pages=256, sleep=0.05)
+except (OSError, sqlite3.Error):
+    try:
+        os.remove(target)
+    except OSError:
+        pass
+    raise
 '@
 
 & $pythonCmd -c $backupScript

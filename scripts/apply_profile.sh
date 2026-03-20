@@ -19,10 +19,6 @@ case "${platform}" in
     ;;
 esac
 
-if [[ "${platform}" == "linux" ]]; then
-  platform="macos"
-fi
-
 case "${profile}" in
   a|b|c|d) ;;
   *)
@@ -32,7 +28,12 @@ case "${profile}" in
 esac
 
 base_env="${PROJECT_ROOT}/.env.example"
-override_env="${PROJECT_ROOT}/deploy/profiles/${platform}/profile-${profile}.env"
+template_platform="${platform}"
+if [[ "${template_platform}" == "linux" ]]; then
+  echo "[profile] linux currently reuses the macos local profile template and fills a host DATABASE_URL." >&2
+  template_platform="macos"
+fi
+override_env="${PROJECT_ROOT}/deploy/profiles/${template_platform}/profile-${profile}.env"
 
 normalize_cli_path() {
   local raw_path="${1:-}"
@@ -80,6 +81,7 @@ set_env_value() {
     }
   ' "${file_path}" > "${tmp_file}"
   mv "${tmp_file}" "${file_path}"
+  chmod 600 "${file_path}" 2>/dev/null || true
 }
 
 generate_random_mcp_api_key() {
@@ -201,8 +203,11 @@ dedupe_env_keys() {
     set_env_value "${file_path}" "${key}" "${value}"
   done < <(
     awk '
-      match($0, /^[[:space:]]*([A-Z0-9_]+)[[:space:]]*=/, matches) {
-        count[matches[1]]++
+      /^[[:space:]]*[A-Z0-9_]+[[:space:]]*=/ {
+        line = $0
+        sub(/^[[:space:]]*/, "", line)
+        sub(/[[:space:]]*=.*$/, "", line)
+        count[line]++
       }
       END { for (key in count) if (count[key] > 1) print key }
     ' "${file_path}" | sort
@@ -257,8 +262,9 @@ cp "${base_env}" "${target_file}"
   echo "# -----------------------------------------------------------------------------"
   cat "${override_env}"
 } >> "${target_file}"
+chmod 600 "${target_file}" 2>/dev/null || true
 
-if [[ "${platform}" == "macos" ]]; then
+if [[ "${platform}" == "macos" || "${platform}" == "linux" ]]; then
   if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${target_file}"; then
     db_path="${PROJECT_ROOT}/demo.db"
     set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"

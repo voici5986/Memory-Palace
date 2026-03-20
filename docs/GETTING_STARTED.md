@@ -408,7 +408,7 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 
 > 备份文件默认写入 `backups/`。如果你准备分享仓库或打包交付，通常不需要把它一并带上。
 >
-> 这两条备份脚本都会先读取你指定 env 文件里的 `DATABASE_URL`，自动去掉可选的 query / fragment（例如 `?mode=...`、`#...`），再对实际 SQLite 文件做一致性备份。原生 Windows 优先用 `backup_memory.ps1`；`Git Bash` / `WSL` 继续用 `backup_memory.sh` 即可。当前 `backup_memory.sh` 还会先给源/目标连接加 `busy_timeout`，再按小批量页面做增量 backup；如果中途失败，会清理半成品备份文件，避免留下看起来像成功的空备份。
+> 这两条备份脚本都会先读取你指定 env 文件里的 `DATABASE_URL`，自动去掉可选的 query / fragment（例如 `?mode=...`、`#...`），再对实际 SQLite 文件做一致性备份。原生 Windows 优先用 `backup_memory.ps1`；`Git Bash` / `WSL` 继续用 `backup_memory.sh` 即可。当前这两条脚本都会先给源/目标连接加 `busy_timeout`，再按小批量页面做增量 backup；如果中途失败，也都会清理半成品备份文件，避免留下看起来像成功的空备份。
 >
 > 如果你只是想先看脚本用法，直接运行 `bash scripts/backup_memory.sh --help` 或 `.\scripts\backup_memory.ps1 -?`。原生 Windows 的 PowerShell 脚本现在也会优先检查仓库里的 `backend/.venv`，找不到时再回退到常见的 `python3` / `py`，正常本地仓库环境一般不需要额外改 PATH。
 
@@ -680,7 +680,7 @@ claude mcp list
 说明：
 
 - `Claude Code` 当前官方 CLI 同时支持 `stdio`、`sse`、`http`
-- 公开文档里仍以 `/sse` 作为规范入口；`/sse/` 只保留成临时兼容重定向
+- 公开文档里仍以 `/sse` 作为规范入口；`/sse/` 现在只是兼容写法，也会被转发到同一条后端 SSE 链路
 - 如果未来 Memory Palace 公开提供了更明确的 HTTP / streamable HTTP MCP 入口，优先按官方推荐切到 `http`
 - 就当前仓库公开暴露的远程入口来说，用户可直接连接的是 `/sse`
 

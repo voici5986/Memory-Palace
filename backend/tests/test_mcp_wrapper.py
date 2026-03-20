@@ -194,6 +194,16 @@ def test_read_env_value_parses_quoted_value_with_inline_comment(tmp_path: Path) 
     )
 
 
+def test_normalize_env_string_value_strips_quotes_and_whitespace() -> None:
+    module = _load_module()
+
+    assert (
+        module._normalize_env_string_value('  "sqlite+aiosqlite:////tmp/demo.db"  ')
+        == "sqlite+aiosqlite:////tmp/demo.db"
+    )
+    assert module._normalize_env_string_value("  '30'  ") == "30"
+
+
 def test_read_stream_chunk_prefers_read1_when_available() -> None:
     module = _load_module()
 

@@ -108,7 +108,7 @@ PY
   done
 }
 
-normalize_database_url() {
+normalize_env_value() {
   local value="${1:-}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
@@ -132,7 +132,7 @@ format_sqlite_absolute_url() {
 
 is_docker_internal_database_url() {
   local value
-  value="$(normalize_database_url "${1:-}")"
+  value="$(normalize_env_value "${1:-}")"
   local prefix
   for prefix in "${DOCKER_INTERNAL_SQLITE_PREFIXES[@]}"; do
     case "${value}" in
@@ -158,10 +158,10 @@ fi
 
 cd "${BACKEND_DIR}"
 
-runtime_database_url="$(normalize_database_url "${DATABASE_URL:-}")"
+runtime_database_url="$(normalize_env_value "${DATABASE_URL:-}")"
 effective_database_url="${runtime_database_url}"
 if [[ -z "${runtime_database_url}" && -f "${ENV_FILE}" ]]; then
-  effective_database_url="$(normalize_database_url "$(read_env_value "${ENV_FILE}" "DATABASE_URL")")"
+  effective_database_url="$(normalize_env_value "$(read_env_value "${ENV_FILE}" "DATABASE_URL")")"
   if [[ -n "${effective_database_url}" ]]; then
     export DATABASE_URL="${effective_database_url}"
   fi
@@ -178,7 +178,7 @@ fi
 # Reuse the repo's configured DATABASE_URL when .env exists so MCP clients and
 # the Dashboard/API keep talking to the same SQLite file. Fall back to demo.db
 # only for a minimal no-.env local boot.
-if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then
+if [[ -z "$(normalize_env_value "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then
   if [[ -f "${DOCKER_ENV_FILE}" ]]; then
     echo "Refusing to fall back to demo.db while ${DOCKER_ENV_FILE} exists." >&2
     echo "The repo-local stdio wrapper does not reuse Docker's /app/data database path." >&2
@@ -188,9 +188,9 @@ if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]
   export DATABASE_URL="$(format_sqlite_absolute_url "${DEFAULT_DB_PATH}")"
 fi
 
-runtime_remote_timeout="$(normalize_database_url "${RETRIEVAL_REMOTE_TIMEOUT_SEC:-}")"
+runtime_remote_timeout="$(normalize_env_value "${RETRIEVAL_REMOTE_TIMEOUT_SEC:-}")"
 if [[ -z "${runtime_remote_timeout}" && -f "${ENV_FILE}" ]]; then
-  runtime_remote_timeout="$(normalize_database_url "$(read_env_value "${ENV_FILE}" "RETRIEVAL_REMOTE_TIMEOUT_SEC")")"
+  runtime_remote_timeout="$(normalize_env_value "$(read_env_value "${ENV_FILE}" "RETRIEVAL_REMOTE_TIMEOUT_SEC")")"
 fi
 if [[ -n "${runtime_remote_timeout}" ]]; then
   export RETRIEVAL_REMOTE_TIMEOUT_SEC="${runtime_remote_timeout}"

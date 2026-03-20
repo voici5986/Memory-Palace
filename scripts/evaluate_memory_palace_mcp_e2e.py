@@ -239,12 +239,28 @@ async def run_suite() -> tuple[list[StepResult], str]:
                 else:
                     results.append(_result("FAIL", "add_alias", "add_alias 行为异常", alias_raw + "\n\n" + alias_read))
 
-                delete_alias = _text_of(await session.call_tool("delete_memory", {"uri": "notes://pref_alias"}))
+                delete_alias = _maybe_json(
+                    _text_of(await session.call_tool("delete_memory", {"uri": "notes://pref_alias"}))
+                )
                 read_after_delete = _text_of(await session.call_tool("read_memory", {"uri": "core://pref_concise"}))
-                if "Success: Memory 'notes://pref_alias' deleted." in delete_alias and "user likes short answers" in read_after_delete:
+                if (
+                    isinstance(delete_alias, dict)
+                    and delete_alias.get("ok") is True
+                    and delete_alias.get("deleted") is True
+                    and delete_alias.get("uri") == "notes://pref_alias"
+                    and "Success: Memory 'notes://pref_alias' deleted." in str(delete_alias.get("message", ""))
+                    and "user likes short answers" in read_after_delete
+                ):
                     results.append(_result("PASS", "delete_alias", "删除 alias 后原始 core 路径仍保留"))
                 else:
-                    results.append(_result("FAIL", "delete_alias", "delete_memory/alias 行为不符合设计", delete_alias + "\n\n" + read_after_delete))
+                    results.append(
+                        _result(
+                            "FAIL",
+                            "delete_alias",
+                            "delete_memory/alias 行为不符合设计",
+                            json.dumps(delete_alias, ensure_ascii=False) + "\n\n" + read_after_delete,
+                        )
+                    )
 
                 compact_raw = _maybe_json(_text_of(await session.call_tool("compact_context", {"reason": "force test", "force": True, "max_lines": 6})))
                 if isinstance(compact_raw, dict) and compact_raw.get("ok") is True:

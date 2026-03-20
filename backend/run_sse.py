@@ -32,11 +32,11 @@ from db import close_sqlite_client
 from mcp_server import (
     drain_pending_flush_summaries,
     mcp,
-    startup as mcp_startup,
 )
 from mcp.server.sse import SseServerTransport
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from runtime_state import runtime_state
+from runtime_bootstrap import initialize_backend_runtime
 
 _MCP_API_KEY_ENV = "MCP_API_KEY"
 _MCP_API_KEY_HEADER = "X-MCP-API-Key"
@@ -78,11 +78,13 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
 
 
 def _is_loopback_port_available(port: int) -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-            return False
-    except OSError:
-        return True
+    for host in ("127.0.0.1", "::1"):
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return False
+        except OSError:
+            continue
+    return True
 
 
 def _resolve_sse_port(host: str) -> int:
@@ -92,7 +94,7 @@ def _resolve_sse_port(host: str) -> int:
 
     normalized_host = str(host or "").strip().lower()
     if (
-        normalized_host in {"127.0.0.1", "localhost"}
+        normalized_host in {"127.0.0.1", "localhost", "::1"}
         and not _is_loopback_port_available(_DEFAULT_SSE_PORT)
     ):
         print(
@@ -624,6 +626,7 @@ def create_sse_app(
     *,
     include_health: bool = True,
     manage_runtime_lifecycle: bool = True,
+    initialize_runtime_on_startup: bool = False,
 ) -> ASGIApp:
     transport = _create_sse_transport()
     sse_endpoint, health_endpoint = _build_sse_handlers(transport)
@@ -644,6 +647,8 @@ def create_sse_app(
     if manage_runtime_lifecycle:
         @asynccontextmanager
         async def lifespan(_app: Starlette):
+            if initialize_runtime_on_startup:
+                await initialize_backend_runtime()
             yield
             try:
                 await drain_pending_flush_summaries(reason="runtime.shutdown")
@@ -661,10 +666,7 @@ def main():
     This is required for clients that don't support stdio (like some web-based tools).
     """
     print("Initializing Memory Palace SSE Server...")
-    asyncio.run(mcp_startup())
-
-    # Create the Starlette app for SSE with optional API key guard.
-    app = create_sse_app()
+    app = create_sse_app(initialize_runtime_on_startup=True)
 
     host = str(os.getenv("HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port = _resolve_sse_port(host)

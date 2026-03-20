@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -102,6 +103,44 @@ def test_apply_profile_shell_rewrites_database_url_when_placeholder_has_spacing_
     assert make_url(database_url).database == expected_db_path
     assert "<your-user>" not in generated_text
     assert "DATABASE_URL =" not in generated_text
+
+
+def test_apply_profile_shell_linux_keeps_local_template_selection_but_writes_host_path(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "linux", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "linux" in result.stderr
+    assert "macos local profile template" in result.stderr
+    database_url = dotenv_values(project_root / ".env.generated").get("DATABASE_URL")
+    assert isinstance(database_url, str)
+    expected_db_path = (project_root / "demo.db").as_posix()
+    assert database_url == f"sqlite+aiosqlite:///{expected_db_path}"
 
 
 def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
@@ -214,6 +253,40 @@ def test_apply_profile_shell_docker_profile_syncs_compose_wal_overrides(
     values = dotenv_values(project_root / ".env.docker")
     assert values.get("MEMORY_PALACE_DOCKER_WAL_ENABLED") == "false"
     assert values.get("MEMORY_PALACE_DOCKER_JOURNAL_MODE") == "delete"
+
+
+def test_apply_profile_shell_tightens_generated_env_permissions(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "macos", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    generated_env = project_root / ".env.generated"
+    assert stat.S_IMODE(generated_env.stat().st_mode) == 0o600
 
 
 def test_repo_local_stdio_wrapper_resolves_real_project_root_through_symlink(

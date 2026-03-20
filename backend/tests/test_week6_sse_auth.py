@@ -270,6 +270,38 @@ def test_sse_health_endpoint_stays_public_when_api_key_is_configured(monkeypatch
     assert response.json() == {"status": "ok", "service": "memory-palace-sse"}
 
 
+def test_create_sse_app_initializes_runtime_in_lifespan_when_enabled(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+
+    async def _fake_initialize_runtime() -> None:
+        events.append("startup")
+
+    async def _fake_drain_pending_flush_summaries(*_args, **_kwargs) -> None:
+        events.append("drain")
+
+    async def _fake_shutdown() -> None:
+        events.append("shutdown")
+
+    async def _fake_close_sqlite_client() -> None:
+        events.append("close")
+
+    monkeypatch.setattr(run_sse, "initialize_backend_runtime", _fake_initialize_runtime)
+    monkeypatch.setattr(
+        run_sse, "drain_pending_flush_summaries", _fake_drain_pending_flush_summaries
+    )
+    monkeypatch.setattr(run_sse.runtime_state, "shutdown", _fake_shutdown)
+    monkeypatch.setattr(run_sse, "close_sqlite_client", _fake_close_sqlite_client)
+
+    with TestClient(create_sse_app(initialize_runtime_on_startup=True)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "memory-palace-sse"}
+    assert events == ["startup", "drain", "shutdown", "close"]
+
+
 def test_embedded_sse_message_mounts_accept_both_message_paths(monkeypatch) -> None:
     monkeypatch.setenv("MCP_API_KEY", "week6-sse-secret")
     monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
@@ -869,20 +901,16 @@ async def test_sse_cancelled_run_propagates_after_transport_cleanup(monkeypatch)
     ]
 
 
-def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:
+def test_sse_main_requests_runtime_initialization_before_uvicorn(monkeypatch) -> None:
     call_order = []
 
-    async def _fake_startup() -> None:
-        call_order.append("startup")
-
-    def _fake_create_sse_app():
-        call_order.append("create_sse_app")
+    def _fake_create_sse_app(**kwargs):
+        call_order.append(("create_sse_app", kwargs))
         return {"app": "fake"}
 
     def _fake_uvicorn_run(app, host, port):
         call_order.append(("uvicorn", host, port, app))
 
-    monkeypatch.setattr(run_sse, "mcp_startup", _fake_startup)
     monkeypatch.setattr(run_sse, "create_sse_app", _fake_create_sse_app)
     monkeypatch.setattr(run_sse.uvicorn, "run", _fake_uvicorn_run)
     monkeypatch.setenv("HOST", "127.0.0.1")
@@ -890,11 +918,10 @@ def test_sse_main_runs_mcp_startup_before_uvicorn(monkeypatch) -> None:
 
     run_sse.main()
 
-    assert call_order[0] == "startup"
-    assert call_order[1] == "create_sse_app"
-    assert call_order[2][0] == "uvicorn"
-    assert call_order[2][1] == "127.0.0.1"
-    assert call_order[2][2] == 8010
+    assert call_order[0] == ("create_sse_app", {"initialize_runtime_on_startup": True})
+    assert call_order[1][0] == "uvicorn"
+    assert call_order[1][1] == "127.0.0.1"
+    assert call_order[1][2] == 8010
 
 
 def test_sse_malformed_message_returns_400_without_internal_error_event(tmp_path) -> None:

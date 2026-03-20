@@ -107,6 +107,13 @@ Profiles C and D use the same algorithm path, both calling OpenAI-compatible API
 > - Embedding: `RETRIEVAL_EMBEDDING_*`
 > - Reranker: `RETRIEVAL_RERANKER_*`
 > - If you also want to enable LLM-assisted write guard / gist / intent routing: Fill in `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optionally `INTENT_LLM_*`.
+>
+> **If you are only doing a retrieval smoke test right now**:
+> - **Profile C**: first make the embedding path work
+> - **Profile D**: add the reranker path on top of Profile C
+> - `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and `INTENT_LLM_*` are not hard prerequisites for a retrieval smoke test
+>
+> The repository's real-profile helper follows the same boundary today: `Profile C = API embedding`, `Profile D = API embedding + reranker`. A local small-sample smoke run was rechecked against that same boundary as well.
 
 **Profile C** (Local Model Services) —— Suitable for those with a GPU or using local inference like Ollama/vLLM:
 
@@ -145,6 +152,8 @@ RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # Note: There is no RETRIEVAL_RERANKER_BACKEND configuration item
 ```
+
+> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code does not try to guess this value for you; when it is wrong, you usually see the mismatch later during indexing or retrieval.
 
 **Profile D** (Remote API Services) —— No local GPU required, uses cloud models:
 

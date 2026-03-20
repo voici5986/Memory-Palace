@@ -738,6 +738,20 @@ collect_backend_bind_mounts_from_compose_config() {
         current_target = "/app/data"
       }
     }
+    function extract_inline_type(value, normalized, marker_index) {
+      normalized = strip_quotes(value)
+      marker_index = index(normalized, "type:")
+      if (marker_index == 0) {
+        return ""
+      }
+      normalized = substr(normalized, marker_index + length("type:"))
+      sub(/^[[:space:]]+/, "", normalized)
+      if (normalized == "") {
+        return ""
+      }
+      sub(/[[:space:]].*$/, "", normalized)
+      return normalized
+    }
     function flush_record() {
       if (current_type == "bind" && current_source != "" && current_target != "") {
         print current_source "\t" current_target
@@ -763,8 +777,9 @@ collect_backend_bind_mounts_from_compose_config() {
         flush_record()
         value = $0
         sub(/^      - /, "", value)
-        if (match(value, /type: ([^[:space:]]+)/, match_parts)) {
-          current_type = match_parts[1]
+        inline_type = extract_inline_type(value)
+        if (inline_type != "") {
+          current_type = inline_type
         } else {
           parse_bind_shorthand(value)
         }

@@ -248,6 +248,7 @@ delete_memory(
 - This deletes the **URI path**, not the underlying memory body version chain.
 - If a memory has multiple alias paths, deleting one does not affect others.
 - It is recommended to `read_memory` to confirm content before deletion.
+- The current return value is a **structured JSON string**, with common fields such as `ok`, `deleted`, `uri`, and `message`.
 
 **Usage Example:**
 

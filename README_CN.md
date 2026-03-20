@@ -554,7 +554,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，脚本会自动生成一把本地 key。前端会在代理层自动带上这把 key，所以按推荐的一键脚本路径启动时，**受保护请求通常已经能直接用**；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。这不一定代表配置坏了；只有当受保护数据也一起报 `401` 或空态时，才需要继续排查 env / 代理配置。
 >
-> 客户端配置里仍然请把 `/sse` 当成规范公开入口来写。`/sse/` 现在只保留成一个临时兼容重定向，所以新的示例和你自己的配置都继续写 `/sse` 即可。
+> 客户端配置里仍然请把 `/sse` 当成规范公开入口来写。`/sse/` 现在只保留成兼容写法，也会转发到同一条后端 SSE 路径，所以新的示例和你自己的配置都继续写 `/sse` 即可。
 >
 > 也请把这个 Docker 前端端口当成可信操作员 / 管理入口。只要有人能直接访问 `http://<你的主机>:3000`，他就能使用 Dashboard 以及被代理的受保护接口，所以不要把这个端口当成“有 `MCP_API_KEY` 就等于终端用户鉴权”的公网入口；若要给受信范围之外的人访问，请先在前面加你自己的 VPN、反向代理鉴权或网络访问控制。
 >
@@ -684,7 +684,7 @@ Memory Palace 通过 MCP 协议暴露 **9 个标准化工具**：
 | **读写** | `read_memory` | 读取记忆内容（完整或按 `RETRIEVAL_CHUNK_SIZE` 分块）|
 | | `create_memory` | 创建新记忆节点（先通过 Write Guard 预检；建议始终显式填写 `title`）|
 | | `update_memory` | 更新现有记忆（优先用 Patch；只有真的要追加到末尾时再用 Append）|
-| | `delete_memory` | 删除记忆路径 |
+| | `delete_memory` | 删除记忆路径（返回结构化 JSON 字符串） |
 | | `add_alias` | 为记忆添加别名路径 |
 | **检索** | `search_memory` | 统一搜索入口，支持 `keyword` / `semantic` / `hybrid` 模式 |
 | **治理** | `compact_context` | 压缩会话上下文为长期摘要（Gist + Trace）|

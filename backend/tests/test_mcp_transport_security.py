@@ -40,13 +40,13 @@ def test_loopback_host_keeps_dns_rebinding_protection(monkeypatch) -> None:
 def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
     calls: list[tuple[str, int]] = []
 
-    async def _noop_startup() -> None:
-        return None
-
     monkeypatch.delenv("HOST", raising=False)
     monkeypatch.delenv("PORT", raising=False)
-    monkeypatch.setattr(run_sse, "mcp_startup", _noop_startup)
-    monkeypatch.setattr(run_sse, "create_sse_app", lambda: "app")
+    monkeypatch.setattr(
+        run_sse,
+        "create_sse_app",
+        lambda **kwargs: "app",
+    )
     monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: True)
     monkeypatch.setattr(
         run_sse.uvicorn,
@@ -57,6 +57,54 @@ def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
     run_sse.main()
 
     assert calls == [("127.0.0.1", 8000)]
+
+
+def test_loopback_port_probe_checks_ipv6_when_ipv4_is_free(monkeypatch) -> None:
+    attempts: list[tuple[str, int]] = []
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            _ = exc_type, exc, tb
+            return False
+
+    def _fake_create_connection(address, timeout=0.2):
+        attempts.append(address)
+        _ = timeout
+        if address[0] == "127.0.0.1":
+            raise OSError("ipv4 closed")
+        if address[0] == "::1":
+            return _Connection()
+        raise AssertionError(address)
+
+    monkeypatch.setattr(run_sse.socket, "create_connection", _fake_create_connection)
+
+    assert run_sse._is_loopback_port_available(8000) is False
+    assert attempts == [("127.0.0.1", 8000), ("::1", 8000)]
+
+
+def test_run_sse_main_falls_back_for_ipv6_loopback_host(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+
+    monkeypatch.setenv("HOST", "::1")
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.setattr(
+        run_sse,
+        "create_sse_app",
+        lambda **kwargs: "app",
+    )
+    monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: False)
+    monkeypatch.setattr(
+        run_sse.uvicorn,
+        "run",
+        lambda app, host, port: calls.append((host, port)),
+    )
+
+    run_sse.main()
+
+    assert calls == [("::1", 8010)]
 
 
 def test_sse_transport_security_rejects_invalid_host_without_traceback(tmp_path) -> None:

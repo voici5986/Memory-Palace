@@ -222,7 +222,7 @@ The real problem is still only whether that path points into the container.
 
    If this doesn't work, prioritize troubleshooting processes and ports; if it already returns `{"status":"ok","service":"memory-palace-sse"}`, continue checking authentication or sessions for `/sse` and `/messages`.
 
-   One more small boundary: the frontend proxy still treats `/sse` as the canonical path. If a client accidentally uses `/sse/`, the frontend now redirects it back to `/sse` automatically. So keep writing `/sse` in docs and client configs; a trailing slash is no longer a reason by itself to assume the proxy is broken.
+   One more small boundary: the frontend proxy still treats `/sse` as the canonical path. If a client accidentally uses `/sse/`, the frontend now forwards it to the same backend SSE path as well. So keep writing `/sse` in docs and client configs, but a trailing slash is no longer a reason by itself to assume the proxy is broken.
 
 3. Change the port (`run_sse.py` tries `8000` first; use `8010` explicitly when needed):
 

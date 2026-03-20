@@ -554,7 +554,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > If `MCP_API_KEY` is empty in the Docker env file, the profile helper generates a local key automatically. The frontend proxy uses that key on the server side, so on the recommended one-click path, **protected requests usually already work**. The page may still keep showing `Set API key`, because the browser itself does not know the proxy-held key. Treat that as expected unless protected data also starts failing with `401` or empty states.
 >
-> Keep using `/sse` as the canonical public URL in client configs. `/sse/` is only kept as a temporary compatibility redirect, so new examples and operator docs should continue to point to `/sse`.
+> Keep using `/sse` as the canonical public URL in client configs. `/sse/` is now only kept as a compatibility spelling and is forwarded to the same backend SSE path, so new examples and operator docs should continue to point to `/sse`.
 >
 > Treat that Docker frontend port as a trusted operator/admin surface. Anyone who can directly reach `http://<host>:3000` can use the Dashboard and its proxied protected routes, so do not expose this port to untrusted networks as if `MCP_API_KEY` were end-user auth. Add your own VPN, reverse-proxy auth, or network ACL in front of it.
 >
@@ -676,7 +676,7 @@ Memory Palace exposes **9 standardized tools** via the MCP protocol:
 | **Read/Write** | `read_memory` | Read memory content (full or chunked by `RETRIEVAL_CHUNK_SIZE`) |
 | | `create_memory` | Create new memory node (passes through Write Guard first; prefer giving an explicit `title`) |
 | | `update_memory` | Update existing memory (prefer Patch mode; use Append only for real tail appends) |
-| | `delete_memory` | Delete a memory path |
+| | `delete_memory` | Delete a memory path (returns a structured JSON string) |
 | | `add_alias` | Add an alias path for a memory |
 | **Retrieval** | `search_memory` | Unified search entry with `keyword` / `semantic` / `hybrid` modes |
 | **Governance** | `compact_context` | Compress session context into long-term summary (Gist + Trace) |

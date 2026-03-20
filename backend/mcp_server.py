@@ -36,6 +36,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from db.sqlite_client import get_sqlite_client
 from db.snapshot import get_snapshot_manager
 from runtime_state import runtime_state
+from runtime_bootstrap import initialize_backend_runtime
 
 # Load environment variables
 # Explicitly look for .env in the parent directory (project root)
@@ -4083,6 +4084,7 @@ async def delete_memory(uri: str) -> str:
         delete_memory("writer://draft_v1")
     """
     client = get_sqlite_client()
+    full_uri = str(uri or "")
 
     try:
         # Parse URI
@@ -4097,7 +4099,12 @@ async def delete_memory(uri: str) -> str:
         # Check if it exists first
         memory = await client.get_memory_by_path(path, domain)
         if not memory:
-            return f"Error: Memory at '{full_uri}' not found."
+            return _tool_response(
+                ok=False,
+                message=f"Error: Memory at '{full_uri}' not found.",
+                deleted=False,
+                uri=full_uri,
+            )
 
         async def _write_task():
             await _snapshot_path_delete(full_uri)
@@ -4120,12 +4127,27 @@ async def delete_memory(uri: str) -> str:
         except Exception:
             pass
 
-        return f"Success: Memory '{full_uri}' deleted."
+        return _tool_response(
+            ok=True,
+            message=f"Success: Memory '{full_uri}' deleted.",
+            deleted=True,
+            uri=full_uri,
+        )
 
     except ValueError as e:
-        return f"Error: {str(e)}"
+        return _tool_response(
+            ok=False,
+            message=f"Error: {str(e)}",
+            deleted=False,
+            uri=full_uri,
+        )
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _tool_response(
+            ok=False,
+            message=f"Error: {str(e)}",
+            deleted=False,
+            uri=full_uri,
+        )
 
 
 @mcp.tool()
@@ -4933,8 +4955,7 @@ async def index_status() -> str:
 
 async def startup():
     """Initialize the database on startup."""
-    client = get_sqlite_client()
-    await client.init_db()
+    await initialize_backend_runtime(ensure_runtime_started=False)
 
 
 if __name__ == "__main__":

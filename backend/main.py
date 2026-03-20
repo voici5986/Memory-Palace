@@ -1,16 +1,14 @@
 import inspect
 import os
-import sqlite3
-import stat
 import hmac
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import unquote
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
 
 def _load_project_dotenv(project_root: Optional[Path] = None) -> Optional[Path]:
@@ -32,6 +30,11 @@ from api.maintenance import (
 )
 from db import get_sqlite_client, close_sqlite_client
 from runtime_state import runtime_state
+from runtime_bootstrap import (
+    _extract_sqlite_file_path,
+    initialize_backend_runtime,
+    _try_restore_legacy_sqlite_file,
+)
 from run_sse import create_embedded_sse_apps
 
 
@@ -73,7 +76,6 @@ _DEFAULT_CORS_ALLOW_ORIGINS: tuple[str, ...] = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 )
-_LEGACY_REQUIRED_TABLE_NAMES: tuple[str, ...] = ("memories",)
 
 
 def _resolve_cors_config() -> tuple[list[str], bool]:
@@ -89,129 +91,15 @@ def _resolve_cors_config() -> tuple[list[str], bool]:
     return origins, allow_credentials
 
 
-def _extract_sqlite_file_path(database_url: Optional[str]) -> Optional[Path]:
-    """Extract local file path from sqlite+aiosqlite URL."""
-    if not database_url:
-        return None
-    prefix = "sqlite+aiosqlite:///"
-    if not database_url.startswith(prefix):
-        return None
-    raw_path = database_url[len(prefix):]
-    raw_path = raw_path.split("?", 1)[0].split("#", 1)[0]
-    raw_path = unquote(raw_path)
-    if not raw_path:
-        return None
-    if raw_path == ":memory:" or raw_path.startswith("file::memory:"):
-        return None
-    if raw_path.startswith("/") or (
-        len(raw_path) >= 3 and raw_path[1] == ":" and raw_path[2] == "/"
-    ):
-        return Path(raw_path)
-    return Path(raw_path)
-
-
-def _is_regular_file_no_symlink(path: Path) -> bool:
-    try:
-        file_mode = path.stat(follow_symlinks=False).st_mode
-    except OSError:
-        return False
-    return stat.S_ISREG(file_mode)
-
-
-def _sqlite_quick_check_ok(conn: sqlite3.Connection) -> bool:
-    try:
-        rows = conn.execute("PRAGMA quick_check(1)").fetchall()
-    except sqlite3.Error:
-        return False
-    if len(rows) != 1 or not rows[0]:
-        return False
-    return str(rows[0][0]).strip().lower() == "ok"
-
-
-def _sqlite_has_required_legacy_tables(conn: sqlite3.Connection) -> bool:
-    placeholders = ",".join("?" for _ in _LEGACY_REQUIRED_TABLE_NAMES)
-    if not placeholders:
-        return True
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT name
-            FROM sqlite_master
-            WHERE type='table'
-              AND name IN ({placeholders})
-            LIMIT 1
-            """,
-            tuple(_LEGACY_REQUIRED_TABLE_NAMES),
-        ).fetchall()
-    except sqlite3.Error:
-        return False
-    return bool(rows)
-
-
-def _try_restore_legacy_sqlite_file(database_url: Optional[str]) -> None:
-    """
-    Compatibility helper:
-    if the new DB file does not exist but a legacy filename exists in the same
-    directory, copy it to the new path so upgrades keep old data.
-    """
-    target_path = _extract_sqlite_file_path(database_url)
-    if not target_path or target_path.exists():
-        return
-    target_dir = target_path.parent
-    if not target_dir.exists():
+def _mount_embedded_sse_apps(app: FastAPI) -> None:
+    if getattr(app.state, "embedded_sse_mounted", False):
         return
 
-    legacy_candidates = (
-        "agent_memory.db",
-        "nocturne_memory.db",
-        "nocturne.db",
-    )
-    for legacy_name in legacy_candidates:
-        legacy_path = target_dir / legacy_name
-        if not legacy_path.exists():
-            continue
-
-        if not _is_regular_file_no_symlink(legacy_path):
-            print(
-                f"[compat] Skipped legacy database file {legacy_path}: "
-                "not a regular file"
-            )
-            continue
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            with sqlite3.connect(f"file:{legacy_path}?mode=ro", uri=True) as source_conn:
-                if not _sqlite_quick_check_ok(source_conn):
-                    print(
-                        f"[compat] Skipped legacy database file {legacy_path}: "
-                        "sqlite quick_check failed"
-                    )
-                    continue
-                if not _sqlite_has_required_legacy_tables(source_conn):
-                    print(
-                        f"[compat] Skipped legacy database file {legacy_path}: "
-                        "missing expected legacy tables"
-                    )
-                    continue
-                with sqlite3.connect(target_path) as target_conn:
-                    source_conn.backup(target_conn)
-        except sqlite3.Error as exc:
-            print(
-                f"[compat] Skipped legacy database file {legacy_path}: "
-                f"sqlite error: {exc}"
-            )
-            if target_path.exists():
-                try:
-                    target_path.unlink()
-                except OSError:
-                    pass
-            continue
-
-        print(
-            f"[compat] Restored legacy database file from {legacy_path} "
-            f"to {target_path}"
-        )
-        return
+    embedded_sse_stream_app, embedded_sse_message_app = create_embedded_sse_apps()
+    app.mount("/sse/messages", embedded_sse_message_app)
+    app.mount("/messages", embedded_sse_message_app)
+    app.mount("/sse", embedded_sse_stream_app)
+    app.state.embedded_sse_mounted = True
 
 
 @asynccontextmanager
@@ -222,10 +110,8 @@ async def lifespan(app: FastAPI):
     
     # Initialize SQLite
     try:
-        _try_restore_legacy_sqlite_file(os.getenv("DATABASE_URL"))
-        sqlite_client = get_sqlite_client()
-        await sqlite_client.init_db()
-        await runtime_state.ensure_started(get_sqlite_client)
+        await initialize_backend_runtime()
+        _mount_embedded_sse_apps(app)
         print("SQLite database initialized.")
     except Exception as e:
         print(f"Failed to initialize SQLite: {e}")
@@ -373,12 +259,6 @@ async def health(
         }
 
     return payload
-
-
-embedded_sse_stream_app, embedded_sse_message_app = create_embedded_sse_apps()
-app.mount("/sse/messages", embedded_sse_message_app)
-app.mount("/messages", embedded_sse_message_app)
-app.mount("/sse", embedded_sse_stream_app)
 
 
 if __name__ == "__main__":

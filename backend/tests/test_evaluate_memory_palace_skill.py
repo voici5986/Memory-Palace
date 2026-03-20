@@ -29,8 +29,8 @@ def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
     assert 'ENV_FILE="${PROJECT_ROOT}/.env"' in wrapper_text
     assert 'DOCKER_ENV_FILE="${PROJECT_ROOT}/.env.docker"' in wrapper_text
     assert 'DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"' in wrapper_text
-    assert 'runtime_database_url="$(normalize_database_url "${DATABASE_URL:-}")"' in wrapper_text
-    assert 'if [[ -z "$(normalize_database_url "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
+    assert 'runtime_database_url="$(normalize_env_value "${DATABASE_URL:-}")"' in wrapper_text
+    assert 'if [[ -z "$(normalize_env_value "${DATABASE_URL:-}")" && ! -f "${ENV_FILE}" ]]; then' in wrapper_text
     assert 'if [[ -f "${DOCKER_ENV_FILE}" ]]; then' in wrapper_text
     assert "connect your client to the Docker /sse endpoint instead." in wrapper_text
     assert 'format_sqlite_absolute_url()' in wrapper_text

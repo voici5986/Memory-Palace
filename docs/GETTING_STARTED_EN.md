@@ -409,7 +409,7 @@ bash scripts/backup_memory.sh --env-file .env --output-dir backups
 
 > Backup files are written to `backups/` by default. If you are preparing to share the repository or package it for delivery, you usually don't need to include them.
 >
-> Both backup scripts read `DATABASE_URL` from the selected env file, strip optional query / fragment suffixes such as `?mode=...` or `#...`, and then back up the resolved SQLite file. On native Windows, prefer `backup_memory.ps1`; on `Git Bash` / `WSL`, `backup_memory.sh` is fine. The current `backup_memory.sh` also adds `busy_timeout`, copies in small page batches, and removes a partial backup file if the run fails halfway, so a failed backup does not leave behind a misleading artifact.
+> Both backup scripts read `DATABASE_URL` from the selected env file, strip optional query / fragment suffixes such as `?mode=...` or `#...`, and then back up the resolved SQLite file. On native Windows, prefer `backup_memory.ps1`; on `Git Bash` / `WSL`, `backup_memory.sh` is fine. Both scripts now add `busy_timeout`, copy in small page batches, and remove a partial backup file if the run fails halfway, so a failed backup does not leave behind a misleading artifact.
 >
 > If you only want to see the usage first, run `bash scripts/backup_memory.sh --help` or `.\scripts\backup_memory.ps1 -?`. On native Windows, the PowerShell script now checks the repo `backend/.venv` first and then falls back to common launchers such as `python3` / `py`, so a normal local repo setup usually does not need a special PATH tweak before backup.
 
@@ -685,7 +685,7 @@ Notes:
 - Claude Code officially supports `stdio`, `sse`, and `http`
 - if Memory Palace later exposes a clearer HTTP / streamable HTTP MCP entry, prefer `http`
 - for the current public repository, the remote entry users can connect to directly is `/sse`
-- treat `/sse` as the canonical public URL; `/sse/` only exists as a temporary compatibility redirect
+- treat `/sse` as the canonical public URL; `/sse/` is now only a compatibility spelling and is forwarded to the same backend SSE path
 - for the GHCR / Docker path above, `<YOUR_MCP_API_KEY>` normally comes from `.env.docker`, not from a repo-local stdio wrapper
 
 ### 6.3.3 Gemini CLI manual `/sse` connection

@@ -45,7 +45,7 @@ def read_env_value(file_path: Path, key: str) -> str:
     return str(value)
 
 
-def normalize_database_url(value: str | None) -> str:
+def _normalize_env_string_value(value: str | None) -> str:
     normalized = (value or "").strip()
     if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
         normalized = normalized[1:-1]
@@ -53,7 +53,7 @@ def normalize_database_url(value: str | None) -> str:
 
 
 def is_docker_internal_database_url(value: str | None) -> bool:
-    normalized = normalize_database_url(value)
+    normalized = _normalize_env_string_value(value)
     return any(
         normalized.startswith(f"sqlite+aiosqlite:///{prefix}")
         or normalized.startswith(f"sqlite+aiosqlite://{prefix}")
@@ -83,9 +83,11 @@ def resolve_backend_python() -> Path:
 
 def build_runtime_env() -> dict[str, str]:
     runtime_env = os.environ.copy()
-    effective_database_url = normalize_database_url(runtime_env.get("DATABASE_URL", ""))
+    effective_database_url = _normalize_env_string_value(
+        runtime_env.get("DATABASE_URL", "")
+    )
     if not effective_database_url and ENV_FILE.is_file():
-        effective_database_url = normalize_database_url(
+        effective_database_url = _normalize_env_string_value(
             read_env_value(ENV_FILE, "DATABASE_URL")
         )
         if effective_database_url:
@@ -95,7 +97,7 @@ def build_runtime_env() -> dict[str, str]:
         runtime_env.get("RETRIEVAL_REMOTE_TIMEOUT_SEC", "")
     ).strip()
     if not runtime_remote_timeout and ENV_FILE.is_file():
-        runtime_remote_timeout = normalize_database_url(
+        runtime_remote_timeout = _normalize_env_string_value(
             read_env_value(ENV_FILE, "RETRIEVAL_REMOTE_TIMEOUT_SEC")
         )
         if runtime_remote_timeout:
@@ -104,7 +106,7 @@ def build_runtime_env() -> dict[str, str]:
     if is_docker_internal_database_url(effective_database_url):
         print(
             "Refusing to start repo-local stdio MCP with Docker-internal DATABASE_URL: "
-            f"{normalize_database_url(effective_database_url)}",
+            f"{_normalize_env_string_value(effective_database_url)}",
             file=sys.stderr,
         )
         print(
@@ -126,7 +128,7 @@ def build_runtime_env() -> dict[str, str]:
         raise SystemExit(1)
 
     has_runtime_database_url = bool(
-        normalize_database_url(runtime_env.get("DATABASE_URL", ""))
+        _normalize_env_string_value(runtime_env.get("DATABASE_URL", ""))
     )
     if not has_runtime_database_url and not ENV_FILE.is_file():
         if DOCKER_ENV_FILE.is_file():

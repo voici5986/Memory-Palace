@@ -256,3 +256,32 @@ def test_main_script_binds_loopback_by_default(
     runpy.run_module("main", run_name="__main__")
 
     assert calls == [("127.0.0.1", 8000)]
+
+
+def test_mount_embedded_sse_apps_is_lazy_and_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mounted_paths: list[str] = []
+
+    class _FakeState:
+        pass
+
+    class _FakeApp:
+        def __init__(self) -> None:
+            self.state = _FakeState()
+
+        def mount(self, path: str, _app) -> None:
+            mounted_paths.append(path)
+
+    monkeypatch.setattr(
+        main,
+        "create_embedded_sse_apps",
+        lambda: ({"stream": True}, {"message": True}),
+    )
+
+    app = _FakeApp()
+    main._mount_embedded_sse_apps(app)
+    main._mount_embedded_sse_apps(app)
+
+    assert mounted_paths == ["/sse/messages", "/messages", "/sse"]
+    assert app.state.embedded_sse_mounted is True

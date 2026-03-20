@@ -108,6 +108,13 @@ C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatibl
 > - Embedding：`RETRIEVAL_EMBEDDING_*`
 > - Reranker：`RETRIEVAL_RERANKER_*`
 > - 如果你还想启用 LLM 辅助的 write guard / gist / intent routing：再填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`
+>
+> **如果你现在只是做检索链路 smoke**：
+> - **Profile C**：最少先把 Embedding 链路配通
+> - **Profile D**：在 Profile C 的基础上再把 Reranker 链路配通
+> - `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*` 不是检索 smoke 的硬前提
+>
+> 当前仓库附带的 real-profile helper 也是按这个边界定义的：`Profile C = API embedding`，`Profile D = API embedding + reranker`。本地小样本 smoke 也已经按这条边界重新核对过。
 
 **Profile C**（本地模型服务）——适合有 GPU 或使用 Ollama/vLLM 等本地推理：
 
@@ -146,6 +153,8 @@ RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
+
+> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；配错了，通常就会在索引或检索阶段暴露成维度不一致问题。
 
 **Profile D**（远程 API 服务）——无需本地 GPU，使用云端模型：
 

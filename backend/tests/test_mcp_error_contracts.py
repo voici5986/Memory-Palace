@@ -126,8 +126,10 @@ async def test_update_memory_rejects_system_domain_writes() -> None:
 async def test_delete_memory_rejects_system_domain_writes(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
     raw = await mcp_server.delete_memory("system://boot")
-    assert raw.startswith("Error:")
-    assert "read-only" in raw
+    payload = json.loads(raw)
+    assert payload["ok"] is False
+    assert payload["deleted"] is False
+    assert "read-only" in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -154,8 +156,12 @@ async def test_delete_memory_records_deletion_time_in_session_cache(
     monkeypatch.setattr(mcp_server, "_utc_iso_now", lambda: "2026-03-20T12:00:00Z")
 
     raw = await mcp_server.delete_memory("core://agent/stale")
+    payload = json.loads(raw)
 
-    assert raw == "Success: Memory 'core://agent/stale' deleted."
+    assert payload["ok"] is True
+    assert payload["deleted"] is True
+    assert payload["uri"] == "core://agent/stale"
+    assert payload["message"] == "Success: Memory 'core://agent/stale' deleted."
     assert captured["updated_at"] == "2026-03-20T12:00:00Z"
 
 

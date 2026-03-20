@@ -187,6 +187,19 @@ def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> 
     assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in ps1_text
 
 
+def test_shell_compose_bind_mount_parser_avoids_gnu_awk_only_capture_groups() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function extract_inline_type(" in shell_text
+    assert "inline_type = extract_inline_type(value)" in shell_text
+    assert "match(value, /type: ([^[:space:]]+)/, match_parts)" not in shell_text
+    assert 'marker_index = index(normalized, "type:")' in shell_text
+    assert 'normalized = substr(normalized, marker_index + length("type:"))' in shell_text
+    assert 'sub(/[[:space:]].*$/, "", normalized)' in shell_text
+
+
 def test_pull_based_ghcr_release_artifacts_exist() -> None:
     ghcr_compose = (PROJECT_ROOT / "docker-compose.ghcr.yml").read_text(
         encoding="utf-8"
