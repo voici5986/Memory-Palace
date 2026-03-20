@@ -260,6 +260,19 @@ def test_docker_publish_workflow_uses_repo_backend_venv_for_validation() -> None
     assert "cd backend && .venv/bin/python -m pytest tests -q" in workflow
 
 
+def test_docker_publish_workflow_promotes_tag_refs_from_sha_images() -> None:
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "if: github.event_name == 'workflow_dispatch' || github.ref_type != 'tag'" in workflow
+    assert "promote_tag:" in workflow
+    assert 'SOURCE_TAG="sha-${GITHUB_SHA::7}"' in workflow
+    assert "docker buildx imagetools inspect" in workflow
+    assert "docker buildx imagetools create" in workflow
+    assert "type=sha,prefix=sha-,format=short" in workflow
+
+
 def test_compose_volume_defaults_are_project_scoped() -> None:
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     ghcr_compose_text = (PROJECT_ROOT / "docker-compose.ghcr.yml").read_text(
