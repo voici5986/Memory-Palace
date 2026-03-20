@@ -83,6 +83,12 @@ def test_env_example_documents_sse_message_rate_limit_knobs() -> None:
 def test_health_returns_shallow_payload_for_unauthenticated_remote_request() -> None:
     module = _reload_main_module()
 
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
+    module.initialize_backend_runtime = _noop_initialize_backend_runtime
+
     with TestClient(
         module.app,
         client=("203.0.113.10", 50000),
@@ -103,6 +109,12 @@ def test_health_returns_detailed_payload_for_authenticated_remote_request(
 ) -> None:
     monkeypatch.setenv("MCP_API_KEY", "health-secret")
     module = _reload_main_module()
+
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
+    module.initialize_backend_runtime = _noop_initialize_backend_runtime
 
     with TestClient(
         module.app,

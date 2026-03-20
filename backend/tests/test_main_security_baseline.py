@@ -186,10 +186,15 @@ async def test_health_hides_internal_exception_details(
 def test_health_endpoint_returns_503_for_detailed_internal_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
     def _boom():
         raise RuntimeError("boom-secret-detail")
 
     monkeypatch.setenv("MCP_API_KEY", "health-secret")
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
     monkeypatch.setattr(main, "get_sqlite_client", _boom)
 
     with TestClient(main.app) as client:
@@ -206,6 +211,10 @@ def test_health_endpoint_returns_503_for_detailed_internal_errors(
 def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
     class _StartupClient:
         async def init_db(self) -> None:
             return None
@@ -214,6 +223,7 @@ def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
         return None
 
     monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
     monkeypatch.setattr(main, "get_sqlite_client", lambda: _StartupClient())
     monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
 
@@ -230,6 +240,10 @@ def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
 def test_health_endpoint_keeps_shallow_payload_when_forwarded_headers_are_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
     class _StartupClient:
         async def init_db(self) -> None:
             return None
@@ -238,6 +252,7 @@ def test_health_endpoint_keeps_shallow_payload_when_forwarded_headers_are_presen
         return None
 
     monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
     monkeypatch.setattr(main, "get_sqlite_client", lambda: _StartupClient())
     monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
 
@@ -265,6 +280,10 @@ def test_health_endpoint_keeps_shallow_payload_when_forwarded_headers_are_presen
 def test_health_endpoint_keeps_detailed_payload_when_api_key_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
     class _FakeClient:
         async def init_db(self) -> None:
             return None
@@ -282,6 +301,7 @@ def test_health_endpoint_keeps_detailed_payload_when_api_key_matches(
         return {"running": True}
 
     monkeypatch.setenv("MCP_API_KEY", "health-secret")
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
     monkeypatch.setattr(main, "get_sqlite_client", lambda: _FakeClient())
     monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
     monkeypatch.setattr(main.runtime_state.write_lanes, "status", _lane_status)
@@ -301,6 +321,10 @@ def test_health_endpoint_keeps_detailed_payload_when_api_key_matches(
 def test_health_endpoint_returns_503_for_degraded_detailed_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
     class _FakeClient:
         async def get_index_status(self):
             return {"index_available": False, "degraded": True, "reason": "rebuild_required"}
@@ -312,6 +336,7 @@ def test_health_endpoint_returns_503_for_degraded_detailed_payload(
         return {"running": True}
 
     monkeypatch.setenv("MCP_API_KEY", "health-secret")
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
     monkeypatch.setattr(main, "get_sqlite_client", lambda: _FakeClient())
     monkeypatch.setattr(main.runtime_state.write_lanes, "status", _lane_status)
     monkeypatch.setattr(main.runtime_state.index_worker, "status", _worker_status)

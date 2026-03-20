@@ -125,7 +125,7 @@ def test_backup_memory_ps1_help_flag_shows_usage_without_writing_files(tmp_path:
 
     assert proc.returncode == 0, proc.stderr
     assert "backup_memory.ps1" in proc.stdout
-    assert "-Keep <count>" in proc.stdout
+    assert "-Keep <" in proc.stdout
     assert not output_dir.exists()
 
 

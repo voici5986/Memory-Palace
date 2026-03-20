@@ -144,7 +144,7 @@ function Dedupe-EnvKeys {
     $finalLines = [System.Collections.Generic.List[string]]::new()
     foreach ($item in $deduped) {
         if ($firstSeen.Contains($item) -and $lastValues.ContainsKey($item)) {
-            [void]$finalLines.Add("{0}={1}" -f $item, $lastValues[$item])
+            [void]$finalLines.Add(("{0}={1}" -f $item, $lastValues[$item]))
             continue
         }
         [void]$finalLines.Add([string]$item)
@@ -272,7 +272,7 @@ function Assert-ResolvedProfilePlaceholders {
     }
 
     [Console]::Error.WriteLine(
-        "Generated {0}, but profile {1} still contains unresolved placeholders:" -f $FilePath, $ResolvedProfile
+        ("Generated {0}, but profile {1} still contains unresolved placeholders:" -f $FilePath, $ResolvedProfile)
     )
     foreach ($item in $unresolved) {
         [Console]::Error.WriteLine("  {0}" -f $item)
