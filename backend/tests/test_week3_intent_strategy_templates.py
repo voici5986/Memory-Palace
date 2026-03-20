@@ -309,6 +309,9 @@ async def test_classify_intent_uses_scoring_and_ambiguous_fallback(
     causal = client.classify_intent("Why did rebuild fail?")
     temporal = client.classify_intent("When did rebuild happen?")
     exploratory = client.classify_intent("Explore alternatives and compare options")
+    causal_with_temporal_connector = client.classify_intent(
+        "Why did rebuild fail after the remote embedding request timed out?"
+    )
     ambiguous = client.classify_intent("Why did rebuild fail after yesterday?")
 
     await client.close()
@@ -316,6 +319,8 @@ async def test_classify_intent_uses_scoring_and_ambiguous_fallback(
     assert causal["intent"] == "causal"
     assert temporal["intent"] == "temporal"
     assert exploratory["intent"] == "exploratory"
+    assert causal_with_temporal_connector["intent"] == "causal"
+    assert causal_with_temporal_connector["strategy_template"] == "causal_wide_pool"
     assert ambiguous["intent"] == "unknown"
     assert ambiguous["strategy_template"] == "default"
 

@@ -102,7 +102,7 @@ The final "is this path still current?" revalidation step now also prefers batch
 
 ### 🧠 Intent-Aware Search
 
-The search engine routes queries with four core intent categories — **factual**, **exploratory**, **temporal**, and **causal** — and applies specialized strategy templates (`factual_high_precision`, `exploratory_high_recall`, `temporal_time_filtered`, `causal_wide_pool`); when there is no strong signal it defaults to `factual_high_precision`, and falls back to `unknown` (`default` template) only for conflicting or low-signal mixed queries.
+The search engine routes queries with four core intent categories — **factual**, **exploratory**, **temporal**, and **causal** — and applies specialized strategy templates (`factual_high_precision`, `exploratory_high_recall`, `temporal_time_filtered`, `causal_wide_pool`); when there is no strong signal it defaults to `factual_high_precision`, and falls back to `unknown` (`default` template) only for conflicting or low-signal mixed queries. In plain English: a query like `why ... after ...` is still treated as **causal** when `after/before` only describes the triggering event, while stronger time anchors such as `when`, `timeline`, or `yesterday` can still keep the fallback in `unknown`.
 
 ### ♻️ Memory Governance Loop
 
@@ -219,7 +219,7 @@ If you want a page-by-page walkthrough of the Dashboard, see [Dashboard User Gui
 #### Retrieval Pipeline (`sqlite_client.py`)
 
 1. **Query Preprocessing** — `preprocess_query()` normalizes and tokenizes the search query.
-2. **Intent Classification** — `classify_intent()` uses keyword scoring (`keyword_scoring_v2`) to determine intent: four core classes (`factual`, `exploratory`, `temporal`, `causal`); it defaults to `factual` (`factual_high_precision`) when no strong keyword signal exists, and falls back to `unknown` (`default` template) for conflicting or low-signal mixed queries.
+2. **Intent Classification** — `classify_intent()` uses keyword scoring (`keyword_scoring_v2`) to determine intent: four core classes (`factual`, `exploratory`, `temporal`, `causal`); it defaults to `factual` (`factual_high_precision`) when no strong keyword signal exists, and falls back to `unknown` (`default` template) for conflicting or low-signal mixed queries. Mixed causal/temporal queries are handled more carefully now: `why ... after/before ...` stays on the **causal** path when the time word is only a weak connector, while queries with stronger time anchors such as `when`, `timeline`, or `yesterday` still keep the conservative `unknown` fallback.
 3. **Strategy Selection** — Based on intent, a strategy template is applied (e.g., `factual_high_precision` uses tighter matching; `temporal_time_filtered` adds time range constraints).
 4. **Multi-Stage Retrieval** — Depending on the profile:
    - **Profile A**: Pure keyword matching via SQLite FTS

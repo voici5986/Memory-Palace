@@ -280,6 +280,7 @@ frontend/src/
    - `temporal` → 策略模板 `temporal_time_filtered`（时间过滤）
    - `causal` → 策略模板 `causal_wide_pool`（因果推理，宽候选池）
    - `unknown` → 策略模板 `default`（冲突或低信号混合时保守回退）
+   - 一个容易误解的边界是：`why ... after/before ...` 不会因为出现 `after/before` 就自动掉到 `unknown`；如果这些词只是描述触发事件，规则仍优先保留 `causal`。只有像 `when`、`timeline`、`yesterday` 这类更强的时间锚点一起出现时，才继续按混合低信号查询保守回退。
 3. 执行 **keyword / semantic / hybrid** 检索。
 4. 可选 **reranker** 重排序（通过远程 API 调用）。
 5. 支持额外的查询侧约束，例如 `scope_hint`、`domain`、`path_prefix`、`max_priority`。
@@ -287,7 +288,7 @@ frontend/src/
 
 > 当前向量维度检查会跟着这次查询真正命中的 scope 走，而不是对全库做一遍全局判定；所以无关 domain 里的旧向量不会再把当前作用域的语义检索误降级。若当前作用域内确实存在维度不一致，`degrade_reasons` 会明确提示需要 reindex。
 
-> 意图分类使用 `keyword_scoring_v2` 方法实现（`db/sqlite_client.py` `classify_intent` 方法），通过关键词匹配评分与排名进行意图推断，无需外部模型调用。
+> 意图分类使用 `keyword_scoring_v2` 方法实现（`db/sqlite_client.py` `classify_intent` 方法），通过关键词匹配评分与排名进行意图推断，无需外部模型调用。当前规则已经区分“弱时间连接词”和“强时间锚点”：前者不会轻易压过明显的因果意图，后者仍会触发保守回退。
 >
 > **配置策略说明**：
 > - 本项目支持两种思路：`1)` 分别直配 embedding / reranker / llm；`2)` 通过 `router` 统一代理这些能力。

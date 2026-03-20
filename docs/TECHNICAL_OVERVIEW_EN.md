@@ -280,6 +280,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
    - `temporal` → Strategy template `temporal_time_filtered` (Time-filtered)
    - `causal` → Strategy template `causal_wide_pool` (Causal reasoning, wide candidate pool)
    - `unknown` → Strategy template `default` (Conservative fallback when signals conflict or are mixed)
+   - One easy-to-miss boundary: `why ... after/before ...` does not automatically become `unknown`. If `after/before` only describes the triggering event, the rule still prefers `causal`. The conservative fallback stays for stronger time anchors such as `when`, `timeline`, or `yesterday`.
 3. Executes **keyword / semantic / hybrid** retrieval.
 4. Optional **reranker** re-ranking (via remote API call).
 5. Supports additional query-side constraints, such as `scope_hint`, `domain`, `path_prefix`, `max_priority`.
@@ -287,7 +288,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 
 > Vector-dimension checks now follow the scope that the current query actually targets instead of doing a global full-table decision first. In practice, old vectors in an unrelated domain no longer force a false semantic fallback; if the vectors inside the current scope really mismatch, `degrade_reasons` now tells the caller that a reindex is required.
 
-> Intent classification is implemented using the `keyword_scoring_v2` method (`db/sqlite_client.py` `classify_intent` method), inferring intent through keyword matching scores and rankings without external model calls.
+> Intent classification is implemented using the `keyword_scoring_v2` method (`db/sqlite_client.py` `classify_intent` method), inferring intent through keyword matching scores and rankings without external model calls. The current rule set now distinguishes weak temporal connectors from strong temporal anchors, so obvious causal queries are less likely to be pushed into the conservative fallback just because they contain `after` or `before`.
 >
 > **Configuration Strategy Notes**:
 > - This project supports two approaches: `1)` directly configuring embedding / reranker / llm separately; `2)` unifying these capabilities via a `router` proxy.

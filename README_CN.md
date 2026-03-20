@@ -98,7 +98,7 @@ Embedding 维度不匹配的检查现在会跟着**当前查询作用域**走（
 
 ### 🧠 意图感知搜索
 
-搜索引擎默认按四类核心意图路由——**factual（事实型）**、**exploratory（探索型）**、**temporal（时间型）**、**causal（因果型）**——并匹配对应策略模板（`factual_high_precision`、`exploratory_high_recall`、`temporal_time_filtered`、`causal_wide_pool`）；当无显著信号时默认 `factual_high_precision`，当信号冲突或低信号混合时回退为 `unknown`（模板 `default`）。
+搜索引擎默认按四类核心意图路由——**factual（事实型）**、**exploratory（探索型）**、**temporal（时间型）**、**causal（因果型）**——并匹配对应策略模板（`factual_high_precision`、`exploratory_high_recall`、`temporal_time_filtered`、`causal_wide_pool`）；当无显著信号时默认 `factual_high_precision`，当信号冲突或低信号混合时回退为 `unknown`（模板 `default`）。说人话就是：`why ... after ...` 这类查询，如果 `after/before` 只是描述触发事件，仍会按 **causal** 处理；只有遇到 `when`、`timeline`、`yesterday` 这类更强的时间锚点时，才继续保守回退到 `unknown`。
 
 ### ♻️ 记忆治理循环
 
@@ -215,7 +215,7 @@ Observability 搜索和活力清理确认这类更容易跑久一点的操作，
 #### 检索流水线（`sqlite_client.py`）
 
 1. **查询预处理** — `preprocess_query()` 对搜索查询进行规范化和分词。
-2. **意图分类** — `classify_intent()` 使用关键词评分方法（`keyword_scoring_v2`）判定意图：默认为 `factual`、`exploratory`、`temporal`、`causal` 四类；无显著关键词信号时默认 `factual`（`factual_high_precision`）；信号冲突或低信号混合时回退 `unknown`（模板 `default`）。
+2. **意图分类** — `classify_intent()` 使用关键词评分方法（`keyword_scoring_v2`）判定意图：默认为 `factual`、`exploratory`、`temporal`、`causal` 四类；无显著关键词信号时默认 `factual`（`factual_high_precision`）；信号冲突或低信号混合时回退 `unknown`（模板 `default`）。现在对因果/时间混合查询会更稳一些：`why ... after/before ...` 如果时间词只是弱连接词，仍走 **causal**；如果同时出现 `when`、`timeline`、`yesterday` 这类更强的时间锚点，才继续保守回退。
 3. **策略匹配** — 根据意图匹配策略模板（如 `factual_high_precision` 使用更严格的匹配；`temporal_time_filtered` 添加时间范围约束）。
 4. **多阶段检索** — 按档位执行：
    - **档位 A**：纯关键词匹配，基于 SQLite FTS

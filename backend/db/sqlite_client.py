@@ -2045,6 +2045,29 @@ class SQLiteClient:
         }
         scores = {intent: len(hits) for intent, hits in hits_by_intent.items()}
 
+        # "why ... after/before ..." queries usually ask for causes, where the
+        # temporal token is only describing the triggering event rather than
+        # asking for a timeline. Keep conservative fallback for stronger mixed
+        # time cues such as "yesterday" or "when".
+        causal_strong_hits = {
+            "why",
+            "because",
+            "cause",
+            "reason",
+            "root cause",
+            "为什么",
+            "原因",
+            "因果",
+        }
+        temporal_weak_hits = {"before", "after", "之前", "之后"}
+        causal_hits = set(hits_by_intent.get("causal", []))
+        temporal_hits = set(hits_by_intent.get("temporal", []))
+        prefer_causal_over_temporal = bool(causal_hits & causal_strong_hits) and bool(
+            temporal_hits
+        ) and temporal_hits <= temporal_weak_hits
+        if prefer_causal_over_temporal:
+            scores["causal"] = max(scores.get("causal", 0), scores.get("temporal", 0) + 1)
+
         ranked = sorted(
             ((intent, score) for intent, score in scores.items() if score > 0),
             key=lambda item: item[1],
@@ -2081,7 +2104,15 @@ class SQLiteClient:
 
             # Conservative fallback: low-signal mixed-intent queries should not
             # force a single strategy template.
-            if top_score <= 2 and (top_score - runner_score) <= 1:
+            if (
+                top_score <= 2
+                and (top_score - runner_score) <= 1
+                and not (
+                    prefer_causal_over_temporal
+                    and top_intent == "causal"
+                    and runner_intent == "temporal"
+                )
+            ):
                 ambiguous_signals = []
                 for intent in (top_intent, runner_intent):
                     for hit in hits_by_intent.get(intent, [])[:2]:
