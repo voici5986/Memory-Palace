@@ -227,6 +227,41 @@ def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
     }
 
 
+def test_health_endpoint_keeps_shallow_payload_when_forwarded_headers_are_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StartupClient:
+        async def init_db(self) -> None:
+            return None
+
+    async def _noop_ensure_started(_factory=None) -> None:
+        return None
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setattr(main, "get_sqlite_client", lambda: _StartupClient())
+    monkeypatch.setattr(main.runtime_state, "ensure_started", _noop_ensure_started)
+
+    with TestClient(
+        main.app,
+        client=("127.0.0.1", 50000),
+        base_url="http://127.0.0.1:8000",
+    ) as client:
+        response = client.get(
+            "/health",
+            headers={
+                "Host": "127.0.0.1:8000",
+                "X-Forwarded-For": "198.51.100.8",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "status": "ok",
+        "timestamp": payload["timestamp"],
+    }
+
+
 def test_health_endpoint_keeps_detailed_payload_when_api_key_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

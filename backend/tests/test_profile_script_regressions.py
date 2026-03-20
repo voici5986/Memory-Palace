@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
 
@@ -438,6 +440,103 @@ def test_apply_profile_shell_dry_run_prints_generated_env_without_touching_targe
     assert "Generated .env.generated from" not in result.stdout
 
 
+def test_apply_profile_powershell_dry_run_prints_generated_env_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh not available")
+
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.ps1"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.ps1", script_path)
+
+    existing_target = project_root / ".env.generated"
+    original_text = "EXISTING_KEY=keep-me\n"
+    existing_target.write_text(original_text, encoding="utf-8")
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/apply_profile.ps1",
+            "-Platform",
+            "macos",
+            "-Profile",
+            "b",
+            "-Target",
+            ".env.generated",
+            "-DryRun",
+        ],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "SEARCH_DEFAULT_MODE=hybrid" in result.stdout
+    assert existing_target.read_text(encoding="utf-8") == original_text
+    assert "Generated .env.generated from" not in result.stdout
+
+
+def test_apply_profile_powershell_rejects_unresolved_database_url_placeholders(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh not available")
+
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.ps1"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.ps1", script_path)
+
+    (project_root / ".env.example").write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////<still-placeholder>/memory_palace/demo.db\n",
+        encoding="utf-8",
+    )
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text("SEARCH_DEFAULT_MODE=hybrid\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            "scripts/apply_profile.ps1",
+            "-Platform",
+            "macos",
+            "-Profile",
+            "b",
+            "-Target",
+            ".env.generated",
+        ],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "DATABASE_URL still contains unresolved placeholders" in result.stderr
+
+
 def test_repo_local_stdio_wrapper_resolves_real_project_root_through_symlink(
     tmp_path: Path,
 ) -> None:
@@ -595,17 +694,29 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
         PROJECT_ROOT / "scripts" / "apply_profile.ps1"
     ).read_text(encoding="utf-8")
 
+    assert ".SYNOPSIS" in script_text
+    assert "[switch]$DryRun" in script_text
+    assert "[Alias('Help', 'h', '?')]" in script_text
+    assert "[switch]$ShowHelp" in script_text
+    assert "Usage: ./scripts/apply_profile.ps1" in script_text
     assert "[ValidateSet('macos', 'linux', 'windows', 'docker')]" in script_text
     assert "$Platform = $Platform.ToLowerInvariant()" in script_text
     assert "if ($Platform -eq 'linux') { $Platform = 'macos' }" in script_text
     assert "[System.Text.UTF8Encoding]::new($false)" in script_text
     assert "function Write-LinesUtf8" in script_text
+    assert "function Assert-ResolvedDatabaseUrlPlaceholder" in script_text
     assert "function Assert-ResolvedProfilePlaceholders" in script_text
     assert "function Sync-DockerWalOverrides" in script_text
     assert "function Ensure-DefaultEnvValue" in script_text
     assert "MEMORY_PALACE_DOCKER_WAL_ENABLED" in script_text
     assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE" in script_text
-    assert "Ensure-DefaultEnvValue -FilePath $Target -Key 'RUNTIME_AUTO_FLUSH_ENABLED' -Value 'true'" in script_text
+    assert '$workingTarget = $Target' in script_text
+    assert 'if ($DryRun.IsPresent) {' in script_text
+    assert '$workingTarget = [System.IO.Path]::GetTempFileName()' in script_text
+    assert 'Assert-ResolvedDatabaseUrlPlaceholder -FilePath $workingTarget -DisplayPath $Target' in script_text
+    assert "[System.IO.File]::ReadAllText($workingTarget, $utf8NoBom)" in script_text
+    assert "Remove-Item -Path $workingTarget -Force -ErrorAction SilentlyContinue" in script_text
+    assert "Ensure-DefaultEnvValue -FilePath $workingTarget -Key 'RUNTIME_AUTO_FLUSH_ENABLED' -Value 'true'" in script_text
     assert "$line -match '^\\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\\s*=\\s*.*:PORT/'" in script_text
     assert "$line -match '=\\s*replace-with-your-key(\\s+#.*)?\\s*$'" in script_text
     assert "$line -match '=\\s*your-embedding-model-id(\\s+#.*)?\\s*$'" in script_text

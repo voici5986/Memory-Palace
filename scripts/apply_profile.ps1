@@ -1,3 +1,19 @@
+<#
+.SYNOPSIS
+Generate a Memory Palace env file from a base template plus a deployment profile.
+
+.DESCRIPTION
+Appends a selected profile template onto `.env.example`, applies small
+platform-specific autofills, validates unresolved placeholders, and can print
+the generated env to stdout without touching the target file.
+
+.EXAMPLE
+./scripts/apply_profile.ps1 -Platform windows -Profile b
+
+.EXAMPLE
+./scripts/apply_profile.ps1 -Platform docker -Profile c -Target .env.docker -DryRun
+#>
+
 param(
     [ValidateSet('macos', 'linux', 'windows', 'docker')]
     [string]$Platform = 'windows',
@@ -5,7 +21,12 @@ param(
     [ValidateSet('a', 'b', 'c', 'd', 'A', 'B', 'C', 'D')]
     [string]$Profile = 'b',
 
-    [string]$Target = ''
+    [string]$Target = '',
+
+    [switch]$DryRun,
+
+    [Alias('Help', 'h', '?')]
+    [switch]$ShowHelp
 )
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -14,6 +35,17 @@ $Platform = $Platform.ToLowerInvariant()
 if ($Platform -eq 'linux') { $Platform = 'macos' }
 $profileLower = $Profile.ToLower()
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+if ($ShowHelp.IsPresent) {
+    @'
+Usage: ./scripts/apply_profile.ps1 [-Platform <macos|linux|windows|docker>] [-Profile <a|b|c|d>] [-Target <path>] [-DryRun]
+
+Examples:
+  ./scripts/apply_profile.ps1 -Platform windows -Profile b
+  ./scripts/apply_profile.ps1 -Platform docker -Profile c -Target .env.docker -DryRun
+'@ | Write-Host
+    exit 0
+}
 
 if ([string]::IsNullOrWhiteSpace($Target)) {
     $Target = Join-Path $projectRoot '.env'
@@ -132,6 +164,40 @@ function Ensure-DefaultEnvValue {
     Set-EnvValueInFile -FilePath $FilePath -Key $Key -Value $Value
 }
 
+function Assert-ResolvedDatabaseUrlPlaceholder {
+    param(
+        [string]$FilePath,
+        [string]$DisplayPath
+    )
+
+    if (-not (Test-Path $FilePath)) {
+        return
+    }
+
+    $databaseUrlLine = Read-LinesUtf8 -FilePath $FilePath |
+        Where-Object { $_ -match '^\s*DATABASE_URL\s*=' } |
+        Select-Object -Last 1
+
+    if (-not $databaseUrlLine) {
+        return
+    }
+
+    if (
+        $databaseUrlLine.Contains('__REPLACE_ME__') `
+        -or $databaseUrlLine -match '<[^>]+>' `
+        -or $databaseUrlLine -match '(?i)placeholder'
+    ) {
+        [Console]::Error.WriteLine(
+            "Generated {0}, but DATABASE_URL still contains unresolved placeholders:" -f $DisplayPath
+        )
+        [Console]::Error.WriteLine("  {0}" -f $databaseUrlLine)
+        [Console]::Error.WriteLine(
+            "Replace DATABASE_URL with a real host sqlite path before using this env file."
+        )
+        throw "Fill the DATABASE_URL placeholder before using this env file."
+    }
+}
+
 function Get-EnvValueFromFile {
     param(
         [string]$FilePath,
@@ -220,6 +286,11 @@ if (-not (Test-Path $overrideEnv)) {
     exit 1
 }
 
+$workingTarget = $Target
+if ($DryRun.IsPresent) {
+    $workingTarget = [System.IO.Path]::GetTempFileName()
+}
+
 $combinedLines = [System.Collections.Generic.List[string]]::new()
 foreach ($line in Read-LinesUtf8 -FilePath $baseEnv) {
     [void]$combinedLines.Add([string]$line)
@@ -231,21 +302,21 @@ foreach ($line in Read-LinesUtf8 -FilePath $baseEnv) {
 foreach ($line in Read-LinesUtf8 -FilePath $overrideEnv) {
     [void]$combinedLines.Add([string]$line)
 }
-Write-LinesUtf8 -FilePath $Target -Lines $combinedLines.ToArray()
+Write-LinesUtf8 -FilePath $workingTarget -Lines $combinedLines.ToArray()
 
 if ($Platform -eq 'macos') {
     $placeholderPattern = '^\s*DATABASE_URL\s*=\s*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db(\s+#.*)?\s*$'
-    if (Select-String -Path $Target -Pattern $placeholderPattern -Quiet) {
+    if (Select-String -Path $workingTarget -Pattern $placeholderPattern -Quiet) {
         $dbPath = (Join-Path $projectRoot 'demo.db') -replace '\\', '/'
         $dbUrl = 'DATABASE_URL=sqlite+aiosqlite:////' + $dbPath.TrimStart('/')
-        Set-EnvValueInFile -FilePath $Target -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
+        Set-EnvValueInFile -FilePath $workingTarget -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
         Write-Host "[auto-fill] DATABASE_URL set to $dbPath"
     }
 }
 
 if ($Platform -eq 'windows') {
     $placeholderPattern = '^\s*DATABASE_URL\s*=\s*sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db(\s+#.*)?\s*$'
-    if (Select-String -Path $Target -Pattern $placeholderPattern -Quiet) {
+    if (Select-String -Path $workingTarget -Pattern $placeholderPattern -Quiet) {
         $dbPath = (Join-Path $projectRoot 'demo.db') -replace '\\', '/'
         if ($dbPath -match '^/([a-zA-Z])/(.*)$') {
             $drive = $Matches[1].ToUpperInvariant()
@@ -259,23 +330,34 @@ if ($Platform -eq 'windows') {
             $dbPath = 'C:/memory_palace/demo.db'
         }
         $dbUrl = 'DATABASE_URL=sqlite+aiosqlite:///' + $dbPath
-        Set-EnvValueInFile -FilePath $Target -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
+        Set-EnvValueInFile -FilePath $workingTarget -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
         Write-Host "[auto-fill] DATABASE_URL set to $dbPath"
     }
 }
 
 if ($Platform -eq 'docker') {
-    $currentApiKey = Get-EnvValueFromFile -FilePath $Target -Key 'MCP_API_KEY'
+    $currentApiKey = Get-EnvValueFromFile -FilePath $workingTarget -Key 'MCP_API_KEY'
     if ([string]::IsNullOrWhiteSpace($currentApiKey)) {
         $generatedApiKey = New-DockerMcpApiKey
-        Set-EnvValueInFile -FilePath $Target -Key 'MCP_API_KEY' -Value $generatedApiKey
+        Set-EnvValueInFile -FilePath $workingTarget -Key 'MCP_API_KEY' -Value $generatedApiKey
         Write-Host "[auto-fill] MCP_API_KEY generated for docker profile"
     }
-    Sync-DockerWalOverrides -FilePath $Target
+    Sync-DockerWalOverrides -FilePath $workingTarget
 }
 
-Ensure-DefaultEnvValue -FilePath $Target -Key 'RUNTIME_AUTO_FLUSH_ENABLED' -Value 'true'
-Dedupe-EnvKeys -FilePath $Target
-Assert-ResolvedProfilePlaceholders -FilePath $Target -ResolvedProfile $profileLower
+Ensure-DefaultEnvValue -FilePath $workingTarget -Key 'RUNTIME_AUTO_FLUSH_ENABLED' -Value 'true'
+Dedupe-EnvKeys -FilePath $workingTarget
+Assert-ResolvedDatabaseUrlPlaceholder -FilePath $workingTarget -DisplayPath $Target
+Assert-ResolvedProfilePlaceholders -FilePath $workingTarget -ResolvedProfile $profileLower
+
+if ($DryRun.IsPresent) {
+    try {
+        [Console]::Out.Write([System.IO.File]::ReadAllText($workingTarget, $utf8NoBom))
+    }
+    finally {
+        Remove-Item -Path $workingTarget -Force -ErrorAction SilentlyContinue
+    }
+    exit 0
+}
 
 Write-Host "Generated $Target from $overrideEnv"

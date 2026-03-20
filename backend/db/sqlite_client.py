@@ -2253,7 +2253,18 @@ class SQLiteClient:
             timeout = httpx.Timeout(self._remote_http_timeout_sec)
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    retry_payload = self._build_embedding_retry_payload_without_dimensions(
+                        endpoint=endpoint,
+                        payload=payload,
+                        response=exc.response,
+                    )
+                    if retry_payload is None:
+                        raise
+                    response = await client.post(url, json=retry_payload, headers=headers)
+                    response.raise_for_status()
                 parsed = response.json()
             if isinstance(parsed, dict):
                 return parsed
@@ -2328,6 +2339,65 @@ class SQLiteClient:
             return True
         return status_code in {400, 404} and "model" in body
 
+    @staticmethod
+    def _build_embedding_payload(model: str, content: str, *, dimensions: int) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": content,
+        }
+        if int(dimensions) > 0:
+            payload["dimensions"] = int(dimensions)
+        return payload
+
+    @staticmethod
+    def _looks_like_unsupported_embedding_dimensions_error(
+        status_code: Optional[int], body: str
+    ) -> bool:
+        lowered = str(body or "").strip().lower()
+        if "dimension" not in lowered:
+            return False
+        unsupported_markers = (
+            "unsupported",
+            "not supported",
+            "unknown field",
+            "unexpected",
+            "extra_forbidden",
+            "extra inputs",
+            "extra fields not permitted",
+            "additional properties are not allowed",
+            "not permitted",
+            "invalid parameter",
+        )
+        if any(marker in lowered for marker in unsupported_markers):
+            return True
+        return status_code in {400, 422}
+
+    def _build_embedding_retry_payload_without_dimensions(
+        self,
+        *,
+        endpoint: str,
+        payload: Dict[str, Any],
+        response: Optional[httpx.Response],
+    ) -> Optional[Dict[str, Any]]:
+        if endpoint != "/embeddings":
+            return None
+        if not isinstance(payload, dict) or "dimensions" not in payload:
+            return None
+        if response is None:
+            return None
+        body = ""
+        try:
+            body = response.text if isinstance(response.text, str) else ""
+        except Exception:
+            body = ""
+        if not self._looks_like_unsupported_embedding_dimensions_error(
+            response.status_code, body
+        ):
+            return None
+        retry_payload = dict(payload)
+        retry_payload.pop("dimensions", None)
+        return retry_payload
+
     async def _fetch_remote_embedding(
         self, content: str, degrade_reasons: Optional[List[str]] = None
     ) -> Optional[List[float]]:
@@ -2337,7 +2407,11 @@ class SQLiteClient:
             self._append_degrade_reason(degrade_reasons, "embedding_config_missing")
             return None
 
-        payload = {"model": self._embedding_model, "input": content}
+        payload = self._build_embedding_payload(
+            self._embedding_model,
+            content,
+            dimensions=int(self._embedding_dim),
+        )
         response = await self._post_json(
             self._embedding_api_base,
             "/embeddings",
@@ -2374,7 +2448,11 @@ class SQLiteClient:
             )
             return None
 
-        payload = {"model": model, "input": content}
+        payload = self._build_embedding_payload(
+            model,
+            content,
+            dimensions=int(self._embedding_dim),
+        )
         response = await self._post_json(
             api_base,
             "/embeddings",

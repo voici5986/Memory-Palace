@@ -405,7 +405,7 @@ bash scripts/apply_profile.sh macos b
 
 `DATABASE_URL` 现在也走同样的保护逻辑。本地模板里的常见占位路径会先由 `apply_profile.*` 按当前 checkout 自动改写；如果生成结果里还残留 `<...>` 或 `__REPLACE_ME__` 这类占位段，脚本或后端都会直接拦下，不再静默带着一条坏的 sqlite 路径继续往后跑。
 
-在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。
+在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。Windows PowerShell 现在也支持同样的预览方式：`.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`。如果你只是想先看脚本用法，可以直接运行 `.\scripts\apply_profile.ps1 -Help`。
 
 如果你前面已经生成过 `.env.docker`，也不要直接把那份 Docker 文件改名成 `.env`。Docker profile 里的 `/app/data/...` 这类容器路径只对容器有效；如果你自己把挂载点改成 `/data/...`，本机 `stdio` MCP 也一样不能直接拿来用，还是需要宿主机自己的绝对路径。
 
@@ -633,6 +633,7 @@ RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # 例如 Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_EMBEDDING_DIM=1024          # 按 provider 实际返回维度填写
 
 # ── Reranker 模型 ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
@@ -648,8 +649,10 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - `RETRIEVAL_EMBEDDING_BACKEND` 只控制 Embedding 链路。
 > - Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关，启用与否由 `RETRIEVAL_RERANKER_ENABLED` 控制。
 > - Reranker 连接参数优先读取 `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL`；缺失时才回退 `ROUTER_*`（其中 base/key 还可继续回退 `OPENAI_*`）。
+> - 当前代码会把 `RETRIEVAL_EMBEDDING_DIM` 作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 一起发出去；如果 provider 明确不支持这个字段，会自动重试一次不带 `dimensions` 的旧请求。
 >
 > 如果你的 provider 对 Embedding / Reranker 使用的是带命名空间的 model id（例如 `Qwen/...`），请填写你自己的 provider 实际 model id，不要把示例值原样照抄到别的环境。
+> 如果你本地用的是 Ollama 这类 OpenAI-compatible 入口，也优先走 `/v1/embeddings` 这条路径；本地小样本联调里，`qwen3-embedding:8b-q8_0` 配合显式 `dimensions=1024` 可以正常返回 1024 维向量。
 > 如果你后面要用 `docker_one_click.sh/.ps1` 跑 `profile c/d`，这些示例 model id 也会被当成未解析占位符；在换成真实值之前，脚本会直接在 `docker compose` 前 fail-closed。
 >
 > **推荐口径（重要）**：

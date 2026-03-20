@@ -626,6 +626,8 @@ RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # 语义权重
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 仅控制 Embedding 路径；Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关。Reranker 参数优先使用 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
+> `RETRIEVAL_EMBEDDING_DIM` 现在也会作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 一起发送；如果 provider 明确不支持这个字段，运行时会自动重试一次不带 `dimensions` 的旧请求。无论是否发生这次重试，`RETRIEVAL_EMBEDDING_DIM` 仍应和最终实际返回的向量维度保持一致。
+>
 > 这里的 model id 只是占位示例，不是项目硬依赖。Memory Palace 不绑定某个固定 provider 或模型家族；请直接填写你自己的 OpenAI-compatible 服务里实际可用的 model id。
 >
 > 进阶配置（例如 `INTENT_LLM_*`、`RETRIEVAL_MMR_*`、`CORS_ALLOW_*`、运行时观测/睡眠整合开关）请以 `.env.example` 为准；本节只保留最常用主配置。

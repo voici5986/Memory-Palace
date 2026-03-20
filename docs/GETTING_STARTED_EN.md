@@ -112,6 +112,13 @@ bash scripts/apply_profile.sh macos b
 >
 > If you only want to preview the generated output first, on macOS / Linux you can run `bash scripts/apply_profile.sh --dry-run ...`. That path prints the final env content without writing the target file.
 >
+> The PowerShell version now exposes the same preview/help path as well:
+>
+> ```powershell
+> .\scripts\apply_profile.ps1 -DryRun -Platform windows -Profile b -Target .env.generated
+> .\scripts\apply_profile.ps1 -Help
+> ```
+>
 > Local `profile c/d` now also keeps `RUNTIME_AUTO_FLUSH_ENABLED=true` by default, so unless you override it yourself, the generated `.env` keeps the same auto-flush default as A/B.
 >
 > If you are running `apply_profile.ps1` from PowerShell on Linux / WSL, `-Platform linux` is now accepted as well; it maps to the same local template family as `macos`. On native Windows, keep using `-Platform windows`.
@@ -348,7 +355,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Currently, Docker Compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before treating the frontend as truly ready. In practice, when the container first shows `running`, the page may still take a few more seconds to become truly available, which is normal.
 >
-> The backend container-side check is no longer “HTTP 200 from `/health` is enough”. It also runs `deploy/docker/backend-healthcheck.py`, which requires the payload to report `status == "ok"`. If detailed `/health` is already degraded, Docker keeps the backend unhealthy.
+> The backend container-side check is no longer “HTTP 200 from `/health` is enough”. It also runs `deploy/docker/backend-healthcheck.py`, which requires the payload to report `status == "ok"`. If detailed `/health` is already degraded, Docker keeps the backend unhealthy; when the request fails, the JSON is invalid, or the status is not `ok`, the script now prints one short failure reason first, which makes container-side diagnosis less guessy.
 >
 > Keep the WAL safety boundary in mind as well: the repository defaults only treat **Docker named volume + WAL** as a supported path. If you replace backend `/app/data` with a bind mount to NFS/CIFS/SMB or another network filesystem, explicitly switch back to `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` and `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`. `docker_one_click.sh/.ps1` now performs that preflight check before `docker compose up` and aborts on the risky combination; manual `docker compose up` / `docker compose -f docker-compose.ghcr.yml up` does not do that validation for you.
 >

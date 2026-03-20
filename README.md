@@ -406,7 +406,7 @@ For `profile c/d`, `apply_profile.sh/.ps1` now also fail-closed when the generat
 
 The same guard now also applies to `DATABASE_URL` placeholder remnants. On local templates, `apply_profile.*` rewrites the common checkout-specific placeholder path for you; if the generated result still leaves segments such as `<...>` or `__REPLACE_ME__` inside `DATABASE_URL`, the script/backend stop early instead of quietly carrying a broken sqlite path forward.
 
-On macOS / Linux, `apply_profile.sh` now also backs up an existing target file to `*.bak` before overwrite. If you only want to preview the generated result first, use `bash scripts/apply_profile.sh --dry-run ...`; that prints the final env content without writing the target file.
+On macOS / Linux, `apply_profile.sh` now also backs up an existing target file to `*.bak` before overwrite. If you only want to preview the generated result first, use `bash scripts/apply_profile.sh --dry-run ...`; that prints the final env content without writing the target file. Windows PowerShell now has the same preview path via `.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`. If you only want the script usage first, run `.\scripts\apply_profile.ps1 -Help`.
 
 If you previously generated `.env.docker`, do not simply rename that Docker file to `.env`. The Docker profile uses container-only paths such as `/app/data/...`; if you customized the mount to `/data/...`, that is still container-only. Local `stdio` MCP needs a host-side absolute path instead.
 
@@ -632,6 +632,7 @@ RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
+RETRIEVAL_EMBEDDING_DIM=1024          # Match the provider's actual vector size
 
 # ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
@@ -647,8 +648,10 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - `RETRIEVAL_EMBEDDING_BACKEND` controls only the embedding path.
 > - There is no `RETRIEVAL_RERANKER_BACKEND` switch; reranker activation is controlled by `RETRIEVAL_RERANKER_ENABLED`.
 > - Reranker connection settings are resolved from `RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL` first, and fall back to `ROUTER_*` only when missing (with base/key then able to fall back to `OPENAI_*`).
+> - The current runtime also sends `RETRIEVAL_EMBEDDING_DIM` as the `dimensions` field on OpenAI-compatible `/embeddings` requests; if a provider explicitly rejects that field, it automatically retries once without `dimensions`.
 >
 > The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
+> If you are using a local OpenAI-compatible endpoint such as Ollama, prefer the `/v1/embeddings` path as well; in the local small-sample validation for this session, `qwen3-embedding:8b-q8_0` worked correctly with an explicit `dimensions=1024`.
 > If you use `docker_one_click.sh/.ps1` for `profile c/d`, unresolved placeholder model IDs are treated the same as placeholder endpoint/key values: the script stops before `docker compose` until you replace them with real values.
 >
 > If you use `--allow-runtime-env-injection` for local `profile c/d` debugging, the script switches that run into explicit API mode, forwards explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_ENABLED` / `RETRIEVAL_RERANKER_*`, and optional `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` / `INTENT_LLM_*` values, reuses `ROUTER_API_BASE/ROUTER_API_KEY` as the fallback source for embedding / reranker API base+key when the explicit `RETRIEVAL_*` values are not set, and falls back to `ROUTER_RERANKER_MODEL` when `RETRIEVAL_RERANKER_MODEL` is still missing.

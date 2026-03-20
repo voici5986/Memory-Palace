@@ -156,7 +156,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
-> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；配错了，通常就会在索引或检索阶段暴露成维度不一致问题。
+> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求；但如果最终返回的真实维度和你的配置不一致，问题仍然会在索引或检索阶段暴露出来。
+>
+> 本次本地小样本联调里，远端 API embedding + reranker 这条 C/D 路径已经再次跑通；另外，一条常见的本地 OpenAI-compatible 路径也已复核过：Ollama 的 `/v1/embeddings` 在模型支持时可以配合显式 `dimensions=1024` 使用。
 
 **Profile D**（远程 API 服务）——无需本地 GPU，使用云端模型：
 

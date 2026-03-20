@@ -155,7 +155,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # Note: There is no RETRIEVAL_RERANKER_BACKEND configuration item
 ```
 
-> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code does not try to guess this value for you; when it is wrong, you usually see the mismatch later during indexing or retrieval.
+> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field; but if the final returned vector size still disagrees with your config, the mismatch will surface later during indexing or retrieval.
+>
+> In the local small-sample validation for this session, the remote API embedding + reranker C/D path was rechecked successfully. A common local OpenAI-compatible path was also rechecked: Ollama `/v1/embeddings` can be used with an explicit `dimensions=1024` when the model supports it.
 
 **Profile D** (Remote API Services) —— No local GPU required, uses cloud models:
 

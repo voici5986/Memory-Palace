@@ -2,8 +2,10 @@ import hashlib
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
+import db.sqlite_client as sqlite_client_module
 from db.sqlite_client import EmbeddingCache, SQLiteClient
 
 
@@ -78,6 +80,7 @@ async def test_embedding_provider_chain_uses_configured_fallback_provider(
         call_meta["endpoint"] = endpoint
         call_meta["api_key"] = api_key
         assert payload["model"] == "chain-model"
+        assert payload["dimensions"] == client._embedding_dim
         return {"data": [{"embedding": [0.11, 0.22, 0.33]}]}
 
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
@@ -95,6 +98,61 @@ async def test_embedding_provider_chain_uses_configured_fallback_provider(
     assert call_meta["endpoint"] == "/embeddings"
     assert call_meta["api_key"] == "test-key"
     assert "embedding_fallback_hash" not in degrade_reasons
+
+
+@pytest.mark.asyncio
+async def test_post_json_retries_embedding_without_dimensions_when_provider_rejects_them(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://embedding.example/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "retry-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "1024")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "embedding-dim-retry.db"))
+    await client.init_db()
+
+    calls: list[dict[str, object]] = []
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def post(self, url: str, json=None, headers=None):
+            calls.append(dict(json or {}))
+            request = httpx.Request("POST", url)
+            if len(calls) == 1:
+                return httpx.Response(
+                    400,
+                    json={"error": {"message": "unsupported field: dimensions"}},
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                json={"data": [{"embedding": [0.5] * 1024}]},
+                request=request,
+            )
+
+    monkeypatch.setattr(sqlite_client_module.httpx, "AsyncClient", _FakeAsyncClient)
+
+    degrade_reasons: list[str] = []
+    embedding = await client._fetch_remote_embedding(
+        "embedding dimensions retry sample",
+        degrade_reasons=degrade_reasons,
+    )
+    await client.close()
+
+    assert len(calls) == 2
+    assert calls[0]["dimensions"] == 1024
+    assert "dimensions" not in calls[1]
+    assert embedding == [0.5] * 1024
+    assert degrade_reasons == []
 
 
 @pytest.mark.asyncio

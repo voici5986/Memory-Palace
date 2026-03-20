@@ -626,6 +626,8 @@ RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # Semantic weight
 >
 > Configuration semantics: `RETRIEVAL_EMBEDDING_BACKEND` only controls the embedding path; there is no `RETRIEVAL_RERANKER_BACKEND` switch. Reranker parameters prioritize `RETRIEVAL_RERANKER_*`, falling back to `ROUTER_*` (and finally `OPENAI_*` base/key) if missing.
 >
+> `RETRIEVAL_EMBEDDING_DIM` is now also forwarded as `dimensions` on OpenAI-compatible `/embeddings` requests; if a provider explicitly rejects that field, the runtime retries once without `dimensions`. Regardless of whether that retry happens, `RETRIEVAL_EMBEDDING_DIM` should still match the actual vector size returned in the end.
+>
 > The model IDs here are placeholders. Memory Palace is not tied to a specific provider; please fill in the actual model IDs available in your OpenAI-compatible service.
 >
 > For advanced configuration (e.g., `INTENT_LLM_*`, `RETRIEVAL_MMR_*`, `CORS_ALLOW_*`, runtime observability/sleep consolidation switches), refer to `.env.example`. This section only lists the most common primary configurations.
