@@ -7,6 +7,46 @@ server {
 
   add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self';" always;
 
+  location ^~ /api/maintenance/ {
+    proxy_pass http://backend:8000/maintenance/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-MCP-API-Key "${MCP_API_KEY_NGINX_ESCAPED}";
+  }
+
+  location ^~ /api/review/ {
+    proxy_pass http://backend:8000/review/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-MCP-API-Key "${MCP_API_KEY_NGINX_ESCAPED}";
+  }
+
+  location ^~ /api/browse/ {
+    proxy_pass http://backend:8000/browse/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-MCP-API-Key "${MCP_API_KEY_NGINX_ESCAPED}";
+  }
+
+  location ^~ /api/setup/ {
+    proxy_pass http://backend:8000/setup/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-MCP-API-Key "${MCP_API_KEY_NGINX_ESCAPED}";
+  }
+
   location /api/ {
     proxy_pass http://backend:8000/;
     proxy_http_version 1.1;
@@ -14,7 +54,6 @@ server {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header X-MCP-API-Key "${MCP_API_KEY_NGINX_ESCAPED}";
   }
 
   location = /sse {

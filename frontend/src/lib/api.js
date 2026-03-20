@@ -55,7 +55,9 @@ const readStoredMaintenanceAuthFrom = (storage) => {
   try {
     const raw = storage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
     if (!raw) return null;
-    return normalizeMaintenanceAuth(JSON.parse(raw));
+    const auth = normalizeMaintenanceAuth(JSON.parse(raw));
+    if (!auth) return null;
+    return { auth, raw };
   } catch (_error) {
     return null;
   }
@@ -75,13 +77,13 @@ const readStoredMaintenanceAuth = () => {
   const sessionStorage = getBrowserStorage('sessionStorage');
   const localStorage = getBrowserStorage('localStorage');
 
-  const sessionAuth = readStoredMaintenanceAuthFrom(sessionStorage);
-  if (sessionAuth) {
-    return sessionAuth;
+  const sessionRecord = readStoredMaintenanceAuthFrom(sessionStorage);
+  if (sessionRecord) {
+    return sessionRecord.auth;
   }
 
-  const legacyAuth = readStoredMaintenanceAuthFrom(localStorage);
-  if (!legacyAuth) {
+  const legacyRecord = readStoredMaintenanceAuthFrom(localStorage);
+  if (!legacyRecord) {
     return null;
   }
 
@@ -91,17 +93,19 @@ const readStoredMaintenanceAuth = () => {
       sessionStorage.setItem(
         DASHBOARD_AUTH_STORAGE_KEY,
         JSON.stringify({
-          maintenanceApiKey: legacyAuth.key,
-          maintenanceApiKeyMode: legacyAuth.mode,
+          maintenanceApiKey: legacyRecord.auth.key,
+          maintenanceApiKeyMode: legacyRecord.auth.mode,
         })
       );
-      removeStoredMaintenanceAuthFrom(localStorage);
+      if (localStorage?.getItem(DASHBOARD_AUTH_STORAGE_KEY) === legacyRecord.raw) {
+        removeStoredMaintenanceAuthFrom(localStorage);
+      }
     } catch (_error) {
       // Keep the legacy auth readable for the current session when migration fails.
     }
   }
 
-  return legacyAuth;
+  return legacyRecord.auth;
 };
 
 export const getMaintenanceAuthState = () => {

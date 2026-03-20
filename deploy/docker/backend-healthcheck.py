@@ -12,6 +12,18 @@ def _log_failure(message: str) -> None:
     print(f"backend healthcheck failed: {message}", file=sys.stderr)
 
 
+def _resolve_timeout_seconds() -> float:
+    raw_value = str(
+        os.getenv("MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC") or ""
+    ).strip()
+    if not raw_value:
+        return 5.0
+    try:
+        return max(1.0, float(raw_value))
+    except ValueError:
+        return 5.0
+
+
 def main() -> int:
     url = str(os.getenv("MEMORY_PALACE_BACKEND_HEALTHCHECK_URL") or "").strip()
     if not url:
@@ -24,7 +36,7 @@ def main() -> int:
 
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=3) as response:
+        with urllib.request.urlopen(request, timeout=_resolve_timeout_seconds()) as response:
             raw_payload = response.read().decode("utf-8")
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", None) or exc

@@ -129,6 +129,8 @@ bash scripts/apply_profile.sh macos b
 >
 > Note: **The profile-b `.env` generated locally for macOS / Windows will not automatically fill in `MCP_API_KEY`**. If you are about to open the Dashboard, or directly call `/browse` / `/review` / `/maintenance`, `/sse`, or `/messages`, please supplement `MCP_API_KEY` yourself, or set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local loopback debugging only. Only the `docker` platform profile script will automatically generate a local key if the key is empty.
 >
+> In addition, the backend itself now fail-closes when the **active** remote retrieval configuration still contains placeholder values. If you bypass `apply_profile.*`, copy a `profile c/d` template by hand, and leave values such as `host.docker.internal:PORT`, `replace-with-your-key`, `your-embedding-model-id`, or `your-reranker-model-id` in place, startup stops immediately instead of continuing with an obviously invalid embedding / reranker config.
+>
 > One easy mistake to avoid: do not copy the `DATABASE_URL` from `.env.docker`, or any container-only sqlite path such as `/app/data/...` or `/data/...`, into your local `.env`. Those paths only exist inside the container; local `stdio` MCP on the host will fail with them.
 
 #### Key Configuration Items
@@ -358,6 +360,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > Currently, Docker Compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before treating the frontend as truly ready. In practice, when the container first shows `running`, the page may still take a few more seconds to become truly available, which is normal.
 >
 > The backend container-side check is no longer “HTTP 200 from `/health` is enough”. It also runs `deploy/docker/backend-healthcheck.py`, which requires the payload to report `status == "ok"`. If detailed `/health` is already degraded, Docker keeps the backend unhealthy; when the request fails, the JSON is invalid, or the status is not `ok`, the script now prints one short failure reason first, which makes container-side diagnosis less guessy.
+>
+> If your environment starts slowly, you can also tune that probe timeout through `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC`; the helper currently defaults to `5` seconds.
 >
 > Keep the WAL safety boundary in mind as well: the repository defaults only treat **Docker named volume + WAL** as a supported path. If you replace backend `/app/data` with a bind mount to NFS/CIFS/SMB or another network filesystem, explicitly switch back to `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` and `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`. `docker_one_click.sh/.ps1` now performs that preflight check before `docker compose up` and aborts on the risky combination; manual `docker compose up` / `docker compose -f docker-compose.ghcr.yml up` does not do that validation for you.
 >

@@ -129,6 +129,8 @@ bash scripts/apply_profile.sh macos b
 >
 > 但要注意：**macOS / Windows 本地生成的 profile-b `.env` 不会自动补 `MCP_API_KEY`**。如果你接下来就要打开 Dashboard，或者直接调 `/browse` / `/review` / `/maintenance`、`/sse`、`/messages`，请再自行补 `MCP_API_KEY`，或仅在本机回环调试时设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`。只有 `docker` 平台的 profile 脚本会在 key 为空时自动生成一把本地 key。
 >
+> 另外，现在后端本身也会对**当前正在启用的远端检索配置**做占位符 fail-closed 检查：如果你跳过 `apply_profile.*`，直接手工复制了 `profile c/d` 模板，并且还保留着 `host.docker.internal:PORT`、`replace-with-your-key`、`your-embedding-model-id`、`your-reranker-model-id` 这类示例值，启动会直接报错，而不是带着一份明显无效的 embedding / reranker 配置继续运行。
+>
 
 #### 关键配置项说明
 
@@ -357,6 +359,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 当前 Docker Compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，才把 frontend 视为真正 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
 > backend 容器侧的检查现在也不再是“`/health` 只要回 `200` 就算好”，而是会继续执行 `deploy/docker/backend-healthcheck.py`，确认返回 payload 里的 `status == "ok"`。如果详细 `/health` 已经降级，Docker 也会把 backend 继续视为 unhealthy；若请求失败、返回了非法 JSON，或状态不是 `ok`，这个脚本还会先打印一条简短失败原因，排障时比单纯看 exit code 更直接。
+>
+> 如果你的环境启动比较慢，还可以通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整这条探活请求的超时；当前脚本默认值是 `5` 秒。
 >
 > WAL 风险边界也请一起记住：仓库默认只把“Docker **named volume** + WAL”当成受支持路径。如果你把 backend 的 `/app/data` 改成 NFS/CIFS/SMB 或其它网络文件系统 bind mount，就必须显式切回 `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` 和 `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`。当前 `docker_one_click.sh/.ps1` 已经会在 `docker compose up` 前做这层 preflight，并在发现高风险组合时直接拒绝启动；但手动 `docker compose up` / `docker compose -f docker-compose.ghcr.yml up` 不会代你做这一步。
 >

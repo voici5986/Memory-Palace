@@ -91,9 +91,37 @@ def test_frontend_nginx_template_targets_repo_managed_sse_port() -> None:
     ).read_text(encoding="utf-8")
 
     assert "proxy_pass http://backend:8000/sse/;" in template_text
-    assert template_text.count("proxy_pass http://backend:8000;") == 2
+    assert "location ^~ /messages {" in template_text
+    assert "location ^~ /sse/messages {" in template_text
     assert "location = /sse/ {" in template_text
     assert "return 307 /sse;" in template_text
+
+
+def test_frontend_nginx_template_only_injects_api_key_for_protected_api_routes() -> None:
+    template_text = (
+        PROJECT_ROOT / "deploy" / "docker" / "nginx.conf.template"
+    ).read_text(encoding="utf-8")
+
+    for path in (
+        "location ^~ /api/maintenance/ {",
+        "location ^~ /api/review/ {",
+        "location ^~ /api/browse/ {",
+        "location ^~ /api/setup/ {",
+    ):
+        assert path in template_text
+
+    public_api_block = template_text.split("location /api/ {", 1)[1].split("}", 1)[0]
+    assert "proxy_pass http://backend:8000/;" in public_api_block
+    assert "X-MCP-API-Key" not in public_api_block
+
+
+def test_backend_entrypoint_requires_gosu_before_privilege_drop() -> None:
+    script_text = (
+        PROJECT_ROOT / "deploy" / "docker" / "backend-entrypoint.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "command -v gosu >/dev/null 2>&1" in script_text
+    assert "backend-entrypoint: gosu is required when running as root" in script_text
 
 
 def test_frontend_static_nginx_reference_is_removed() -> None:

@@ -42,6 +42,32 @@ def utc_iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def parse_iso_datetime(
+    value: Optional[str],
+    *,
+    normalize_to_utc_naive: bool = False,
+    strict: bool = False,
+) -> Optional[datetime]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        if strict:
+            raise ValueError(
+                f"Invalid datetime '{value}'. Use ISO-8601 like '2026-01-31T12:00:00Z'."
+            ) from exc
+        return None
+    if normalize_to_utc_naive and parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def is_loopback_hostname(
     value: Optional[str],
     loopback_hosts: Optional[Iterable[str]] = None,

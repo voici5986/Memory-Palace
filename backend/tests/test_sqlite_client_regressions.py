@@ -13,6 +13,12 @@ def _sqlite_url(db_path: Path) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
 
 
+@pytest.fixture(autouse=True)
+def _force_local_retrieval_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_ENABLED", "false")
+
+
 @pytest.mark.asyncio
 async def test_get_index_status_does_not_persist_missing_fts_state(
     tmp_path: Path,
@@ -157,3 +163,10 @@ def test_get_sqlite_client_initializes_singleton_once_under_thread_race(
 
     assert len(created_urls) == 1
     assert len({id(client) for client in clients}) == 1
+
+
+def test_parse_iso_datetime_normalizes_timezone_offsets_to_utc_naive() -> None:
+    parsed = SQLiteClient._parse_iso_datetime("2026-03-21T16:30:00+08:00")
+
+    assert parsed == sqlite_client_module.datetime(2026, 3, 21, 8, 30, 0)
+    assert parsed.tzinfo is None

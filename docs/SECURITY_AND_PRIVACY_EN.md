@@ -157,7 +157,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - it only targets the local checkout `.env`
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
-- only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend only migrates it forward once and clears the old copy.
+- only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend still only migrates it forward once, but now only removes the old copy when it can confirm that `localStorage` still holds that same old value. This avoids one tab deleting a newer value that was just written by another tab.
 
 **New validation anchors:**
 
@@ -168,7 +168,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 **Default approach for Docker one-click deployment is different:**
 
 - `apply_profile.*` will automatically generate a local key if `MCP_API_KEY` is found to be empty under the `docker` platform.
-- The frontend container will not write this key into the page; instead, Nginx proxy will forward the `X-MCP-API-Key` at the server side to `/api/*`, `/sse`, `/messages`.
+- The frontend container will not write this key into the page; instead, Nginx proxy will forward the `X-MCP-API-Key` at the server side only to the protected Dashboard API routes, plus `/sse` and `/messages`.
 - This way the browser can use the Dashboard directly without exposing the real key in the page source.
 - This convenience path assumes the frontend port itself is trusted. Anyone who can directly reach the Docker Dashboard port can also use those proxied protected routes, so `MCP_API_KEY` is **not** acting as end-user auth at that layer. Put your own VPN, reverse-proxy auth, or network ACL in front of `3000` before exposing it beyond a trusted environment.
 
@@ -186,10 +186,10 @@ The following security configurations can be directly verified in the project's 
 |---|---|---|
 | Non-root execution (Backend) | `groupadd --gid 10001 app && useradd --uid 10001` | `deploy/docker/Dockerfile.backend` |
 | Non-root execution (Frontend) | Using `nginxinc/nginx-unprivileged:1.27-alpine` base image | `deploy/docker/Dockerfile.frontend` |
-| Frontend proxy authentication | Nginx forwards `X-MCP-API-Key` at the server side; the real key is not stored on the browser side, and special characters in the proxy-held key are escaped before the final config is generated | `deploy/docker/nginx.conf.template` |
+| Frontend proxy authentication | Nginx forwards `X-MCP-API-Key` at the server side; the real key is not stored on the browser side. The proxy now injects that header only for protected `/api/maintenance/*`, `/api/review/*`, `/api/browse/*`, `/api/setup/*` routes plus `/sse` / `/messages`, instead of attaching it to every `/api/*` request. Special characters in the proxy-held key are escaped before the final config is generated | `deploy/docker/nginx.conf.template` |
 | Prohibit privilege escalation | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
 | Data persistence | Docker volumes are isolated per compose project by default: `<compose-project>_data` → `/app/data`, `<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
-| Health check (Backend) | `python /usr/local/bin/backend-healthcheck.py`; internally it requests `http://127.0.0.1:8000/health` and requires the payload to report `status == "ok"` | `backend.healthcheck` in `docker-compose.yml`, `deploy/docker/backend-healthcheck.py` |
+| Health check (Backend) | `python /usr/local/bin/backend-healthcheck.py`; internally it requests `http://127.0.0.1:8000/health` and requires the payload to report `status == "ok"`. The request timeout can be tuned with `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` | `backend.healthcheck` in `docker-compose.yml`, `deploy/docker/backend-healthcheck.py` |
 | Health check (Frontend) | `wget -q -O - http://127.0.0.1:8080/` | `frontend.healthcheck` in `docker-compose.yml` |
 
 ---

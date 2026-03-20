@@ -157,7 +157,7 @@ Authorization: Bearer <MCP_API_KEY>
 - 现阶段只允许写本地 checkout 的 `.env`
 - 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
 - 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
-- 浏览器本地只会把 Dashboard 使用的 `MCP_API_KEY` 放在当前浏览器会话的 `sessionStorage`；embedding / reranker / LLM key 不会保存在浏览器里。若检测到旧版 `localStorage` 值，前端只会做一次迁移并清掉旧值。
+- 浏览器本地只会把 Dashboard 使用的 `MCP_API_KEY` 放在当前浏览器会话的 `sessionStorage`；embedding / reranker / LLM key 不会保存在浏览器里。若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但现在只会在确认 `localStorage` 里还是**同一份旧值**时才删除它，避免多标签页并发迁移时误删另一标签页刚写入的新值。
 
 **新增测试锚点：**
 
@@ -168,7 +168,7 @@ Authorization: Bearer <MCP_API_KEY>
 **Docker 一键部署的默认做法不一样：**
 
 - `apply_profile.*` 在 `docker` 平台下如果发现 `MCP_API_KEY` 为空，会自动生成一把本地 key
-- 前端容器不会把这把 key 写进页面，而是由 Nginx 代理在服务端转发到 `/api/*`、`/sse`、`/messages`
+- 前端容器不会把这把 key 写进页面，而是由 Nginx 代理在服务端只转发到受保护的 Dashboard API 路径，以及 `/sse`、`/messages`
 - 这样浏览器可以直接使用 Dashboard，但不会在页面源码里暴露真实 key
 - 但这条便利路径默认把前端端口本身视为可信入口。谁能直接访问 Docker Dashboard 端口，谁就能使用这些被代理的受保护接口，所以这一层的 `MCP_API_KEY` **并不等于** 终端用户鉴权。若要暴露给受信范围之外的使用者，请先在 `3000` 前面加上你自己的 VPN、反向代理鉴权或网络访问控制。
 
@@ -186,10 +186,10 @@ Authorization: Bearer <MCP_API_KEY>
 |---|---|---|
 | 非 root 运行（后端） | `groupadd --gid 10001 app && useradd --uid 10001` | `deploy/docker/Dockerfile.backend` |
 | 非 root 运行（前端） | 使用 `nginxinc/nginx-unprivileged:1.27-alpine` 基础镜像 | `deploy/docker/Dockerfile.frontend` |
-| 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key；生成配置前会先转义代理持有 key 里的特殊字符 | `deploy/docker/nginx.conf.template` |
+| 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key；当前仅对受保护的 `/api/maintenance/*`、`/api/review/*`、`/api/browse/*`、`/api/setup/*` 以及 `/sse` / `/messages` 路径注入该头，通用 `/api/*` 不再一律附加；生成配置前会先转义代理持有 key 里的特殊字符 | `deploy/docker/nginx.conf.template` |
 | 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
 | 数据持久化 | Docker Volumes 默认按 compose project 隔离：`<compose-project>_data` → `/app/data`，`<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
-| 健康检查（后端） | `python /usr/local/bin/backend-healthcheck.py`；脚本内部会请求 `http://127.0.0.1:8000/health`，并要求返回 payload 的 `status == "ok"` | `docker-compose.yml` 中的 `backend.healthcheck`、`deploy/docker/backend-healthcheck.py` |
+| 健康检查（后端） | `python /usr/local/bin/backend-healthcheck.py`；脚本内部会请求 `http://127.0.0.1:8000/health`，并要求返回 payload 的 `status == "ok"`；请求超时可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整 | `docker-compose.yml` 中的 `backend.healthcheck`、`deploy/docker/backend-healthcheck.py` |
 | 健康检查（前端） | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` 中的 `frontend.healthcheck` |
 
 ---

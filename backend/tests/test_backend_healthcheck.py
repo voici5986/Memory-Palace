@@ -83,3 +83,18 @@ def test_backend_healthcheck_logs_unhealthy_status(monkeypatch, capsys) -> None:
 
     assert module.main() == 1
     assert "backend healthcheck failed: status=degraded" in capsys.readouterr().err
+
+
+def test_backend_healthcheck_uses_configured_timeout(monkeypatch) -> None:
+    module = _load_module()
+    captured: dict[str, float] = {}
+
+    def _fake_urlopen(request, timeout=3):
+        captured["timeout"] = timeout
+        return _FakeResponse(b'{"status":"ok"}')
+
+    monkeypatch.setenv("MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC", "7")
+    monkeypatch.setattr(module.urllib.request, "urlopen", _fake_urlopen)
+
+    assert module.main() == 0
+    assert captured["timeout"] == 7.0

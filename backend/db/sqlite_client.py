@@ -24,7 +24,11 @@ from typing import Optional, Dict, Any, List, Tuple, Sequence, Mapping
 from contextlib import asynccontextmanager
 from urllib.parse import unquote
 from filelock import AsyncFileLock
-from shared_utils import env_bool as _shared_env_bool, env_int as _shared_env_int
+from shared_utils import (
+    env_bool as _shared_env_bool,
+    env_int as _shared_env_int,
+    parse_iso_datetime as _shared_parse_iso_datetime,
+)
 
 from sqlalchemy import (
     Column,
@@ -126,6 +130,21 @@ def _validate_database_url_placeholders(database_url: str) -> None:
             "Generate your local .env via scripts/apply_profile.sh/.ps1 or "
             "replace the placeholder with a real host path before starting the backend."
         )
+
+
+def _has_unresolved_profile_placeholder(value: Optional[str]) -> bool:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return False
+    return any(
+        marker in candidate
+        for marker in (
+            "host.docker.internal:PORT",
+            "replace-with-your-key",
+            "your-embedding-model-id",
+            "your-reranker-model-id",
+        )
+    )
 
 
 def _resolve_existing_probe_path(path: Optional[FilePath]) -> Optional[FilePath]:
@@ -485,6 +504,7 @@ class SQLiteClient:
         self._reranker_model = self._first_env(
             ["RETRIEVAL_RERANKER_MODEL", "ROUTER_RERANKER_MODEL"]
         )
+        self._validate_active_provider_placeholders()
         self._rerank_weight = min(
             1.0, max(0.0, self._env_float("RETRIEVAL_RERANKER_WEIGHT", 0.25))
         )
@@ -1565,15 +1585,41 @@ class SQLiteClient:
 
     @staticmethod
     def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
-        if not value:
-            return None
-        candidate = value.strip()
-        if candidate.endswith("Z"):
-            candidate = candidate[:-1] + "+00:00"
-        try:
-            return datetime.fromisoformat(candidate)
-        except ValueError:
-            return None
+        return _shared_parse_iso_datetime(
+            value,
+            normalize_to_utc_naive=True,
+            strict=False,
+        )
+
+    def _validate_active_provider_placeholders(self) -> None:
+        unresolved: list[str] = []
+        embedding_backend = (self._embedding_backend or "").strip().lower()
+
+        if embedding_backend in {"api", "router", "openai"}:
+            embedding_model = self._resolve_embedding_model(embedding_backend)
+            for env_name, env_value in (
+                ("RETRIEVAL_EMBEDDING_API_BASE", self._embedding_api_base),
+                ("RETRIEVAL_EMBEDDING_API_KEY", self._embedding_api_key),
+                ("RETRIEVAL_EMBEDDING_MODEL", embedding_model),
+            ):
+                if _has_unresolved_profile_placeholder(env_value):
+                    unresolved.append(env_name)
+
+        if self._reranker_enabled:
+            for env_name, env_value in (
+                ("RETRIEVAL_RERANKER_API_BASE", self._reranker_api_base),
+                ("RETRIEVAL_RERANKER_API_KEY", self._reranker_api_key),
+                ("RETRIEVAL_RERANKER_MODEL", self._reranker_model),
+            ):
+                if _has_unresolved_profile_placeholder(env_value):
+                    unresolved.append(env_name)
+
+        if unresolved:
+            joined = ", ".join(dict.fromkeys(unresolved))
+            raise ValueError(
+                "Active retrieval config still contains unresolved profile placeholders "
+                f"for: {joined}. Fill the profile C/D provider values before starting the backend."
+            )
 
     @staticmethod
     def _normalize_db_datetime(value: Optional[datetime]) -> Optional[datetime]:

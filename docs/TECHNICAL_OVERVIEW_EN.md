@@ -228,7 +228,7 @@ Additional notes:
 - Common static copy, date/number formats, and common frontend-side error mappings will follow the current language switch.
 - If authentication is not yet configured, the page shell will still open, but protected data requests will show an authorization prompt, empty state, or `401`.
 - When starting via the recommended one-click Docker path, protected requests usually already work: the frontend proxy automatically forwards the same `MCP_API_KEY` on the server side; however, the page may still keep showing `Set API key`, because the browser page itself does not know the proxy-held key. Only when protected data also starts failing with `401` or empty states should you keep troubleshooting env / proxy configuration.
-- Stored browser Dashboard auth now lives in the current browser session's `sessionStorage`; if a legacy `localStorage` value is found, the frontend only migrates it forward once and clears the old copy.
+- Stored browser Dashboard auth now lives in the current browser session's `sessionStorage`; if a legacy `localStorage` value is found, the frontend still only migrates it forward once, but it now removes the old copy only when `localStorage` still contains that same old value. This avoids one tab deleting a newer value written by another tab during migration.
 
 ---
 
@@ -251,7 +251,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 >
 > Code reference: `readWindowRuntimeMaintenanceAuth()` and `getMaintenanceAuthState()` in `frontend/src/lib/api.js`.
 >
-> In plain language: the frontend first trusts a runtime-injected key; if that is missing, it falls back to a key saved in the current browser session. A legacy Dashboard key left in `localStorage` is only migrated once and then removed from the old location.
+> In plain language: the frontend first trusts a runtime-injected key; if that is missing, it falls back to a key saved in the current browser session. A legacy Dashboard key left in `localStorage` is still only migrated once, but the current tab only deletes it when it can confirm that the old value was not replaced by another tab in the meantime.
 >
 > In plain English: the frontend makes authentication "runtime-decided," so you can either fill in the key directly at the top of the page or have it injected by a deployment script before the page loads.
 >
@@ -321,9 +321,9 @@ Related files:
 
 - Compose file: `docker-compose.yml`
 - Image definition: `deploy/docker/Dockerfile.backend` (based on `python:3.11-slim`), `deploy/docker/Dockerfile.frontend` (build stage `node:22-alpine`, run stage `nginxinc/nginx-unprivileged:1.27-alpine`)
-- Backend healthcheck helper: `deploy/docker/backend-healthcheck.py` (performs a second check against `/health` inside the container and requires the payload to report `status == "ok"`)
-- Nginx configuration template: `deploy/docker/nginx.conf.template` (server-side forwarding for `X-MCP-API-Key`, plus `no-store/no-cache/must-revalidate` on `/index.html` to reduce stale entry pages after frontend updates; the frontend entrypoint escapes special characters in the proxy-held key, rejects the remaining ASCII control characters, and then generates the final Nginx config)
-- Entrypoint scripts: `deploy/docker/backend-entrypoint.sh`, `deploy/docker/frontend-entrypoint.sh`
+- Backend healthcheck helper: `deploy/docker/backend-healthcheck.py` (performs a second check against `/health` inside the container and requires the payload to report `status == "ok"`; defaults to a `5` second timeout, configurable through `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC`)
+- Nginx configuration template: `deploy/docker/nginx.conf.template` (injects `X-MCP-API-Key` only for the protected Dashboard API routes plus `/sse` / `/messages`, and returns `no-store/no-cache/must-revalidate` on `/index.html` to reduce stale entry pages after frontend updates; the frontend entrypoint escapes special characters in the proxy-held key, rejects the remaining ASCII control characters, and then generates the final Nginx config)
+- Entrypoint scripts: `deploy/docker/backend-entrypoint.sh`, `deploy/docker/frontend-entrypoint.sh` (the backend entrypoint now fails closed if `gosu` is unavailable in a root-start path)
 - Backup scripts: `scripts/backup_memory.sh`, `scripts/backup_memory.ps1` (keep the latest `20` backups by default; adjust with `--keep` / `-Keep`; backup filenames use UTC timestamps so host/container runs sort consistently)
 - Pre-publishing check: `scripts/pre_publish_check.sh`
 

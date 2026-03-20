@@ -405,6 +405,8 @@ bash scripts/apply_profile.sh macos b
 
 `DATABASE_URL` 现在也走同样的保护逻辑。对本地 shell 路径，`apply_profile.sh` 会先按当前 checkout 自动改写常见占位路径，包括 `/Users/...` 和 `/home/...`；如果生成结果里还残留 `<...>` 或 `__REPLACE_ME__` 这类占位段，脚本或后端都会直接拦下，不再静默带着一条坏的 sqlite 路径继续往后跑。
 
+后端现在也会对**当前实际启用的远端检索配置**做同样的 fail-closed 检查。如果你绕过 `apply_profile.*`，直接手工复制了 C/D 模板，并且还保留着 `host.docker.internal:PORT`、`replace-with-your-key`、`your-embedding-model-id`、`your-reranker-model-id` 这类示例值，启动会直接报错，而不是带着一份明显无效的 provider 配置继续运行。
+
 在 macOS / Linux 上，`apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果你只是想先看看最终会生成什么内容，可以用 `bash scripts/apply_profile.sh --dry-run ...`；这条路径只打印最终结果，不会真正改目标文件。Windows PowerShell 现在也支持同样的预览方式：`.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun`。如果你只是想先看脚本用法，可以直接运行 `.\scripts\apply_profile.ps1 -Help`。
 
 如果你前面已经生成过 `.env.docker`，也不要直接把那份 Docker 文件改名成 `.env`。Docker profile 里的 `/app/data/...` 这类容器路径只对容器有效；如果你自己把挂载点改成 `/data/...`，本机 `stdio` MCP 也一样不能直接拿来用，还是需要宿主机自己的绝对路径。
@@ -494,7 +496,7 @@ curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.t
 >
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`）打开首启向导；你可以只把同一把 key 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”的场景下，把常见运行参数一起写进 `.env`。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求。
 >
-> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
+> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。当前端发现旧版遗留在 `localStorage` 里的 Dashboard key 时，仍然只会迁移一次，但现在只有在确认没有被别的标签页替换掉时，才会删除那份旧值。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
 >
 > 如果你选择的是“保存到本地 `.env`”，并且同时填了 Dashboard key，要记住 `.env` 写入和浏览器 key 持久化是两步。现在只要浏览器本地存储失败，向导就会直接报保存失败，不再给出误导性的成功提示。实际使用时，这通常意味着 `.env` 可能已经写进去了，但浏览器侧鉴权还没准备好；先看右上角状态，再决定是否重试。
 >

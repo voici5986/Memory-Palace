@@ -1,4 +1,15 @@
-from shared_utils import env_bool, env_int, is_loopback_hostname, utc_iso_now
+from datetime import datetime
+
+import pytest
+
+import mcp_server
+from shared_utils import (
+    env_bool,
+    env_int,
+    is_loopback_hostname,
+    parse_iso_datetime,
+    utc_iso_now,
+)
 
 
 def test_env_bool_uses_shared_truthy_values(monkeypatch) -> None:
@@ -30,3 +41,24 @@ def test_is_loopback_hostname_handles_ipv6_and_host_ports() -> None:
 
 def test_utc_iso_now_returns_utc_z_suffix() -> None:
     assert utc_iso_now().endswith("Z")
+
+
+def test_parse_iso_datetime_normalizes_timezone_offsets_to_utc_naive() -> None:
+    parsed = parse_iso_datetime(
+        "2026-03-21T16:30:00+08:00",
+        normalize_to_utc_naive=True,
+    )
+
+    assert parsed == datetime(2026, 3, 21, 8, 30, 0)
+    assert parsed.tzinfo is None
+
+
+def test_parse_iso_datetime_raises_friendly_error_when_strict() -> None:
+    with pytest.raises(ValueError, match="Invalid datetime 'not-a-datetime'"):
+        parse_iso_datetime("not-a-datetime", strict=True)
+
+
+def test_mcp_server_parse_iso_datetime_reuses_shared_normalization() -> None:
+    assert mcp_server._parse_iso_datetime("2026-03-21T16:30:00+08:00") == datetime(
+        2026, 3, 21, 8, 30, 0
+    )

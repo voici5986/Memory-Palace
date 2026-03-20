@@ -1,10 +1,20 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
-import { extractApiError } from './api';
+import {
+  clearStoredMaintenanceAuth,
+  extractApiError,
+  getMaintenanceAuthState,
+} from './api';
+
+const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
 
 describe('extractApiError', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('en');
+    clearStoredMaintenanceAuth();
+    delete window.__MEMORY_PALACE_RUNTIME__;
+    delete window.__MCP_RUNTIME_CONFIG__;
+    vi.restoreAllMocks();
   });
 
   it('returns plain string detail directly', () => {
@@ -81,5 +91,95 @@ describe('extractApiError', () => {
   it('localizes generic status-code errors in zh-CN', async () => {
     await i18n.changeLanguage('zh-CN');
     expect(extractApiError({ message: 'Request failed with status code 500' })).toBe('请求失败（状态码 500）');
+  });
+
+  it('migrates legacy dashboard auth from localStorage into sessionStorage', () => {
+    window.localStorage.setItem(
+      DASHBOARD_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        maintenanceApiKey: 'legacy-key',
+        maintenanceApiKeyMode: 'header',
+      }),
+    );
+
+    expect(getMaintenanceAuthState()).toMatchObject({
+      key: 'legacy-key',
+      mode: 'header',
+      source: 'stored',
+    });
+    expect(window.sessionStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toContain('legacy-key');
+    expect(window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it('does not delete a newer localStorage auth value during migration', () => {
+    const legacyRaw = JSON.stringify({
+      maintenanceApiKey: 'legacy-key',
+      maintenanceApiKeyMode: 'header',
+    });
+    const newerRaw = JSON.stringify({
+      maintenanceApiKey: 'newer-key',
+      maintenanceApiKeyMode: 'header',
+    });
+    const originalLocalStorage = window.localStorage;
+    const originalSessionStorage = window.sessionStorage;
+    let injectedNewerValue = false;
+
+    const localStorageStore = new Map([[DASHBOARD_AUTH_STORAGE_KEY, legacyRaw]]);
+    const localStorageMock = {
+      getItem(key) {
+        return localStorageStore.has(key) ? localStorageStore.get(key) : null;
+      },
+      setItem(key, value) {
+        localStorageStore.set(key, String(value));
+      },
+      removeItem(key) {
+        localStorageStore.delete(key);
+      },
+    };
+
+    const sessionStorageStore = new Map();
+    const sessionStorageMock = {
+      getItem(key) {
+        return sessionStorageStore.has(key) ? sessionStorageStore.get(key) : null;
+      },
+      setItem(key, value) {
+        sessionStorageStore.set(key, String(value));
+        if (!injectedNewerValue && key === DASHBOARD_AUTH_STORAGE_KEY) {
+          injectedNewerValue = true;
+          localStorageMock.setItem(DASHBOARD_AUTH_STORAGE_KEY, newerRaw);
+        }
+      },
+      removeItem(key) {
+        sessionStorageStore.delete(key);
+      },
+    };
+
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: localStorageMock,
+    });
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      value: sessionStorageMock,
+    });
+
+    try {
+      expect(getMaintenanceAuthState()).toMatchObject({
+        key: 'legacy-key',
+        mode: 'header',
+        source: 'stored',
+      });
+      expect(window.sessionStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toContain('legacy-key');
+      expect(window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toContain('newer-key');
+    } finally {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: originalLocalStorage,
+      });
+      Object.defineProperty(window, 'sessionStorage', {
+        configurable: true,
+        value: originalSessionStorage,
+      });
+    }
   });
 });

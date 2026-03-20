@@ -27,7 +27,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from filelock import AsyncFileLock, Timeout as FileLockTimeout
-from shared_utils import env_bool as _env_bool, env_int as _env_int, utc_iso_now as _utc_iso_now
+from shared_utils import (
+    env_bool as _env_bool,
+    env_int as _env_int,
+    parse_iso_datetime as _parse_iso_datetime_shared,
+    utc_iso_now as _utc_iso_now,
+)
 
 # Ensure we can import from backend modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -2061,23 +2066,11 @@ async def _try_client_method_variants(
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
-    """Parse ISO8601 datetime string (supports trailing Z)."""
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid datetime '{value}'. Use ISO-8601 like '2026-01-31T12:00:00Z'."
-        ) from exc
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-    return parsed
+    return _parse_iso_datetime_shared(
+        value,
+        normalize_to_utc_naive=True,
+        strict=True,
+    )
 
 
 def _normalize_search_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
