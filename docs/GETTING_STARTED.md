@@ -577,7 +577,7 @@ RUNTIME_WRITE_BUSY_TIMEOUT_MS=5000
 
 补一句当前默认口径：
 
-- 如果你走的是仓库自带的 Docker / GHCR compose 路径，`backend` 和 `sse` 共享同一份 SQLite 数据卷时，compose 已经默认把 journal mode 强制改成 `wal`
+- 如果你走的是仓库自带的 Docker / GHCR compose 路径，compose 已经默认把 journal mode 强制改成 `wal`
 - 上面这组 `.env` 主要还是给 **repo-local stdio / 本地手动多进程** 这类路径准备的
 
 ### 6.3 客户端配置示例

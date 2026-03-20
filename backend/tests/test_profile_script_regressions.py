@@ -61,6 +61,49 @@ def test_apply_profile_shell_keeps_database_url_valid_when_repo_path_has_spaces(
     assert make_url(database_url).database == expected_db_path
 
 
+def test_apply_profile_shell_rewrites_database_url_when_placeholder_has_spacing_and_comment(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL = sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db  # local template placeholder",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "RETRIEVAL_EMBEDDING_BACKEND=hash",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "macos", "b", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    generated_env = project_root / ".env.generated"
+    generated_text = generated_env.read_text(encoding="utf-8")
+    database_url = dotenv_values(generated_env).get("DATABASE_URL")
+    assert isinstance(database_url, str)
+    expected_db_path = (project_root / "demo.db").as_posix()
+    assert database_url == f"sqlite+aiosqlite:///{expected_db_path}"
+    assert make_url(database_url).database == expected_db_path
+    assert "<your-user>" not in generated_text
+    assert "DATABASE_URL =" not in generated_text
+
+
 def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
     tmp_path: Path,
 ) -> None:
@@ -97,6 +140,44 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
     assert "unresolved placeholders" in result.stderr
     assert "ROUTER_API_BASE=http://127.0.0.1:PORT/v1" in result.stderr
     assert "ROUTER_API_KEY=replace-with-your-key" in result.stderr
+
+
+def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spacing_and_comment(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "macos" / "profile-c.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db",
+                "ROUTER_API_BASE = http://127.0.0.1:PORT/v1  # unresolved router endpoint",
+                "ROUTER_API_KEY = replace-with-your-key  # unresolved key",
+                "ROUTER_EMBEDDING_MODEL = your-embedding-model-id",
+                "RETRIEVAL_RERANKER_MODEL = your-reranker-model-id  # unresolved model",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "macos", "c", ".env.generated"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "unresolved placeholders" in result.stderr
+    assert "ROUTER_API_BASE = http://127.0.0.1:PORT/v1  # unresolved router endpoint" in result.stderr
+    assert "ROUTER_API_KEY = replace-with-your-key  # unresolved key" in result.stderr
 
 
 def test_repo_local_stdio_wrapper_resolves_real_project_root_through_symlink(
@@ -182,3 +263,9 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
     assert "[System.Text.UTF8Encoding]::new($false)" in script_text
     assert "function Write-LinesUtf8" in script_text
     assert "function Assert-ResolvedProfilePlaceholders" in script_text
+    assert "$line -match '^\\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\\s*=\\s*.*:PORT/'" in script_text
+    assert "$line -match '=\\s*replace-with-your-key(\\s+#.*)?\\s*$'" in script_text
+    assert "$line -match '=\\s*your-embedding-model-id(\\s+#.*)?\\s*$'" in script_text
+    assert "$line -match '=\\s*your-reranker-model-id(\\s+#.*)?\\s*$'" in script_text
+    assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text
+    assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:///C:/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text

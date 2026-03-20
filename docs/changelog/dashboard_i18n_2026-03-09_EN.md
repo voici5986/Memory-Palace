@@ -67,7 +67,6 @@ Current implementation scope:
 - Language switching: English / Chinese
 - Persistence method: Browser `localStorage`
 - Language switching no longer triggers redundant refreshes of protected data in Memory / Observability
-- Agentation development toolbar: Not within the scope of this i18n update
 
 ---
 

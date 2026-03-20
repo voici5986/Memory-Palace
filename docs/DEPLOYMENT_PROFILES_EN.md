@@ -336,7 +336,7 @@ cd <project-root>
 >
 > If the `MCP_API_KEY` in this Docker env file is empty, `apply_profile.sh/.ps1` will automatically generate a local key for both the Dashboard proxy and SSE.
 >
-> The current compose also waits for **both the backend and SSE `/health` checks** to pass before the frontend is considered ready. If you see the container has just started but the browser isn't connecting, wait a few seconds first; do not immediately judge it as a deployment failure.
+> The current compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before the frontend is considered ready. If you see the container has just started but the browser isn't connecting, wait a few seconds first; do not immediately judge it as a deployment failure.
 >
 > Concurrent one-click deployments under the same checkout will be serialized by a deployment lock to prevent shared compose projects/env files from overwriting each other.
 >

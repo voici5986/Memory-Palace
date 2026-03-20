@@ -164,6 +164,17 @@ def test_pull_based_ghcr_release_artifacts_exist() -> None:
     assert "ghcr.io/${{ github.repository_owner }}/memory-palace-${{ matrix.service }}" in workflow
 
 
+def test_pull_based_ghcr_compose_matches_repo_two_service_topology() -> None:
+    ghcr_compose = (PROJECT_ROOT / "docker-compose.ghcr.yml").read_text(
+        encoding="utf-8"
+    )
+    frontend_block = ghcr_compose.split("\n  frontend:\n", 1)[1]
+
+    assert "\n  sse:\n" not in ghcr_compose
+    assert "backend:\n        condition: service_healthy" in frontend_block
+    assert "sse:\n        condition: service_healthy" not in frontend_block
+
+
 def test_docker_publish_workflow_uses_repo_backend_venv_for_validation() -> None:
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"

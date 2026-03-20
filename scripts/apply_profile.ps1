@@ -58,7 +58,7 @@ function Set-EnvValueInFile {
     $newLines = [System.Collections.Generic.List[string]]::new()
 
     foreach ($line in $lines) {
-        if ($line -match "^${escaped}=") {
+        if ($line -match "^\s*${escaped}\s*=") {
             if (-not $updated) {
                 $updated = $true
                 [void]$newLines.Add("$Key=$Value")
@@ -84,8 +84,11 @@ function Dedupe-EnvKeys {
     }
 
     $keys = Read-LinesUtf8 -FilePath $FilePath |
-        Where-Object { $_ -match '^[A-Z0-9_]+=' } |
-        ForEach-Object { ($_ -split '=', 2)[0] } |
+        Where-Object { $_ -match '^\s*[A-Z0-9_]+\s*=' } |
+        ForEach-Object {
+            $parts = $_ -split '=', 2
+            $parts[0].Trim()
+        } |
         Group-Object |
         Where-Object { $_.Count -gt 1 } |
         Sort-Object Name
@@ -93,13 +96,13 @@ function Dedupe-EnvKeys {
     foreach ($group in $keys) {
         $escaped = [regex]::Escape($group.Name)
         $lastLine = Read-LinesUtf8 -FilePath $FilePath |
-            Where-Object { $_ -match "^${escaped}=" } |
+            Where-Object { $_ -match "^\s*${escaped}\s*=" } |
             Select-Object -Last 1
         if (-not $lastLine) {
             continue
         }
 
-        $value = ($lastLine -split '=', 2)[1]
+        $value = ($lastLine -split '=', 2)[1].TrimStart()
         Set-EnvValueInFile -FilePath $FilePath -Key $group.Name -Value $value
     }
 }
@@ -116,14 +119,14 @@ function Get-EnvValueFromFile {
 
     $escaped = [regex]::Escape($Key)
     $lastLine = Read-LinesUtf8 -FilePath $FilePath |
-        Where-Object { $_ -match "^${escaped}=" } |
+        Where-Object { $_ -match "^\s*${escaped}\s*=" } |
         Select-Object -Last 1
 
     if (-not $lastLine) {
         return ''
     }
 
-    return ($lastLine -split '=', 2)[1]
+    return ($lastLine -split '=', 2)[1].TrimStart()
 }
 
 function New-DockerMcpApiKey {
@@ -145,11 +148,11 @@ function Assert-ResolvedProfilePlaceholders {
     $unresolved = [System.Collections.Generic.List[string]]::new()
     foreach ($line in Read-LinesUtf8 -FilePath $FilePath) {
         if (
-            $line -match '^(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)=.*:PORT/' `
-            -or $line -match '=replace-with-your-key$' `
-            -or $line -match '=your-embedding-model-id$' `
-            -or $line -match '=your-reranker-model-id$' `
-            -or $line -match '=https://router\.example\.com/'
+            $line -match '^\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\s*=\s*.*:PORT/' `
+            -or $line -match '=\s*replace-with-your-key(\s+#.*)?\s*$' `
+            -or $line -match '=\s*your-embedding-model-id(\s+#.*)?\s*$' `
+            -or $line -match '=\s*your-reranker-model-id(\s+#.*)?\s*$' `
+            -or $line -match '=\s*https://router\.example\.com/'
         ) {
             [void]$unresolved.Add($line)
         }
@@ -192,8 +195,8 @@ foreach ($line in Read-LinesUtf8 -FilePath $overrideEnv) {
 Write-LinesUtf8 -FilePath $Target -Lines $combinedLines.ToArray()
 
 if ($Platform -eq 'macos') {
-    $placeholder = 'DATABASE_URL=sqlite+aiosqlite:////Users/<your-user>/memory_palace/agent_memory.db'
-    if (Select-String -Path $Target -Pattern ([regex]::Escape($placeholder)) -Quiet) {
+    $placeholderPattern = '^\s*DATABASE_URL\s*=\s*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db(\s+#.*)?\s*$'
+    if (Select-String -Path $Target -Pattern $placeholderPattern -Quiet) {
         $dbPath = (Join-Path $projectRoot 'demo.db') -replace '\\', '/'
         $dbUrl = 'DATABASE_URL=sqlite+aiosqlite:////' + $dbPath.TrimStart('/')
         Set-EnvValueInFile -FilePath $Target -Key 'DATABASE_URL' -Value $dbUrl.Substring('DATABASE_URL='.Length)
@@ -202,8 +205,8 @@ if ($Platform -eq 'macos') {
 }
 
 if ($Platform -eq 'windows') {
-    $placeholder = 'DATABASE_URL=sqlite+aiosqlite:///C:/memory_palace/agent_memory.db'
-    if (Select-String -Path $Target -Pattern ([regex]::Escape($placeholder)) -Quiet) {
+    $placeholderPattern = '^\s*DATABASE_URL\s*=\s*sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db(\s+#.*)?\s*$'
+    if (Select-String -Path $Target -Pattern $placeholderPattern -Quiet) {
         $dbPath = (Join-Path $projectRoot 'demo.db') -replace '\\', '/'
         if ($dbPath -match '^/([a-zA-Z])/(.*)$') {
             $drive = $Matches[1].ToUpperInvariant()

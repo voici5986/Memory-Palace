@@ -65,7 +65,7 @@ set_env_value() {
   tmp_file="$(mktemp "${TMPDIR:-/tmp}/${file_path##*/}.XXXXXX")"
   awk -v key="${key}" -v value="${value}" '
     BEGIN { replaced = 0 }
-    $0 ~ ("^" key "=") {
+    $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
       if (!replaced) {
         print key "=" value
         replaced = 1
@@ -129,7 +129,16 @@ get_env_value() {
   local file_path="$1"
   local key="$2"
   local raw_value
-  raw_value="$(awk -F= -v key="${key}" '$1 == key { value = substr($0, length($1) + 2) } END { print value }' "${file_path}")"
+  raw_value="$(
+    awk -v key="${key}" '
+      $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
+        line = $0
+        sub("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*", "", line)
+        value = line
+      }
+      END { print value }
+    ' "${file_path}"
+  )"
   printf '%s\n' "${raw_value%$'\r'}"
 }
 
@@ -157,10 +166,24 @@ dedupe_env_keys() {
   local key value
   while IFS= read -r key; do
     [[ -n "${key}" ]] || continue
-    value="$(awk -F= -v key="${key}" '$1 == key { value = substr($0, length($1) + 2) } END { print value }' "${file_path}")"
+    value="$(
+      awk -v key="${key}" '
+        $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
+          line = $0
+          sub("^[[:space:]]*" key "[[:space:]]*=[[:space:]]*", "", line)
+          value = line
+        }
+        END { print value }
+      ' "${file_path}"
+    )"
     set_env_value "${file_path}" "${key}" "${value}"
   done < <(
-    awk -F= '/^[A-Z0-9_]+=/{ count[$1]++ } END { for (key in count) if (count[key] > 1) print key }' "${file_path}" | sort
+    awk '
+      match($0, /^[[:space:]]*([A-Z0-9_]+)[[:space:]]*=/, matches) {
+        count[matches[1]]++
+      }
+      END { for (key in count) if (count[key] > 1) print key }
+    ' "${file_path}" | sort
   )
 }
 
@@ -172,16 +195,14 @@ validate_profile_placeholders() {
   fi
 
   local -a unresolved_lines=()
-  local line
+  local line normalized_line
   while IFS= read -r line; do
-    case "${line}" in
-      ROUTER_API_BASE=*":PORT/"*|RETRIEVAL_EMBEDDING_API_BASE=*":PORT/"*|RETRIEVAL_RERANKER_API_BASE=*":PORT/"*)
-        unresolved_lines+=("${line}")
-        ;;
-      *=replace-with-your-key|*=your-embedding-model-id|*=your-reranker-model-id|*=https://router.example.com/*)
-        unresolved_lines+=("${line}")
-        ;;
-    esac
+    normalized_line="${line%$'\r'}"
+    if [[ "${normalized_line}" =~ ^[[:space:]]*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)[[:space:]]*=[[:space:]]*.*:PORT/ ]] \
+      || [[ "${normalized_line}" =~ =[[:space:]]*(replace-with-your-key|your-embedding-model-id|your-reranker-model-id)([[:space:]]+#.*)?[[:space:]]*$ ]] \
+      || [[ "${normalized_line}" =~ =[[:space:]]*https://router\.example\.com/ ]]; then
+      unresolved_lines+=("${line}")
+    fi
   done < "${file_path}"
 
   if [[ "${#unresolved_lines[@]}" -eq 0 ]]; then
@@ -216,13 +237,13 @@ cp "${base_env}" "${target_file}"
 } >> "${target_file}"
 
 if [[ "${platform}" == "macos" ]]; then
-  if grep -Eq $'^DATABASE_URL=sqlite\\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\\.db\r?$' "${target_file}"; then
+  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:////Users/<your-user>/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${target_file}"; then
     db_path="${PROJECT_ROOT}/demo.db"
     set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:////${db_path#/}"
     echo "[auto-fill] DATABASE_URL set to ${db_path}"
   fi
 elif [[ "${platform}" == "windows" ]]; then
-  if grep -Eq $'^DATABASE_URL=sqlite\\+aiosqlite:///C:/memory_palace/agent_memory\\.db\r?$' "${target_file}"; then
+  if grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*sqlite\+aiosqlite:///C:/memory_palace/agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$' "${target_file}"; then
     if db_path="$(resolve_windows_db_path)"; then
       set_env_value "${target_file}" "DATABASE_URL" "sqlite+aiosqlite:///${db_path}"
       echo "[auto-fill] DATABASE_URL set to ${db_path}"

@@ -46,6 +46,17 @@ def test_compose_pins_sse_internal_port_to_proxy_contract() -> None:
     assert "backend:\n        condition: service_healthy" in frontend_block
 
 
+def test_pull_based_ghcr_compose_matches_backend_frontend_proxy_topology() -> None:
+    compose_text = (PROJECT_ROOT / "docker-compose.ghcr.yml").read_text(encoding="utf-8")
+    backend_block = compose_text.split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    frontend_block = compose_text.split("\n  frontend:\n", 1)[1]
+
+    assert "\n  sse:\n" not in compose_text
+    assert "http://127.0.0.1:8000/health" in backend_block
+    assert "RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}" in backend_block
+    assert "backend:\n        condition: service_healthy" in frontend_block
+
+
 def test_frontend_nginx_template_targets_repo_managed_sse_port() -> None:
     template_text = (
         PROJECT_ROOT / "deploy" / "docker" / "nginx.conf.template"

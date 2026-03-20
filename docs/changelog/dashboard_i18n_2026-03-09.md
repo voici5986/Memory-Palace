@@ -67,7 +67,6 @@
 - 语言切换：英文 / 中文
 - 持久化方式：浏览器 `localStorage`
 - 语言切换不会再触发 Memory / Observability 受保护数据的重复刷新
-- Agentation 开发态工具条：不在这次 i18n 范围内
 
 ---
 

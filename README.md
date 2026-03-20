@@ -102,7 +102,7 @@ One protocol, many clients: the public docs focus on the most practical paths fo
 
 Four deployment profiles (A/B/C/D) from pure local to cloud-connected, with Docker support and one-click scripts. The broadest validated path today is still `macOS + Docker`; native Windows now has a repo-local stdio path through `backend/mcp_wrapper.py`, while remote and GUI-host combinations should still be re-checked in the target environment.
 
-On the repository-shipped Docker / GHCR compose paths, when `backend` and `sse` share the same SQLite data volume, compose now forces WAL by default to reduce `database is locked` style write contention.
+On the repository-shipped Docker / GHCR compose paths, compose now forces WAL by default to reduce `database is locked` style write contention on the shared SQLite volume.
 
 ### 📊 Built-in Observability Dashboard
 

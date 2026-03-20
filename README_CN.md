@@ -98,7 +98,7 @@
 
 四种部署档位（A/B/C/D），从纯本地到云端连接，支持 Docker 部署和一键脚本。当前最完整的大链路验证仍是 `macOS + Docker`；原生 Windows 现在已有通过 `backend/mcp_wrapper.py` 的 repo-local stdio 路径，但远程场景和 GUI 宿主组合仍建议按目标环境再复核一次。
 
-如果你走的是仓库自带的 Docker / GHCR compose 路径，`backend` 和 `sse` 共享同一份 SQLite 数据卷时，compose 现在会默认强制打开 WAL，减少 `database is locked` 这类并发写冲突。
+如果你走的是仓库自带的 Docker / GHCR compose 路径，compose 现在会默认强制打开 WAL，减少共享 SQLite 数据卷上的 `database is locked` 这类并发写冲突。
 
 ### 📊 内置可观测性仪表盘
 

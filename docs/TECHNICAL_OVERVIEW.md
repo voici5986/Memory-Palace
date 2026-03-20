@@ -194,7 +194,6 @@ frontend/src/
 │   ├── maintenance/MaintenancePage.jsx        # vitality 清理与维护任务
 │   └── observability/ObservabilityPage.jsx    # 检索统计与任务可观测
 ├── components/
-│   ├── AgentationLite.jsx                     # 轻量化 Agent 集成组件（当前不挂载到主界面）
 │   ├── DiffViewer.jsx                         # Diff 可视化
 │   ├── FluidBackground.jsx                    # 流体动画背景
 │   ├── GlassCard.jsx                          # 毛玻璃卡片

@@ -79,4 +79,19 @@ describe('i18n bootstrap', () => {
     expect(document.documentElement.lang).toBe('zh-CN');
     expect(document.title).toBe('Memory Palace 控制台');
   });
+
+  it('escapes interpolated html-like values in translated strings', async () => {
+    vi.resetModules();
+    const [{ default: freshI18n }] = await Promise.all([
+      import('./i18n'),
+    ]);
+
+    const translated = freshI18n.t('setup.messages.serverSaved', {
+      target: '<script>alert(1)</script>',
+    });
+
+    expect(translated).not.toContain('<script>');
+    expect(translated).toContain('&lt;script&gt;');
+    expect(translated).toMatch(/&lt;(?:&#x2F;|\/)script&gt;/);
+  });
 });

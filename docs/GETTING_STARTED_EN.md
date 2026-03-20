@@ -336,7 +336,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > If `MCP_API_KEY` in the Docker env file is empty, `apply_profile.*` will automatically generate a local key. The Docker frontend will automatically include this key in its proxy layer, so **when starting via the recommended one-click script path**, protected requests usually already work; however, the page may still keep showing `Set API key`, because the browser page itself does not know the proxy-held key. Treat that as expected unless protected data also starts failing with `401` or empty states. Even then, the first-run setup assistant stays in guidance mode for Docker instead of pretending it can persist container env changes.
 >
-> Currently, Docker Compose also waits for **both backend and SSE `/health` checks** to pass before considering the frontend ready. This means that when the container first shows `running`, the page might take a few more seconds to become truly available, which is normal.
+> Currently, Docker Compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before treating the frontend as truly ready. In practice, when the container first shows `running`, the page may still take a few more seconds to become truly available, which is normal.
 >
 > The Docker frontend also serves `/index.html` with `Cache-Control: no-store, no-cache, must-revalidate` to reduce the chance that a browser keeps an old entry page after a frontend update. If you still see an obviously old page right after upgrading the image, first confirm the new container is actually running, then refresh the page once. Only continue checking cache behavior if you also put your own reverse proxy or corporate cache in front of it.
 >
@@ -580,7 +580,7 @@ In plain language:
 
 One more note about the current default path:
 
-- if you use the repository-shipped Docker / GHCR compose path, compose already forces the journal mode to `wal` when `backend` and `sse` share the same SQLite data volume
+- if you use the repository-shipped Docker / GHCR compose path, compose already forces the journal mode to `wal`
 - the `.env` block above is mainly for **repo-local stdio / manually started multi-process local paths**
 
 ### 6.3 Client Configuration Examples

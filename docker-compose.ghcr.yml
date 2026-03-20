@@ -24,31 +24,6 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  sse:
-    image: ${MEMORY_PALACE_BACKEND_IMAGE:-ghcr.io/agi-is-going-to-arrive/memory-palace-backend:latest}
-    pull_policy: missing
-    env_file:
-      - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
-    environment:
-      HOST: 0.0.0.0
-      RUNTIME_WRITE_WAL_ENABLED: ${MEMORY_PALACE_DOCKER_WAL_ENABLED:-true}
-      RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}
-    command: ["python", "run_sse.py"]
-    volumes:
-      - memory_palace_data:/app/data
-      - memory_palace_snapshots:/app/snapshots
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "python", "-c", "import os, urllib.request; headers = {'X-MCP-API-Key': os.getenv('MCP_API_KEY')} if os.getenv('MCP_API_KEY') else {}; request = urllib.request.Request('http://127.0.0.1:8000/health', headers=headers); urllib.request.urlopen(request, timeout=3).read()"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    restart: unless-stopped
-
   frontend:
     image: ${MEMORY_PALACE_FRONTEND_IMAGE:-ghcr.io/agi-is-going-to-arrive/memory-palace-frontend:latest}
     pull_policy: missing
@@ -56,8 +31,6 @@ services:
       - ${MEMORY_PALACE_DOCKER_ENV_FILE:-./.env.docker}
     depends_on:
       backend:
-        condition: service_healthy
-      sse:
         condition: service_healthy
     ports:
       - "${MEMORY_PALACE_FRONTEND_PORT:-${NOCTURNE_FRONTEND_PORT:-3000}}:8080"

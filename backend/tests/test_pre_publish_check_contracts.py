@@ -32,7 +32,7 @@ def test_apply_profile_shell_accepts_crlf_windows_placeholder_lines() -> None:
         encoding="utf-8"
     )
 
-    assert r"agent_memory\\.db\r?$" in script_text
+    assert r"agent_memory\.db([[:space:]]+#.*)?[[:space:]]*\r?$" in script_text
     assert "macos|linux|windows|docker" in script_text
 
 
