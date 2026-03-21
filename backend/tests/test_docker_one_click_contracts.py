@@ -223,7 +223,8 @@ def test_pull_based_ghcr_release_artifacts_exist() -> None:
     assert "ghcr.io/agi-is-going-to-arrive/memory-palace-frontend:latest" in ghcr_compose
     assert "docker/login-action" in workflow
     assert "docker/build-push-action" in workflow
-    assert "ghcr.io/${{ github.repository_owner }}/memory-palace-${{ matrix.service }}" in workflow
+    assert 'run: echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"' in workflow
+    assert "ghcr.io/${{ steps.owner.outputs.owner_lc }}/memory-palace-${{ matrix.service }}" in workflow
 
 
 def test_pull_based_ghcr_compose_matches_repo_two_service_topology() -> None:
