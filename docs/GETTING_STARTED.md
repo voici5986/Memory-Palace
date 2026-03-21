@@ -16,9 +16,11 @@
 | Node.js | `20.19+`（或 `>=22.12`） | `node --version` |
 | npm | `9+` | `npm --version` |
 | Docker（可选） | `20+` | `docker --version` |
-| Docker Compose（可选） | `2.0+` | `docker compose version` |
+| Docker Compose（可选） | `2.0+`（手动运行仓库 compose 文件时建议使用较新的 `docker compose` plugin） | `docker compose version` |
 
 > **提示**：macOS 用户推荐使用 [Homebrew](https://brew.sh) 安装 Python 和 Node.js。Windows 用户推荐从官网下载安装包或使用 [Scoop](https://scoop.sh)。如果你机器上的 Python 命令名是 `python3` 而不是 `python`，把下面命令里的 `python` 换成 `python3` 即可。
+>
+> **Compose 兼容边界**：仓库自带的 `docker-compose.yml` / `docker-compose.ghcr.yml` 在卷名默认值上使用了嵌套 `${...:-...}` 语法。如果你手动运行这些 compose 文件，建议使用较新的 `docker compose` plugin；某些较旧实现或经典 `docker-compose` 可能会在解析阶段直接失败。遇到这种情况，优先改走 `docker_one_click.sh/.ps1`，或先显式设置 `MEMORY_PALACE_DATA_VOLUME`、`MEMORY_PALACE_SNAPSHOTS_VOLUME`、`COMPOSE_PROJECT_NAME` 再启动。
 
 ---
 
@@ -319,6 +321,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。这里的 `<YOUR_MCP_API_KEY>` 默认就填刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
 - `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用宿主机上的本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。
 - 如果你后面要切回本机 `stdio` 客户端，本地 `.env` 必须写宿主机可访问的绝对路径；如果仓库里只有 `.env.docker` 而没有本地 `.env`，或者 `.env` / 显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它都会明确拒绝启动，并提示改走本机路径或 Docker 暴露的 `/sse`。
+- 仓库自带的 compose 文件在卷名默认值上使用了嵌套 `${...:-...}`。如果你本机的 Compose 实现较旧，或仍在用经典 `docker-compose`，这条手动路径可能会在 `docker compose up` 前就解析失败。遇到这种情况，优先改走 `docker_one_click.sh/.ps1`，或先显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` / `COMPOSE_PROJECT_NAME`。
 - 和 `docker_one_click.sh/.ps1` 不同，这条 GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前显式设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
 - 如果容器还要访问**你宿主机上的本地模型服务**，不要把容器侧地址写成 `127.0.0.1`。对容器来说，`127.0.0.1` 指向的是容器自己，不是你的宿主机。优先使用 `host.docker.internal`（或你的实际可达地址）。当前 compose 已显式补 `host.docker.internal:host-gateway`，Linux Docker 也能沿这条路径访问宿主机服务。
 
@@ -586,7 +589,7 @@ $env:PORT = "8010"
 python run_sse.py
 ```
 
-> `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
+> `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给本地独立调试做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >

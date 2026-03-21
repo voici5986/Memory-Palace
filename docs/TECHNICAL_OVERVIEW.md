@@ -12,9 +12,11 @@
 | MCP | `mcp.server.fastmcp` | mcp ≥0.1 | 为 Codex / Claude Code / Gemini CLI / OpenCode 暴露统一工具面；对 `Cursor / Windsurf / VSCode-host / Antigravity` 这类 IDE 宿主，推荐通过 repo-local `AGENTS.md` 与 MCP 配置片段接入 |
 | Frontend | React + Vite + TailwindCSS + Framer Motion | React ≥18.2 · Vite ≥7.3 · TailwindCSS ≥3.3 · Framer Motion ≥12.34 | 可视化管理 Dashboard |
 | Runtime | 内置队列与 worker | — | 写入串行化、索引重建、vitality 衰减、sleep consolidation |
-| Deployment | Docker Compose + profile 脚本 | Docker ≥20 · Compose ≥2.0 | A/B/C/D 档位快速部署 |
+| Deployment | Docker Compose + profile 脚本 | Docker ≥20 · Compose ≥2.0（手动运行仓库 compose 文件时建议使用较新的 `docker compose` plugin） | A/B/C/D 档位快速部署 |
 
 核心依赖详见 `backend/requirements.txt` 和 `frontend/package.json`。
+
+补充边界：仓库自带 compose 文件在卷名默认值上使用了嵌套 `${...:-...}`。对较旧 Compose 实现，这更像“解析兼容性”问题，而不是后端启动失败。遇到这种情况，优先改走 `docker_one_click.sh/.ps1`，或在手动启动前显式设置 `MEMORY_PALACE_DATA_VOLUME`、`MEMORY_PALACE_SNAPSHOTS_VOLUME`、`COMPOSE_PROJECT_NAME`。
 
 ---
 

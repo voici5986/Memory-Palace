@@ -16,9 +16,11 @@ This guide helps you set up the Memory Palace local development environment or D
 | Node.js | `20.19+` (or `>=22.12`) | `node --version` |
 | npm | `9+` | `npm --version` |
 | Docker (Optional) | `20+` | `docker --version` |
-| Docker Compose (Optional) | `2.0+` | `docker compose version` |
+| Docker Compose (Optional) | `2.0+` (a recent `docker compose` plugin is recommended when running the repository compose files manually) | `docker compose version` |
 
 > **Tip**: macOS users are recommended to use [Homebrew](https://brew.sh) to install Python and Node.js. Windows users should download installers from official sites or use [Scoop](https://scoop.sh). If your machine exposes Python as `python3` instead of `python`, replace `python` with `python3` in the commands below.
+>
+> **Compose compatibility boundary**: the repository-shipped `docker-compose.yml` / `docker-compose.ghcr.yml` use nested `${...:-...}` defaults for volume names. If you run those compose files manually, prefer a recent `docker compose` plugin; some older implementations or classic `docker-compose` may fail during parsing. When that happens, prefer `docker_one_click.sh/.ps1`, or pre-set `MEMORY_PALACE_DATA_VOLUME`, `MEMORY_PALACE_SNAPSHOTS_VOLUME`, and `COMPOSE_PROJECT_NAME` before startup.
 
 ---
 
@@ -318,6 +320,7 @@ What this path does and does not do:
 - It does **not** automatically configure local `skills / MCP / IDE host` entries on your machine.
 - If you want the current repo's repo-local skill + MCP install path, keep this checkout and continue with `docs/skills/GETTING_STARTED_EN.md`.
 - If you do not want the repo-local install path, any client that supports remote SSE MCP can still be configured manually to connect to `http://localhost:3000/sse` with the matching auth header / API key. For this GHCR path, `<YOUR_MCP_API_KEY>` normally means the `MCP_API_KEY` written into the `.env.docker` you just generated.
+- The repository compose files use nested `${...:-...}` defaults for volume names. If your local Compose implementation is older, or you are still using classic `docker-compose`, this manual path may fail before `docker compose up` even starts the services. In that case, prefer `docker_one_click.sh/.ps1`, or pre-set `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` / `COMPOSE_PROJECT_NAME`.
 - Unlike `docker_one_click.sh/.ps1`, this GHCR compose path does **not** auto-adjust ports. If `3000` / `18000` are occupied, set `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT` explicitly before `docker compose up`.
 - If the container still needs to reach a **model service running on your host machine**, do not write `127.0.0.1` as the host-side address from inside the container. For the container, `127.0.0.1` points back to the container itself, not your host. Prefer `host.docker.internal` (or your actual reachable host address). The compose files now add `host.docker.internal:host-gateway`, so this path also works on modern Linux Docker.
 - Do **not** assume the repo-local stdio wrapper reuses container data automatically. `scripts/run_memory_palace_mcp_stdio.sh` needs a host-side local repository `.env` and the local `backend/.venv`; it does not reuse container data from `/app/data`.
@@ -587,7 +590,7 @@ $env:PORT = "8010"
 python run_sse.py
 ```
 
-> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. You can still override both `HOST` and `PORT` explicitly. SSE mode remains protected by `MCP_API_KEY`.
+> `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. When that happens, the startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. You can still override both `HOST` and `PORT` explicitly. SSE mode remains protected by `MCP_API_KEY`.
 >
 > The same SSE process also provides a lightweight `/health` endpoint, mainly for standalone local debugging; the truly open streaming entry point for MCP clients remains `/sse`.
 >

@@ -98,6 +98,13 @@ def _is_loopback_port_available(port: int) -> bool:
     return True
 
 
+def _format_http_host_for_display(host: str) -> str:
+    normalized = str(host or "").strip() or "127.0.0.1"
+    if ":" in normalized and not normalized.startswith("[") and not normalized.endswith("]"):
+        return f"[{normalized}]"
+    return normalized
+
+
 def _resolve_sse_port(host: str) -> int:
     raw_port = str(os.getenv("PORT") or "").strip()
     if raw_port:
@@ -108,9 +115,13 @@ def _resolve_sse_port(host: str) -> int:
         normalized_host in {"127.0.0.1", "localhost", "::1"}
         and not _is_loopback_port_available(_DEFAULT_SSE_PORT)
     ):
+        display_host = _format_http_host_for_display(normalized_host or host)
         print(
             f"Loopback port {_DEFAULT_SSE_PORT} is already in use; "
-            f"falling back to {_LOOPBACK_FALLBACK_SSE_PORT}.",
+            f"falling back to {_LOOPBACK_FALLBACK_SSE_PORT}. "
+            f"Update MCP client config to "
+            f"http://{display_host}:{_LOOPBACK_FALLBACK_SSE_PORT}/sse "
+            f"or set PORT explicitly.",
             file=sys.stderr,
         )
         return _LOOPBACK_FALLBACK_SSE_PORT
@@ -659,9 +670,10 @@ def main():
 
     host = str(os.getenv("HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port = _resolve_sse_port(host)
+    display_host = _format_http_host_for_display(host)
 
-    print(f"Starting SSE Server on http://{host}:{port}")
-    print(f"SSE Endpoint: http://{host}:{port}/sse")
+    print(f"Starting SSE Server on http://{display_host}:{port}")
+    print(f"SSE Endpoint: http://{display_host}:{port}/sse")
 
     uvicorn.run(app, host=host, port=port)
 

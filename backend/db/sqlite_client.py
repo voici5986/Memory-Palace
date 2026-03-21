@@ -69,6 +69,51 @@ _SQLITE_ADAPTERS_REGISTERED = False
 _DATABASE_URL_PLACEHOLDER_PATTERN = re.compile(r"<[^>]+>|__REPLACE_ME__")
 _NETWORK_FILESYSTEM_TYPES = {"nfs", "nfs4", "cifs", "smb", "smbfs"}
 logger = logging.getLogger(__name__)
+_INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    # Keep query-routing keywords in one place so future language additions or
+    # config-driven overrides do not require editing classifier logic.
+    "temporal": (
+        "when",
+        "timeline",
+        "history",
+        "before",
+        "after",
+        "recent",
+        "latest",
+        "yesterday",
+        "today",
+        "昨天",
+        "最近",
+        "之前",
+        "之后",
+        "时间",
+    ),
+    "causal": (
+        "why",
+        "cause",
+        "because",
+        "reason",
+        "root cause",
+        "导致",
+        "原因",
+        "因果",
+        "为什么",
+    ),
+    "exploratory": (
+        "explore",
+        "brainstorm",
+        "ideas",
+        "compare",
+        "alternatives",
+        "options",
+        "tradeoff",
+        "可能",
+        "探索",
+        "方案",
+        "对比",
+        "建议",
+    ),
+}
 
 
 def _register_sqlite_adapters() -> None:
@@ -1995,53 +2040,9 @@ class SQLiteClient:
         source = re.sub(r"\s+", " ", source).strip()
         token_set = set(re.findall(r"[a-z0-9_]+", source))
 
-        intent_keywords = {
-            "temporal": [
-                "when",
-                "timeline",
-                "history",
-                "before",
-                "after",
-                "recent",
-                "latest",
-                "yesterday",
-                "today",
-                "昨天",
-                "最近",
-                "之前",
-                "之后",
-                "时间",
-            ],
-            "causal": [
-                "why",
-                "cause",
-                "because",
-                "reason",
-                "root cause",
-                "导致",
-                "原因",
-                "因果",
-                "为什么",
-            ],
-            "exploratory": [
-                "explore",
-                "brainstorm",
-                "ideas",
-                "compare",
-                "alternatives",
-                "options",
-                "tradeoff",
-                "可能",
-                "探索",
-                "方案",
-                "对比",
-                "建议",
-            ],
-        }
-
         hits_by_intent: Dict[str, List[str]] = {
             intent: self._collect_keyword_hits(source, token_set, keywords)
-            for intent, keywords in intent_keywords.items()
+            for intent, keywords in _INTENT_KEYWORDS.items()
         }
         scores = {intent: len(hits) for intent, hits in hits_by_intent.items()}
 

@@ -12,9 +12,11 @@ This document is intended for technical users who need to understand the interna
 | MCP | `mcp.server.fastmcp` | mcp ≥0.1 | Exposes a unified tool interface for Codex / Claude Code / Gemini CLI / OpenCode; for IDE hosts such as `Cursor / Windsurf / VSCode-host / Antigravity`, the recommended path is repo-local `AGENTS.md` plus an MCP config snippet |
 | Frontend | React + Vite + TailwindCSS + Framer Motion | React ≥18.2 · Vite ≥7.3 · TailwindCSS ≥3.3 · Framer Motion ≥12.34 | Visual management Dashboard |
 | Runtime | Built-in queue and worker | — | Write serialization, index rebuilding, vitality decay, sleep consolidation |
-| Deployment | Docker Compose + profile scripts | Docker ≥20 · Compose ≥2.0 | Quick deployment with A/B/C/D tiers |
+| Deployment | Docker Compose + profile scripts | Docker ≥20 · Compose ≥2.0 (a recent `docker compose` plugin is recommended when running the repository compose files manually) | Quick deployment with A/B/C/D tiers |
 
 Core dependencies can be found in `backend/requirements.txt` and `frontend/package.json`.
+
+Boundary note: the repository compose files use nested `${...:-...}` defaults for volume names. On older Compose implementations, a failure here is usually a parsing-compatibility issue rather than a backend startup bug. When that happens, prefer `docker_one_click.sh/.ps1`, or explicitly set `MEMORY_PALACE_DATA_VOLUME`, `MEMORY_PALACE_SNAPSHOTS_VOLUME`, and `COMPOSE_PROJECT_NAME` before manual startup.
 
 ---
 

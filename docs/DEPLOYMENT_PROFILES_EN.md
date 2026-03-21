@@ -573,7 +573,7 @@ When using **Docker one-click deployment**, you don't need to write the key into
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection. If your remote hostname / origin should also pass MCP transport-security host/origin checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
+> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. When that fallback happens, the startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection. If your remote hostname / origin should also pass MCP transport-security host/origin checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
 >
 > In Docker / Compose, SSE is now served directly by the `backend` process and then reached through the frontend proxy; there is no separate `sse` container in the default topology anymore.
 

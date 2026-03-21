@@ -230,6 +230,8 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
    HOST=127.0.0.1 PORT=8010 python run_sse.py
    ```
 
+   如果刚才其实是因为 `8000` 被占用而自动回退，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。优先先按这条提示改客户端，不要先把它误判成 SSE 链路本身坏了。
+
 4. 或查找并释放被占用端口：
 
    ```bash

@@ -1,40 +1,46 @@
-from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+
+from pydantic import BaseModel, Field
 
 
 class DiffRequest(BaseModel):
-    """文本diff请求"""
-    text_a: str = Field(..., description="旧文本")
-    text_b: str = Field(..., description="新文本")
+    """Request payload for text diff comparison."""
+
+    text_a: str = Field(..., description="Original text")
+    text_b: str = Field(..., description="Updated text")
 
 
 class DiffResponse(BaseModel):
-    """文本diff响应"""
-    diff_html: str = Field(..., description="HTML格式的diff")
-    diff_unified: str = Field(..., description="unified格式的diff")
-    summary: str = Field(..., description="变化摘要")
+    """Response payload for text diff comparison."""
+
+    diff_html: str = Field(..., description="HTML-formatted diff")
+    diff_unified: str = Field(..., description="Unified diff")
+    summary: str = Field(..., description="Change summary")
 
 
-# ============ 回滚相关模型 (Rollback/Review) ============
+# Review / rollback models.
 
 class SessionInfo(BaseModel):
-    """Session 元信息"""
+    """Review session metadata."""
+
     session_id: str
     created_at: Optional[str] = None
     resource_count: int
 
 
 class SnapshotInfo(BaseModel):
-    """快照元信息"""
+    """Snapshot metadata."""
+
     resource_id: str
-    resource_type: str  # 'path' or 'memory'
+    resource_type: str  # "path" or "memory"
     snapshot_time: str
     operation_type: Optional[str] = "modify"
-    uri: Optional[str] = None  # Display URI (for memory snapshots where resource_id is memory:{id})
+    uri: Optional[str] = None  # Display URI when resource_id uses the internal memory:{id} form.
 
 
 class SnapshotDetail(BaseModel):
-    """快照详细数据"""
+    """Detailed snapshot payload."""
+
     resource_id: str
     resource_type: str
     snapshot_time: str
@@ -42,27 +48,30 @@ class SnapshotDetail(BaseModel):
 
 
 class ResourceDiff(BaseModel):
-    """资源的快照与当前状态对比"""
+    """Diff between a snapshot and the current resource state."""
+
     resource_id: str
     resource_type: str
     snapshot_time: str
-    snapshot_data: Dict[str, Any]  # 快照时的完整状态 (content, priority, disclosure)
-    current_data: Dict[str, Any]   # 当前的完整状态
+    snapshot_data: Dict[str, Any]  # Full state captured in the snapshot.
+    current_data: Dict[str, Any]   # Current full state.
     diff_unified: str
     diff_summary: str
     has_changes: bool
 
 
 class RollbackRequest(BaseModel):
-    """回滚请求"""
+    """Request payload for snapshot rollback."""
+
     task_description: Optional[str] = Field(
         "Rollback to snapshot by human",
-        description="任务描述（记录在版本历史中）"
+        description="Task description recorded in version history",
     )
 
 
 class RollbackResponse(BaseModel):
-    """回滚响应"""
+    """Rollback result payload."""
+
     resource_id: str
     resource_type: str
     success: bool

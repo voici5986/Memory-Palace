@@ -328,6 +328,7 @@ docker compose -f docker-compose.ghcr.yml up -d
 - 它**不会**自动把 `Claude / Codex / Gemini / OpenCode / Cursor / Antigravity` 这些客户端在你机器上的 skill / MCP 配置一起改好。
 - 如果你还想用当前仓库现成的 repo-local skill + MCP 自动化安装链路，保留这个 checkout，再继续看 [docs/skills/GETTING_STARTED.md](docs/skills/GETTING_STARTED.md)。
 - 如果你不走 repo-local 安装链路，也可以手工把支持远程 SSE 的 MCP 客户端指到 `http://localhost:3000/sse`，并配置同一把 API key / 鉴权头。这里的 `<YOUR_MCP_API_KEY>` 默认就读刚生成的 `.env.docker` 里的 `MCP_API_KEY`。
+- 仓库自带的 compose 文件在卷名默认值上使用了嵌套 `${...:-...}`。如果你本机的 Compose 实现较旧，或仍在用经典 `docker-compose`，这条手动路径可能会在 `docker compose up` 前就解析失败。遇到这种情况，优先改走 `docker_one_click.sh/.ps1`，或先显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` / `COMPOSE_PROJECT_NAME`。
 - `scripts/run_memory_palace_mcp_stdio.sh` 不是 Docker 客户端入口。它依赖本地 `bash` 和 `backend/.venv`，只会复用宿主机上的本地 `.env` / `DATABASE_URL`，不会复用容器里的 `/app/data`。
 - 如果你后面要切回本机 `stdio` 客户端，本地 `.env` 必须写宿主机可访问的绝对路径。仓库里只有 `.env.docker` 而没有本地 `.env` 时，它会明确拒绝回退到 `demo.db`；如果 `.env` 或显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它也会直接拒绝启动，并提示你改成本机路径或走 Docker 暴露的 `/sse`。
 - 和 `docker_one_click.sh/.ps1` 不同，GHCR compose 路径**不会自动换端口**。如果 `3000` / `18000` 已被占用，请在启动前自己设置 `MEMORY_PALACE_FRONTEND_PORT` / `MEMORY_PALACE_BACKEND_PORT`。
@@ -552,7 +553,7 @@ python run_sse.py
 >
 > 同样地，如果 `.env` 或你显式传入的 `DATABASE_URL` 仍是 `/app/...` 或 `/data/...` 这类 Docker 容器路径，wrapper 现在也会直接拒绝启动。这不是 MCP 协议故障，而是本机路径配置错了；改成宿主机绝对路径，或者继续走 Docker `/sse`。
 >
-> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；`python run_sse.py` 会优先尝试回环 `127.0.0.1:8000`，如果本机 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。如果你的远程 hostname / origin 还要通过 MCP 传输层的 host/origin 校验，也要再显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是把非回环监听误解成“默认放开全部来源”。
+> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；`python run_sse.py` 会优先尝试回环 `127.0.0.1:8000`，如果本机 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志还会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`，所以更应该把它看成“客户端配置要跟着改”的提示，而不是静默故障。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。如果你的远程 hostname / origin 还要通过 MCP 传输层的 host/origin 校验，也要再显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是把非回环监听误解成“默认放开全部来源”。
 
 详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
 

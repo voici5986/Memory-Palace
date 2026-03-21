@@ -564,7 +564,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。若你的远程 hostname / origin 也需要通过 MCP 传输层的 host/origin 校验，请显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。若你的远程 hostname / origin 也需要通过 MCP 传输层的 host/origin 校验，请显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
 
 Docker 一键部署时，直接使用：
 

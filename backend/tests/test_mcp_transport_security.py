@@ -118,7 +118,10 @@ def test_loopback_port_probe_checks_ipv6_when_ipv4_is_free(monkeypatch) -> None:
     assert attempts == [(run_sse.socket.AF_INET, ("127.0.0.1", 8000))]
 
 
-def test_run_sse_main_falls_back_for_ipv6_loopback_host(monkeypatch) -> None:
+def test_run_sse_main_falls_back_for_ipv6_loopback_host(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     calls: list[tuple[str, int]] = []
 
     monkeypatch.setenv("HOST", "::1")
@@ -136,8 +139,12 @@ def test_run_sse_main_falls_back_for_ipv6_loopback_host(monkeypatch) -> None:
     )
 
     run_sse.main()
+    captured = capsys.readouterr()
 
     assert calls == [("::1", 8010)]
+    assert "Update MCP client config to http://[::1]:8010/sse or set PORT explicitly." in captured.err
+    assert "Starting SSE Server on http://[::1]:8010" in captured.out
+    assert "SSE Endpoint: http://[::1]:8010/sse" in captured.out
 
 
 def test_sse_transport_security_rejects_invalid_host_without_traceback(tmp_path) -> None:

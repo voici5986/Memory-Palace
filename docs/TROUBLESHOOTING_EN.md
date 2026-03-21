@@ -232,6 +232,8 @@ On the shell-wrapper path (`macOS / Linux / Git Bash / WSL`), `run_memory_palace
    HOST=127.0.0.1 PORT=8010 python run_sse.py
    ```
 
+   If the real issue was an automatic fallback because `8000` was already occupied, the current startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. Follow that hint first before treating it as an SSE transport failure.
+
 4. Or find and release the occupied port:
 
    ```bash
