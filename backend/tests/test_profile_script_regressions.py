@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -834,7 +835,10 @@ def test_apply_profile_powershell_rejects_concurrent_writer_for_same_target(
             lock_holder.wait(timeout=5)
 
     assert result.returncode != 0
-    assert "another apply_profile.ps1 process is already writing .env.generated" in result.stderr
+    stderr_text = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
+    assert "another apply_profile.ps1 process is already writing" in stderr_text
+    assert ".env.generated" in stderr_text
+    assert "wait for it to finish before retrying." in stderr_text
 
 
 def test_apply_profile_powershell_rejects_unresolved_database_url_placeholders(
