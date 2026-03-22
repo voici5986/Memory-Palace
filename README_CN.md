@@ -550,6 +550,8 @@ python run_sse.py
 >
 > 对 shell wrapper 这条路径（`macOS / Linux / Git Bash / WSL`）来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：就算当前 shell 默认编码不太友好，本地 stdio 也更不容易因为编码问题变成乱码或直接报错。
 >
+> 同一条 shell wrapper 现在还会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机还跑着 Ollama 或别的本地 OpenAI-compatible 服务，它们更不容易被宿主机代理误走。这条自动代理绕过只针对 shell wrapper 路径本身，不等于所有后端启动方式都会默认带上同样的保护。
+>
 > 在原生 Windows 或其它更依赖 wrapper 的宿主路径里，repo-local stdio launcher 现在也会按块转发 stdin/stdout，而不是逐字节转发。说人话就是：遇到更大的 MCP 响应时，体感会比以前顺一些，但原来的 CRLF 清理规则不变。
 >
 > 再补一个这轮实测过的细节：如果某个客户端 / IDE host 把 `DATABASE_URL` 传成了空字符串，这两条 wrapper 也会把它当成“没设置”，继续回退到当前仓库 `.env` 里的有效值；不会因为“变量名存在但值为空”就把 repo-local 启动误判成缺配置。

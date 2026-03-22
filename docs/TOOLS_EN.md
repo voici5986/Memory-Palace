@@ -210,6 +210,10 @@ update_memory(
 > ⚠️ **There is no full-replacement mode.** You must explicitly specify changes via `old_string` / `new_string` to prevent accidental overwrites.
 >
 > ⚠️ **Please `read_memory` before updating** to ensure you understand what is being modified.
+>
+> 📌 If a content update returns `guard_action=UPDATE` with a valid `guard_target_id`, `update_memory` still continues as an **in-place update of the current URI**. In plain language: `guard_target_uri` / `guard_target_id` is a “there is a similar target, take a look” hint, not an automatic retargeting of this write to another URI.
+>
+> 📌 If `guard_action=UPDATE` does not include a valid `guard_target_id`, the tool still blocks the update fail-closed.
 
 **Usage Examples:**
 

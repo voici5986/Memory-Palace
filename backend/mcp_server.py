@@ -4022,18 +4022,13 @@ async def update_memory(
             blocked = False
             if content is not None:
                 if guard_action == "ADD":
-                    # Content updates keep the current URI stable. If the guard thinks the
-                    # new content looks like a fresh memory, we still treat this as an
-                    # in-place revision instead of forcing the caller down create_memory.
+                    # Content updates are anchored to the caller's current URI.
+                    # Both "fresh memory" and "merge candidate" signals still map
+                    # to an in-place revision of that URI; the guard target stays
+                    # available for observability, not as a retargeting instruction.
                     blocked = False
                 elif guard_action == "UPDATE":
-                    target_id = guard_decision.get("target_id")
-                    if (
-                        not isinstance(target_id, int)
-                        or not isinstance(current_memory_id, int)
-                        or target_id != current_memory_id
-                    ):
-                        blocked = True
+                    blocked = not isinstance(guard_decision.get("target_id"), int)
                 else:
                     blocked = True
             try:

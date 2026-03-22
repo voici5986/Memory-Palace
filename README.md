@@ -550,6 +550,8 @@ python run_sse.py
 >
 > On the shell-wrapper path (`macOS / Linux / Git Bash / WSL`), `run_memory_palace_mcp_stdio.sh` now also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before it starts Python. In plain language: a non-UTF-8 locale is less likely to turn local stdio traffic into mojibake or encoding errors.
 >
+> The same shell wrapper now also merges any existing `NO_PROXY` / `no_proxy` values and adds `localhost`, `127.0.0.1`, `::1`, and `host.docker.internal`. In plain language: local Ollama or other local OpenAI-compatible services are less likely to be misrouted through a host proxy. This automatic proxy bypass applies to the shell-wrapper path itself; it is not a blanket rule for every possible backend launch path.
+>
 > On native Windows or other wrapper-heavy host paths, the repo-local stdio launcher now forwards stdin/stdout in chunks instead of byte by byte. In plain language: larger MCP responses should feel less sluggish than before, while the same CRLF cleanup rules still apply.
 >
 > One more detail rechecked in the current validation round: if a client or IDE host passes `DATABASE_URL` as an empty string, these wrappers still treat that as “not set” and keep reusing the repository `.env` value. They do not misclassify that case as a missing repo-local configuration just because the variable name exists.

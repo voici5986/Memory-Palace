@@ -576,6 +576,8 @@ python mcp_server.py
 > 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
 >
 > 对 shell wrapper 这条路径来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 不是 UTF-8 默认环境，本地 stdio 也更不容易因为编码问题出错。
+>
+> 这条 shell wrapper 现在还会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并额外补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机同时跑 Ollama 或别的 OpenAI-compatible 服务，本地 stdio 更不容易被宿主机代理误伤。这个行为只在 shell wrapper 这条路径上自动生效，不等于所有启动方式都会自动补这一层保护。
 
 ### 6.2 SSE 模式
 

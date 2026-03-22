@@ -485,6 +485,36 @@ async def test_update_memory_guard_update_without_target_is_fail_closed(
 
 
 @pytest.mark.asyncio
+async def test_update_memory_allows_guard_update_targeting_other_memory_for_in_place_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "UPDATE",
+            "reason": "points_to_other_memory",
+            "method": "embedding",
+            "target_id": 42,
+            "target_uri": "core://agent/other",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/current",
+        old_string="world",
+        new_string="planet",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["updated"] is True
+    assert payload["guard_action"] == "UPDATE"
+    assert payload["guard_target_id"] == 42
+    assert payload["guard_target_uri"] == "core://agent/other"
+    assert fake_client.update_called is True
+
+
+@pytest.mark.asyncio
 async def test_update_memory_metadata_only_marks_guard_bypass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -878,6 +908,35 @@ async def test_browse_update_node_guard_update_without_target_is_fail_closed(
     assert payload["updated"] is False
     assert payload["guard_action"] == "UPDATE"
     assert fake_client.update_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_update_node_allows_guard_update_targeting_other_memory_for_in_place_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "UPDATE",
+            "reason": "points_to_other_memory",
+            "method": "embedding",
+            "target_id": 42,
+            "target_uri": "core://agent/other",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.update_node(
+        path="agent/current",
+        domain="core",
+        body=browse_api.NodeUpdate(content="replace payload"),
+    )
+
+    assert payload["success"] is True
+    assert payload["updated"] is True
+    assert payload["guard_action"] == "UPDATE"
+    assert payload["guard_target_id"] == 42
+    assert payload["guard_target_uri"] == "core://agent/other"
+    assert fake_client.update_called is True
 
 
 @pytest.mark.asyncio

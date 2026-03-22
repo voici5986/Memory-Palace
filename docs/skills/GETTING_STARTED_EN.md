@@ -180,6 +180,7 @@ Its role is simple:
 - Falls back to the repo-local `demo.db` only when there is no repo `.env` at all.
 - Refuses that fallback when `.env.docker` exists without `.env`, because the repo-local stdio wrapper does **not** reuse Docker's `/app/data` database path.
 - Also refuses to start when `.env` or an explicit `DATABASE_URL` still points to `/app/...` or `/data/...`, because those paths only exist inside the container.
+- On the shell-wrapper path, it also merges any existing `NO_PROXY` / `no_proxy` values and adds `localhost`, `127.0.0.1`, `::1`, and `host.docker.internal`, reducing the chance that local Ollama or other host-local OpenAI-compatible services get misrouted through a host proxy.
 
 These wrappers keep the same boundary conditions, so the database you see in the Dashboard / HTTP API is the same one the MCP client actually reads and writes to by default.
 

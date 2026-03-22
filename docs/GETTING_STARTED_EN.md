@@ -577,6 +577,8 @@ python mcp_server.py
 > These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db` or a `/data/...` variant, they refuse to start on purpose. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
 >
 > On the shell-wrapper path, `run_memory_palace_mcp_stdio.sh` also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before it starts Python. In plain language: a non-UTF-8 locale is less likely to break local stdio traffic.
+>
+> The same shell wrapper now also merges any existing `NO_PROXY` / `no_proxy` values and adds `localhost`, `127.0.0.1`, `::1`, and `host.docker.internal`. In plain language: if you run Ollama or another local OpenAI-compatible service on the same machine, repo-local stdio is less likely to be misrouted through a host proxy. This protection is automatic on the shell-wrapper path only; it does not mean every launch path gets the same proxy bypass by default.
 
 ### 6.2 SSE Mode
 

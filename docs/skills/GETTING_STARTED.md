@@ -179,6 +179,7 @@ macOS / Linux / Git Bash / WSL -> scripts/run_memory_palace_mcp_stdio.sh
 - 如果宿主或客户端把 `DATABASE_URL` 显式传成空字符串，也会按“没设置”处理，继续回退到当前仓库 `.env` 的有效值
 - 如果仓库里只有 `.env.docker` 而没有本地 `.env`，就停止并提示改走 Docker `/sse`
 - 如果 `.env` / 显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，也会停止并提示改成本机绝对路径或 Docker `/sse`
+- 对 shell wrapper 这条路径，还会合并已有的 `NO_PROXY` / `no_proxy` 并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`，减少本机 Ollama / 本机 OpenAI-compatible 服务被宿主机代理误走
 
 这两条 wrapper 的边界保持一致，所以你在 Dashboard / HTTP API 里看到的库，和 MCP 客户端实际读写的库，默认就是同一份。
 

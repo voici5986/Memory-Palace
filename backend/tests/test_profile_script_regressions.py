@@ -1091,6 +1091,65 @@ def test_repo_local_stdio_wrapper_exports_utf8_python_defaults(
     assert result.stdout == "utf-8|1"
 
 
+def test_repo_local_stdio_wrapper_merges_local_hosts_into_no_proxy(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    _copy_script(PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh", script_path)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+    _write_shell_script(
+        backend_python,
+        (
+            "#!/usr/bin/env bash\n"
+            "printf '%s|%s|%s' "
+            "\"${NO_PROXY:-missing}\" "
+            "\"${no_proxy:-missing}\" "
+            "\"${HTTP_PROXY:-missing}\"\n"
+        ),
+    )
+
+    result = _run_command(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key
+            not in {
+                "DATABASE_URL",
+                "NO_PROXY",
+                "no_proxy",
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "ALL_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            }
+        }
+        | {
+            "NO_PROXY": "upper.internal",
+            "no_proxy": "corp.internal",
+            "HTTP_PROXY": "http://proxy.example:8080",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    no_proxy_upper, no_proxy_lower, http_proxy = result.stdout.split("|")
+    assert http_proxy == "http://proxy.example:8080"
+    assert no_proxy_upper == no_proxy_lower
+    assert "upper.internal" in no_proxy_upper.split(",")
+    assert "corp.internal" in no_proxy_upper.split(",")
+    assert "localhost" in no_proxy_upper.split(",")
+    assert "127.0.0.1" in no_proxy_upper.split(",")
+    assert "::1" in no_proxy_upper.split(",")
+    assert "host.docker.internal" in no_proxy_upper.split(",")
+    assert no_proxy_upper.split(",").count("localhost") == 1
+
+
 def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -> None:
     script_text = (
         PROJECT_ROOT / "scripts" / "apply_profile.ps1"

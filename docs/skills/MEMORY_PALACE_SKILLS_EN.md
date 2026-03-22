@@ -237,7 +237,7 @@ Do not ignore these fields:
 Recommended rules:
 
 - `NOOP` → Stop writing; inspect `guard_target_uri` / `guard_target_id`, and read the suggested target before deciding whether anything should change.
-- `UPDATE` → Prioritize changing to `update_memory`.
+- `UPDATE` → Inspect the suggested target first. If you are still in the create / pre-write decision stage, this usually means switching to `update_memory`. If you are already running `update_memory` against a specific current URI, the tool may still complete that same URI as an in-place update while keeping `guard_target_*` for your review.
 - `DELETE` → Confirm the old memory should indeed be replaced.
 
 ### Compact / Recover

@@ -258,7 +258,7 @@ frontend/src/
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >
-> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它也会继续复用这个值；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起；如果 `.env` 或显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它也会直接拒绝启动。对 shell wrapper 这条路径，它还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，减少非 UTF-8 locale 下的本地 stdio 编码问题。
+> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它也会继续复用这个值；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起；如果 `.env` 或显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它也会直接拒绝启动。对 shell wrapper 这条路径，它还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，减少非 UTF-8 locale 下的本地 stdio 编码问题；同时也会合并已有的 `NO_PROXY` / `no_proxy` 并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`，让 repo-local stdio 更不容易被宿主机代理误伤本机模型调用。
 
 > Docker 一键部署走的是第三种方式：不把 key 注入页面，而是在前端代理层自动转发。
 

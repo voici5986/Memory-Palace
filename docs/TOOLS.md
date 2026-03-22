@@ -210,6 +210,10 @@ update_memory(
 > ⚠️ **没有全量替换模式。** 必须通过 `old_string` / `new_string` 明确指定修改内容，防止意外覆盖。
 >
 > ⚠️ **更新前请先 `read_memory`**，确保你了解将被修改的内容。
+>
+> 📌 如果内容更新触发了 `guard_action=UPDATE`，并且返回了有效的 `guard_target_id`，`update_memory` 仍会继续按**当前 URI 原地更新**执行；这里的 `guard_target_uri` / `guard_target_id` 更像“有相似目标，值得你再看一眼”的提示，不是自动把这次更新改写到别的 URI。
+>
+> 📌 如果 `guard_action=UPDATE` 但没有返回有效的 `guard_target_id`，工具仍会按 fail-closed 拦下这次更新。
 
 **使用示例：**
 

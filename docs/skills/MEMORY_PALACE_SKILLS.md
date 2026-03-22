@@ -242,7 +242,7 @@ search_memory(query="...", include_session=True)
 推荐规则：
 
 - `NOOP` → 不继续写；先检查 `guard_target_uri` / `guard_target_id`，并先读建议目标再决定是否需要改动
-- `UPDATE` → 优先改为 `update_memory`
+- `UPDATE` → 先看建议目标；如果你还在 create / 写前判断阶段，通常改走 `update_memory`。如果你已经在明确的当前 URI 上执行 `update_memory`，工具也可能继续完成当前 URI 的原地更新，同时把 `guard_target_*` 留给你复查
 - `DELETE` → 先确认旧记忆确实该被替换
 
 ### Compact / Recover

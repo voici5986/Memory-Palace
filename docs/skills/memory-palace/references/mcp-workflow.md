@@ -63,7 +63,7 @@ After `create_memory` or `update_memory`, inspect these fields if returned:
 Operational rule:
 
 - `NOOP` → stop and inspect the suggested target
-- `UPDATE` → read the suggested target and usually switch to `update_memory`
+- `UPDATE` → for `create_memory` or a pre-write decision step, read the suggested target and usually switch to `update_memory`; if you are already running `update_memory` against a specific current URI, the tool may still finish that same URI as an in-place revision and return `guard_target_*` for follow-up review
 - `DELETE` → stop and confirm the old memory should be replaced
 
 If `guard_target_id` is present, prefer it over fuzzy similarity when deciding whether the target is truly the same memory.

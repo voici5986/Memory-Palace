@@ -180,6 +180,77 @@ normalize_env_value() {
   printf '%s' "${value}"
 }
 
+_LOCAL_NO_PROXY_HOSTS=("localhost" "127.0.0.1" "::1" "host.docker.internal")
+
+csv_list_contains_case_insensitive() {
+  local csv="${1:-}"
+  local needle
+  needle="$(normalize_env_value "${2:-}")"
+  if [[ -z "${needle}" ]]; then
+    return 0
+  fi
+
+  local needle_lower
+  needle_lower="$(printf '%s' "${needle}" | tr '[:upper:]' '[:lower:]')"
+  local entry
+  local entries=()
+  IFS=',' read -r -a entries <<< "${csv}"
+  for entry in "${entries[@]}"; do
+    entry="$(normalize_env_value "${entry}")"
+    if [[ -z "${entry}" ]]; then
+      continue
+    fi
+    if [[ "$(printf '%s' "${entry}" | tr '[:upper:]' '[:lower:]')" == "${needle_lower}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_csv_item_if_missing() {
+  local csv="${1:-}"
+  local item
+  item="$(normalize_env_value "${2:-}")"
+  if [[ -z "${item}" ]]; then
+    printf '%s' "${csv}"
+    return 0
+  fi
+  if csv_list_contains_case_insensitive "${csv}" "${item}"; then
+    printf '%s' "${csv}"
+    return 0
+  fi
+  if [[ -n "${csv}" ]]; then
+    printf '%s,%s' "${csv}" "${item}"
+  else
+    printf '%s' "${item}"
+  fi
+}
+
+ensure_local_no_proxy_defaults() {
+  local merged=""
+  local existing_value
+  local existing_entry
+  local existing_entries=()
+  for existing_value in "${NO_PROXY:-}" "${no_proxy:-}"; do
+    existing_value="$(normalize_env_value "${existing_value}")"
+    if [[ -z "${existing_value}" ]]; then
+      continue
+    fi
+    IFS=',' read -r -a existing_entries <<< "${existing_value}"
+    for existing_entry in "${existing_entries[@]}"; do
+      merged="$(append_csv_item_if_missing "${merged}" "${existing_entry}")"
+    done
+  done
+
+  local host
+  for host in "${_LOCAL_NO_PROXY_HOSTS[@]}"; do
+    merged="$(append_csv_item_if_missing "${merged}" "${host}")"
+  done
+
+  export NO_PROXY="${merged}"
+  export no_proxy="${merged}"
+}
+
 format_sqlite_absolute_url() {
   local absolute_path="${1:-}"
   absolute_path="$(normalize_path_slashes "${absolute_path%$'\r'}")"
@@ -270,6 +341,10 @@ export RETRIEVAL_REMOTE_TIMEOUT_SEC="${runtime_remote_timeout}"
 else
   export RETRIEVAL_REMOTE_TIMEOUT_SEC="8"
 fi
+
+# Keep common host-local model endpoints off inherited shell proxies so repo-local
+# stdio remains compatible with local Ollama / OpenAI-compatible services.
+ensure_local_no_proxy_defaults
 
 export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 export PYTHONUTF8="${PYTHONUTF8:-1}"

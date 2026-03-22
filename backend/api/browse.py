@@ -545,16 +545,12 @@ async def update_node(
         blocked = False
         if body.content is not None:
             if guard_action == "ADD":
+                # Dashboard updates always keep the current node/URI stable.
+                # A guard "UPDATE" decision is therefore still an allowed
+                # in-place revision rather than a retargeting instruction.
                 blocked = False
             elif guard_action == "UPDATE":
-                target_id = guard_decision.get("target_id")
-                current_memory_id = lane_memory.get("id")
-                if (
-                    not isinstance(target_id, int)
-                    or not isinstance(current_memory_id, int)
-                    or target_id != current_memory_id
-                ):
-                    blocked = True
+                blocked = not isinstance(guard_decision.get("target_id"), int)
             else:
                 blocked = True
 
