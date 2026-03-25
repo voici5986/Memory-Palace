@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import unicodedata
 import httpx
 from pathlib import Path as FilePath
 from datetime import datetime, timedelta, timezone
@@ -69,6 +70,10 @@ _SQLITE_ADAPTERS_REGISTERED = False
 _DATABASE_URL_PLACEHOLDER_PATTERN = re.compile(r"<[^>]+>|__REPLACE_ME__")
 _NETWORK_FILESYSTEM_TYPES = {"nfs", "nfs4", "cifs", "smb", "smbfs"}
 logger = logging.getLogger(__name__)
+_LATIN_RETRIEVAL_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+_CJK_RETRIEVAL_TOKEN_PATTERN = re.compile(
+    r"[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\U00020000-\U0002EBEF]+"
+)
 _INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     # Keep query-routing keywords in one place so future language additions or
     # config-driven overrides do not require editing classifier logic.
@@ -2841,8 +2846,8 @@ class SQLiteClient:
         embed_dim = dim or self._embedding_dim
         vector = [0.0] * embed_dim
 
-        normalized = re.sub(r"\s+", " ", content.strip().lower())
-        tokens = re.findall(r"[a-z0-9_]+", normalized)
+        normalized = SQLiteClient._normalize_retrieval_text(content)
+        tokens = SQLiteClient._tokenize_retrieval_source(normalized)
         if not tokens and normalized:
             tokens = list(normalized)
 
@@ -2858,6 +2863,56 @@ class SQLiteClient:
         if norm <= 0:
             return [0.0] * embed_dim
         return [v / norm for v in vector]
+
+    @staticmethod
+    def _normalize_retrieval_text(source: str) -> str:
+        normalized = unicodedata.normalize("NFKC", str(source or ""))
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized.casefold()
+
+    @staticmethod
+    def _tokenize_retrieval_source(source: str) -> List[str]:
+        normalized = SQLiteClient._normalize_retrieval_text(source)
+        if not normalized:
+            return []
+
+        latin_tokens: List[str] = []
+        latin_seen: set[str] = set()
+        cjk_tokens: List[str] = []
+        cjk_seen: set[str] = set()
+        merged_tokens: List[str] = []
+        merged_seen: set[str] = set()
+
+        def append_unique(target: List[str], seen: set[str], token: str) -> None:
+            if token and token not in seen:
+                seen.add(token)
+                target.append(token)
+
+        for token in _LATIN_RETRIEVAL_TOKEN_PATTERN.findall(normalized):
+            if _CJK_RETRIEVAL_TOKEN_PATTERN.fullmatch(token):
+                continue
+            append_unique(latin_tokens, latin_seen, token)
+
+        for chunk in _CJK_RETRIEVAL_TOKEN_PATTERN.findall(normalized):
+            append_unique(cjk_tokens, cjk_seen, chunk)
+            for index in range(len(chunk) - 1):
+                append_unique(cjk_tokens, cjk_seen, chunk[index : index + 2])
+
+        buckets = (latin_tokens, cjk_tokens)
+        indices = [0, 0]
+        while True:
+            progressed = False
+            for bucket_index, bucket in enumerate(buckets):
+                next_index = indices[bucket_index]
+                if next_index >= len(bucket):
+                    continue
+                progressed = True
+                indices[bucket_index] += 1
+                append_unique(merged_tokens, merged_seen, bucket[next_index])
+            if not progressed:
+                break
+
+        return merged_tokens
 
     async def _get_embedding(
         self,
@@ -5404,8 +5459,8 @@ class SQLiteClient:
         path = ""
         if isinstance(metadata, dict):
             path = str(metadata.get("path") or "")
-        source = f"{snippet} {path}".lower()
-        return set(re.findall(r"[a-z0-9_]+", source))
+        source = f"{snippet} {path}"
+        return set(SQLiteClient._tokenize_retrieval_source(source))
 
     @staticmethod
     def _jaccard_similarity(tokens_a: set[str], tokens_b: set[str]) -> float:

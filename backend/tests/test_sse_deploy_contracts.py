@@ -50,18 +50,22 @@ def test_sse_main_falls_back_to_8010_when_loopback_8000_is_busy(monkeypatch) -> 
         call_order.append(("create_sse_app", kwargs))
         return {"app": "fake"}
 
-    def _fake_uvicorn_run(app, host, port):
-        call_order.append(("uvicorn", host, port, app))
+    def _fake_run_uvicorn_sse_app(app, *, host, port, transport):
+        call_order.append(("uvicorn", host, port, app, transport))
 
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.delenv("PORT", raising=False)
     monkeypatch.setattr(run_sse, "create_sse_app", _fake_create_sse_app)
-    monkeypatch.setattr(run_sse.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
+    monkeypatch.setattr(run_sse, "_run_uvicorn_sse_app", _fake_run_uvicorn_sse_app)
     monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: port != 8000)
 
     run_sse.main()
 
-    assert call_order[0] == ("create_sse_app", {"initialize_runtime_on_startup": True})
+    assert call_order[0] == (
+        "create_sse_app",
+        {"initialize_runtime_on_startup": True, "transport": "transport"},
+    )
     assert call_order[1][0] == "uvicorn"
     assert call_order[1][1] == "127.0.0.1"
     assert call_order[1][2] == 8010

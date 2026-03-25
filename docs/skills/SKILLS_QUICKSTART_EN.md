@@ -64,6 +64,8 @@ In a nutshell:
 >
 > - **Smoke tests** for `Claude / Codex / Gemini` all have passing results in the recent validation environment; for `Codex`, the default assumption is that `user-scope --with-mcp` has already been installed.
 > - For `OpenCode`, the more accurate public wording is: the repo-local skill is in place, and `mcp list` can confirm that `memory-palace` is connected; a real `run` still depends on the current provider credentials.
+> - In the current validation environment, the isolated `install_skill.py --scope user --with-mcp --check` path passed for `Claude / Codex / Gemini / OpenCode`, and the same isolated user-scope run also passed the skills-only `--check` path.
+> - `MCP-only` live e2e is currently a pass as well; the repository-local MCP validation report is grounded in a real run, not only static config inspection.
 > - `Gemini live` is not yet at a stage to be described as "fully passing"; more accurately: if the Gemini configuration cannot resolve the database path, or if a shared live database is mutated by another Gemini live session first, it stops at `PARTIAL`.
 > - `Cursor / Windsurf / VSCode-host / Antigravity` are now grouped as **IDE Hosts**; their primary path is `AGENTS.md + MCP snippet`, not hidden skill mirrors.
 >
@@ -72,6 +74,7 @@ In a nutshell:
 > - Native Windows now defaults to `python + backend/mcp_wrapper.py`.
 > - `install_skill.py --with-mcp` now writes that native path for `Claude / Codex / Gemini / OpenCode` on Windows.
 > - `python scripts/render_ide_host_config.py --host ...` now also defaults to `python-wrapper` on Windows.
+> - The PowerShell-in-Docker equivalence path for the profile/apply scripts was also rechecked, but native Windows host runs should still be re-validated on the target machine.
 > - If you use `Git Bash` or `WSL`, you can still keep using `bash + scripts/run_memory_palace_mcp_stdio.sh`.
 > - So the real split is now: **python-wrapper for native Windows, bash wrapper for POSIX shell boundaries**.
 

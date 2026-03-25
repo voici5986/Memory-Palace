@@ -64,6 +64,8 @@
 >
 > - `Claude / Codex / Gemini` 的 **smoke** 在最近一次验证环境里都已有通过结果；其中 `Codex` 默认前提是先补好 `user-scope --with-mcp`
 > - `OpenCode` 当前更准确的说法是：repo-local skill 已就位，`mcp list` 可以确认 `memory-palace` 已连接；真实 `run` 仍取决于当前 provider 凭证
+> - 当前验证环境里，隔离用户目录下的 `install_skill.py --scope user --with-mcp --check` 已对 `Claude / Codex / Gemini / OpenCode` 全部通过；同一套隔离 user-scope 也通过了 skills-only 的 `--check`
+> - `MCP-only` 的 live e2e 当前也是 pass；仓库里的 repo-local MCP 验证结果来自真实运行，而不只是静态配置检查
 > - `Gemini live` 还没到可以写成“完全通过”的程度；当前更准确的说法是：如果 Gemini 配置无法反推出数据库路径，或者共享真实数据库先被另一条 Gemini live 会话改动了，它会停在 `PARTIAL`
 > - `Cursor / Windsurf / VSCode-host / Antigravity` 现在统一归到 **IDE Hosts**；它们的主路径是 `AGENTS.md + MCP snippet`，不是 hidden skill mirrors
 >
@@ -72,6 +74,7 @@
 > - 原生 Windows 现在默认走 `python + backend/mcp_wrapper.py`
 > - `install_skill.py --with-mcp` 在 Windows 上会为 `Claude / Codex / Gemini / OpenCode` 生成这条 native 路径
 > - `python scripts/render_ide_host_config.py --host ...` 在 Windows 上默认也会输出 `python-wrapper`
+> - profile/apply 脚本的 PowerShell-in-Docker 等效路径也已经重新复验过，但 native Windows 主机本身仍建议按目标环境再复核一次
 > - 如果你是 `Git Bash` 或 `WSL` 用户，仍然可以继续使用 `bash + scripts/run_memory_palace_mcp_stdio.sh`
 > - 所以现在要区分的是：**native Windows 用 python-wrapper，POSIX shell 边界用 bash wrapper**
 

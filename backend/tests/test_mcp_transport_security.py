@@ -74,11 +74,12 @@ def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
         "create_sse_app",
         lambda **kwargs: "app",
     )
+    monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
     monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: True)
     monkeypatch.setattr(
-        run_sse.uvicorn,
-        "run",
-        lambda app, host, port: calls.append((host, port)),
+        run_sse,
+        "_run_uvicorn_sse_app",
+        lambda app, host, port, transport: calls.append((host, port)),
     )
 
     run_sse.main()
@@ -131,11 +132,12 @@ def test_run_sse_main_falls_back_for_ipv6_loopback_host(
         "create_sse_app",
         lambda **kwargs: "app",
     )
+    monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
     monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: False)
     monkeypatch.setattr(
-        run_sse.uvicorn,
-        "run",
-        lambda app, host, port: calls.append((host, port)),
+        run_sse,
+        "_run_uvicorn_sse_app",
+        lambda app, host, port, transport: calls.append((host, port)),
     )
 
     run_sse.main()

@@ -308,6 +308,39 @@ def _resolve_request_path(scope: Scope) -> str:
     return f"{root_path}{path}"
 
 
+async def _finalize_suppressed_stream_response_if_needed(
+    *,
+    send: Send,
+    response_started: bool,
+    response_completed: bool,
+) -> None:
+    if not response_started or response_completed:
+        return
+    try:
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+    except (ClosedResourceError, RuntimeError, ValueError):
+        return
+
+
+async def _call_app_with_sse_shutdown_suppression(
+    app: ASGIApp, scope: Scope, receive: Receive, send: Send
+) -> None:
+    try:
+        await app(scope, receive, send)
+    except ClosedResourceError:
+        if _should_suppress_closed_resource_error(scope):
+            return
+        raise
+    except RuntimeError as exc:
+        if _should_suppress_stream_shutdown_runtime_error(scope, exc):
+            return
+        raise
+    except ValueError as exc:
+        if _should_suppress_request_validation_value_error(scope, exc):
+            return
+        raise
+
+
 class MemoryPalaceSseServerTransport(SseServerTransport):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -329,6 +362,8 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
         self._message_rate_limit_buckets: Dict[str, Deque[float]] = {}
         self._message_rate_limit_last_seen: Dict[str, float] = {}
         self._message_rate_limit_guard = asyncio.Lock()
+        self._runtime_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._shutdown_streams_requested = False
 
     @staticmethod
     def _session_rate_limit_key(scope: Scope, session_id: UUID) -> str:
@@ -384,6 +419,7 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
     async def connect_sse(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] != "http":
             raise ValueError("connect_sse can only handle HTTP requests")
+        self._runtime_loop = asyncio.get_running_loop()
 
         request = Request(scope, receive)
         error_response = await self._security.validate_request(request, is_post=False)
@@ -427,12 +463,58 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
             async def response_wrapper(
                 scope: Scope, receive: Receive, send: Send
             ) -> None:
+                response_started = False
+                response_completed = False
+
+                async def tracked_send(message: Dict[str, Any]) -> None:
+                    nonlocal response_started, response_completed
+                    message_type = str(message.get("type") or "")
+                    if message_type == "http.response.start":
+                        response_started = True
+                    elif message_type == "http.response.body" and not bool(
+                        message.get("more_body", False)
+                    ):
+                        response_completed = True
+                    await send(message)
+
                 try:
-                    await EventSourceResponse(
-                        content=sse_stream_reader,
-                        data_sender_callable=sse_writer,
-                        ping=self._heartbeat_ping_seconds,
-                    )(scope, receive, send)
+                    try:
+                        await EventSourceResponse(
+                            content=sse_stream_reader,
+                            data_sender_callable=sse_writer,
+                            ping=self._heartbeat_ping_seconds,
+                        )(scope, receive, tracked_send)
+                    except ClosedResourceError:
+                        if not _should_suppress_closed_resource_error(scope):
+                            raise
+                        await _finalize_suppressed_stream_response_if_needed(
+                            send=send,
+                            response_started=response_started,
+                            response_completed=response_completed,
+                        )
+                    except RuntimeError as exc:
+                        if not _should_suppress_stream_shutdown_runtime_error(scope, exc):
+                            raise
+                        await _finalize_suppressed_stream_response_if_needed(
+                            send=send,
+                            response_started=response_started,
+                            response_completed=response_completed,
+                        )
+                    except ValueError as exc:
+                        if not _should_suppress_request_validation_value_error(scope, exc):
+                            raise
+                        await _finalize_suppressed_stream_response_if_needed(
+                            send=send,
+                            response_started=response_started,
+                            response_completed=response_completed,
+                        )
+                    except asyncio.CancelledError:
+                        await _finalize_suppressed_stream_response_if_needed(
+                            send=send,
+                            response_started=response_started,
+                            response_completed=response_completed,
+                        )
+                        return
                 finally:
                     self._read_stream_writers.pop(session_id, None)
                     await self._clear_message_rate_limit_state(
@@ -443,6 +525,32 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
 
             tg.start_soon(response_wrapper, scope, receive, send)
             yield (read_stream, write_stream)
+
+    async def close_active_streams(self) -> None:
+        writers = list(self._read_stream_writers.values())
+        self._read_stream_writers = {}
+        for writer in writers:
+            try:
+                await writer.aclose()
+            except Exception:
+                continue
+
+        async with self._message_rate_limit_guard:
+            self._message_rate_limit_buckets.clear()
+            self._message_rate_limit_last_seen.clear()
+
+    def request_shutdown_stream_close(self) -> None:
+        if self._shutdown_streams_requested:
+            return
+        self._shutdown_streams_requested = True
+        loop = self._runtime_loop
+        if loop is None or loop.is_closed():
+            return
+
+        def _schedule_close() -> None:
+            asyncio.create_task(self.close_active_streams())
+
+        loop.call_soon_threadsafe(_schedule_close)
 
     async def handle_post_message(
         self, scope: Scope, receive: Receive, send: Send
@@ -518,14 +626,14 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
 
         path = _resolve_request_path(scope)
         if path in _PUBLIC_HTTP_PATHS:
-            await app(scope, receive, send)
+            await _call_app_with_sse_shutdown_suppression(app, scope, receive, send)
             return
 
         configured = _get_configured_mcp_api_key()
         headers = Headers(scope=scope)
         if not configured:
             if _allow_insecure_local_without_api_key() and _is_direct_loopback_scope(scope):
-                await app(scope, receive, send)
+                await _call_app_with_sse_shutdown_suppression(app, scope, receive, send)
                 return
             reason = (
                 "insecure_local_override_requires_loopback"
@@ -558,20 +666,7 @@ def apply_mcp_api_key_middleware(app: ASGIApp) -> ASGIApp:
             )
             await response(scope, receive, send)
             return
-        try:
-            await app(scope, receive, send)
-        except ClosedResourceError:
-            if _should_suppress_closed_resource_error(scope):
-                return
-            raise
-        except RuntimeError as exc:
-            if _should_suppress_stream_shutdown_runtime_error(scope, exc):
-                return
-            raise
-        except ValueError as exc:
-            if _should_suppress_request_validation_value_error(scope, exc):
-                return
-            raise
+        await _call_app_with_sse_shutdown_suppression(app, scope, receive, send)
 
     return _auth_middleware
 
@@ -597,9 +692,6 @@ def _build_sse_handlers(
                     streams[1],
                     mcp._mcp_server.create_initialization_options(),
                 )
-
-            response = Response()
-            await response(scope, receive, send)
 
     sse_endpoint = _SseEndpoint()
 
@@ -627,8 +719,9 @@ def create_sse_app(
     include_health: bool = True,
     manage_runtime_lifecycle: bool = True,
     initialize_runtime_on_startup: bool = False,
+    transport: Optional[MemoryPalaceSseServerTransport] = None,
 ) -> ASGIApp:
-    transport = _create_sse_transport()
+    transport = transport or _create_sse_transport()
     sse_endpoint, health_endpoint = _build_sse_handlers(transport)
 
     routes = []
@@ -660,13 +753,42 @@ def create_sse_app(
     return apply_mcp_api_key_middleware(app)
 
 
+class _SignalAwareSseServer(uvicorn.Server):
+    def __init__(self, config: uvicorn.Config, *, transport: MemoryPalaceSseServerTransport):
+        super().__init__(config)
+        self._transport = transport
+
+    def handle_exit(self, sig: int, frame: Optional[object]) -> None:
+        self._transport.request_shutdown_stream_close()
+        super().handle_exit(sig, frame)
+
+
+def _run_uvicorn_sse_app(
+    app: ASGIApp,
+    *,
+    host: str,
+    port: int,
+    transport: MemoryPalaceSseServerTransport,
+) -> None:
+    config = uvicorn.Config(app, host=host, port=port)
+    server = _SignalAwareSseServer(config, transport=transport)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        return
+
+
 def main():
     """
     Run the Memory Palace MCP server using SSE (Server-Sent Events) transport.
     This is required for clients that don't support stdio (like some web-based tools).
     """
     print("Initializing Memory Palace SSE Server...")
-    app = create_sse_app(initialize_runtime_on_startup=True)
+    transport = _create_sse_transport()
+    app = create_sse_app(
+        initialize_runtime_on_startup=True,
+        transport=transport,
+    )
 
     host = str(os.getenv("HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port = _resolve_sse_port(host)
@@ -675,7 +797,7 @@ def main():
     print(f"Starting SSE Server on http://{display_host}:{port}")
     print(f"SSE Endpoint: http://{display_host}:{port}/sse")
 
-    uvicorn.run(app, host=host, port=port)
+    _run_uvicorn_sse_app(app, host=host, port=port, transport=transport)
 
 if __name__ == "__main__":
     main()

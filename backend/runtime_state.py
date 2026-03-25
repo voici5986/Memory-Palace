@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 import uuid
 from collections import Counter, deque
 from dataclasses import dataclass
@@ -41,8 +42,58 @@ def _normalize_session_id(session_id: Optional[str]) -> str:
     return value if value else "default"
 
 
+_LATIN_RUNTIME_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+_CJK_RUNTIME_TOKEN_PATTERN = re.compile(
+    r"[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\U00020000-\U0002EBEF]+"
+)
+
+
+def _normalize_runtime_search_text(value: str) -> str:
+    return unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+
+
 def _tokenize_query(query: str) -> List[str]:
-    return [token for token in re.findall(r"[a-zA-Z0-9_]+", query.lower()) if token]
+    normalized = _normalize_runtime_search_text(query)
+    if not normalized:
+        return []
+
+    latin_tokens: List[str] = []
+    latin_seen: Set[str] = set()
+    cjk_tokens: List[str] = []
+    cjk_seen: Set[str] = set()
+    merged_tokens: List[str] = []
+    merged_seen: Set[str] = set()
+
+    def append_unique(target: List[str], seen: Set[str], token: str) -> None:
+        if token and token not in seen:
+            seen.add(token)
+            target.append(token)
+
+    for token in _LATIN_RUNTIME_TOKEN_PATTERN.findall(normalized):
+        if _CJK_RUNTIME_TOKEN_PATTERN.fullmatch(token):
+            continue
+        append_unique(latin_tokens, latin_seen, token)
+
+    for chunk in _CJK_RUNTIME_TOKEN_PATTERN.findall(normalized):
+        append_unique(cjk_tokens, cjk_seen, chunk)
+        for index in range(len(chunk) - 1):
+            append_unique(cjk_tokens, cjk_seen, chunk[index : index + 2])
+
+    buckets = (latin_tokens, cjk_tokens)
+    indices = [0, 0]
+    while True:
+        progressed = False
+        for bucket_index, bucket in enumerate(buckets):
+            next_index = indices[bucket_index]
+            if next_index >= len(bucket):
+                continue
+            progressed = True
+            indices[bucket_index] += 1
+            append_unique(merged_tokens, merged_seen, bucket[next_index])
+        if not progressed:
+            break
+
+    return merged_tokens
 
 
 @dataclass
@@ -432,7 +483,7 @@ class SessionSearchCache:
         by_uri: Dict[str, Dict[str, Any]] = {}
 
         for item in snapshot:
-            text = item.snippet.lower()
+            text = _normalize_runtime_search_text(item.snippet)
             hits = sum(1 for term in terms if term in text)
             if hits <= 0:
                 continue

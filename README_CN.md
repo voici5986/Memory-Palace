@@ -51,6 +51,10 @@
 
 ## 🆕 这次版本更新了什么？
 
+- **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
+- **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
+- **repo-local SSE 关闭时更安静了**：在 `/sse` 流仍然活着时停止 `run_sse.py`，当前验证路径下已经不会再冒出之前那条 ASGI shutdown traceback。
+- **当前 `v3.6.5` 的验证范围更广了**：后端 `748 passed, 18 skipped`，前端 `112 passed` 且 build 成功，真实浏览器 smoke 重新核对了 Dashboard 四页与语言持久化，live MCP-only e2e 通过，本机 A/B/C/D 与 Docker B/C/D 启动路径也都重新验证过。native Windows 主机实跑和 `Gemini live` 仍然保留目标环境复验边界。
 - **skills + MCP 更像产品了**：现在不只是“有工具”，而是补齐了安装、同步、smoke 和 live e2e。
 - **部署更稳了**：Docker 一键脚本补了 deployment lock，运行时环境注入默认关闭，分享或正式发布前也有自检脚本兜底。
 - **写入链路的恢复能力更强了**：同一 session 的 snapshot 现在改成文件锁，SQLite 短暂锁冲突会做一次小范围重试，后台索引任务也会和前台写入共用同一条写入门控。

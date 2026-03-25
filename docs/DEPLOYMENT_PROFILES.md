@@ -181,6 +181,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 - 它每次都会先基于 `deploy/profiles/docker/profile-*.env` 生成一份 Docker env，再按脚本参数决定是否注入运行时覆盖
 - 所以如果你只是把最终直连配置写进仓库根的 `.env`，然后直接执行 `bash scripts/docker_one_click.sh --profile c`，实际启动的仍然是档位模板，不一定是你刚写进去的那套最终值
 
+> 按当前 `v3.6.5` 的复验结果，本地 `profile c/d + --allow-runtime-env-injection` 现在已经会按预期顺序工作：先基于模板生成 Docker env，再把这次运行的模板占位符校验延后，写入运行时注入值，最后仍然对缺失的外部配置做 fail-closed 检查。用人话说就是：模板里的占位符不再会在你真实值落盘前提前挡住本地联调，但缺失必填注入值时仍然会直接拦下。
+
 最小验证建议分成两种：
 
 ```bash
@@ -364,6 +366,8 @@ cd <project-root>
 > - 可选的 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*`
 >
 > 当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底；当 `RETRIEVAL_RERANKER_MODEL` 没显式提供时，也会优先复用 `ROUTER_RERANKER_MODEL`。
+>
+> 当前验证快照里，本机 A/B/C/D 的启动与检索 smoke 都重新跑过，一键 Docker 路径也重新验证了 B/C/D。对 Docker `profile d` 来说，仍然要把 reranker 可达性当成目标环境边界：整套服务可以先正常启动，但如果容器本身连不到 reranker endpoint，查询阶段仍会以 `reranker_request_failed` 的形式降级。
 >
 > 本地 build 路径现在还会使用按 checkout 固定的本地镜像名。这样做的好处很直接：只要这个 checkout 里已经成功 build 过一次，后续即使切换 `COMPOSE_PROJECT_NAME`，`--no-build` 也还是能复用之前的本地镜像；只有第一次启动或手动删掉本地镜像时，才需要重新 build。
 

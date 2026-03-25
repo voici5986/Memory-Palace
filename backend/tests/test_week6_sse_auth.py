@@ -466,6 +466,79 @@ def test_sse_auth_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
     assert "RuntimeError:" not in output
 
 
+def test_sse_insecure_local_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    env = dict(**os.environ)
+    env.pop("MCP_API_KEY", None)
+    env["MCP_API_KEY_ALLOW_INSECURE_LOCAL"] = "true"
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'streaming_shutdown_insecure_local.db'}"
+    env["HOST"] = "127.0.0.1"
+    env["PORT"] = str(port)
+    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
+
+    client = None
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if server.poll() is not None:
+                pytest.fail(
+                    "uvicorn exited before the insecure-local shutdown test could connect"
+                )
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            pytest.fail(
+                "timed out waiting for insecure-local shutdown test server to start"
+            )
+
+        request = (
+            "GET /sse HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Accept: text/event-stream\r\n"
+            "\r\n"
+        ).encode("utf-8")
+
+        client = socket.create_connection(("127.0.0.1", port), timeout=5)
+        client.sendall(request)
+        received = ""
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            chunk = client.recv(4096).decode("utf-8", errors="ignore")
+            if not chunk:
+                break
+            received += chunk
+            if "event: endpoint" in received:
+                break
+        assert "200 OK" in received
+        assert "event: endpoint" in received
+
+        _request_graceful_shutdown(server)
+        if client is not None:
+            client.close()
+            client = None
+        output, _ = server.communicate(timeout=10)
+    finally:
+        if client is not None:
+            client.close()
+        if server.poll() is None:
+            server.terminate()
+            try:
+                output, _ = server.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                output, _ = server.communicate(timeout=5)
+
+    assert "Expected ASGI message 'http.response.body'" not in output
+    assert "RuntimeError:" not in output
+
+
 def test_sse_auth_rejects_when_posting_to_closed_message_stream(tmp_path) -> None:
     backend_dir = Path(__file__).resolve().parents[1]
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -917,17 +990,21 @@ def test_sse_main_requests_runtime_initialization_before_uvicorn(monkeypatch) ->
         call_order.append(("create_sse_app", kwargs))
         return {"app": "fake"}
 
-    def _fake_uvicorn_run(app, host, port):
-        call_order.append(("uvicorn", host, port, app))
+    def _fake_run_uvicorn_sse_app(app, *, host, port, transport):
+        call_order.append(("uvicorn", host, port, app, transport))
 
     monkeypatch.setattr(run_sse, "create_sse_app", _fake_create_sse_app)
-    monkeypatch.setattr(run_sse.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
+    monkeypatch.setattr(run_sse, "_run_uvicorn_sse_app", _fake_run_uvicorn_sse_app)
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.setenv("PORT", "8010")
 
     run_sse.main()
 
-    assert call_order[0] == ("create_sse_app", {"initialize_runtime_on_startup": True})
+    assert call_order[0] == (
+        "create_sse_app",
+        {"initialize_runtime_on_startup": True, "transport": "transport"},
+    )
     assert call_order[1][0] == "uvicorn"
     assert call_order[1][1] == "127.0.0.1"
     assert call_order[1][2] == 8010

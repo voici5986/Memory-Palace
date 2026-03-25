@@ -468,7 +468,13 @@ try {
     Ensure-DefaultEnvValue -FilePath $workingTarget -Key 'RUNTIME_AUTO_FLUSH_ENABLED' -Value 'true'
     Dedupe-EnvKeys -FilePath $workingTarget
     Assert-ResolvedDatabaseUrlPlaceholder -FilePath $workingTarget -DisplayPath $Target
-    Assert-ResolvedProfilePlaceholders -FilePath $workingTarget -ResolvedProfile $profileLower
+    $allowUnresolvedProfilePlaceholders = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS')
+    if ($allowUnresolvedProfilePlaceholders -eq '1') {
+        Write-Host "[placeholder-guard] deferred profile placeholder validation to caller"
+    }
+    else {
+        Assert-ResolvedProfilePlaceholders -FilePath $workingTarget -ResolvedProfile $profileLower
+    }
 
     if ($DryRun.IsPresent) {
         $dryRunOutput = [System.IO.File]::ReadAllText($workingTarget, $utf8NoBom)

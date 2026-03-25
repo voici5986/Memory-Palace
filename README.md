@@ -55,6 +55,10 @@ If you want the AI to guide installation step by step, start with the standalone
   <img src="docs/images/memory_palace_upgrade.png" width="900" alt="Memory Palace Project Upgrade Comparison" />
 </p>
 
+- **Multilingual retrieval loses less signal now**: local hash embedding, MMR deduplication, and session-first cache now keep mixed CJK/Latin text more consistently, and fold full-width Latin forms such as `ＡＰＩ` into the same retrieval path as `API`.
+- **Local C/D Docker debugging is less brittle**: for `docker_one_click.sh/.ps1 --allow-runtime-env-injection`, template placeholder validation is now deferred until the injected runtime values are written, while the run still fails closed afterwards if required settings remain unresolved.
+- **Repo-local SSE shutdown is quieter**: stopping `run_sse.py` while an `/sse` stream is still active no longer emits the previous ASGI shutdown traceback in the current validation path.
+- **The current `v3.6.5` validation is wider**: backend `748 passed, 18 skipped`, frontend `112 passed` plus build success, real-browser Dashboard smoke rechecked all four pages and locale persistence, live MCP-only e2e passed, and local A/B/C/D plus Docker B/C/D startup paths were rechecked. Native Windows host runs and `Gemini live` still keep explicit target-environment caveats.
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **Write-path recovery is tighter**: same-session snapshots now use file locks, transient SQLite lock conflicts get a small bounded retry, and background index jobs share the same write gate as foreground writes.

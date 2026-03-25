@@ -352,6 +352,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 
 > If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. The current injection path also carries explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_*`, and optional `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` values. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template.
 >
+> In the current validation path, `profile c/d + --allow-runtime-env-injection` was rechecked again. The script now defers the template placeholder check for that run until the injected runtime values have been written, and then still fail-closes if the required external settings remain missing.
+>
 > If you only want a fast smoke check first, hit the real `/embeddings` and `/rerank` endpoints with the same model and key you plan to use. That is usually quicker than starting from a full backend run.
 >
 > Note that `--runtime-env-mode` / `--runtime-env-file` are **not** arguments of `docker_one_click.sh/.ps1`. If you pass them directly to the one-click script, the command fails with `Unknown argument`. For public-repo `profile c/d` local debugging, keep using the explicit injection switches shown above. If you also need a stricter release-style verification, switch back to the actual `.env` / router configuration you plan to deploy and re-run that validation path separately.
@@ -597,6 +599,8 @@ python run_sse.py
 > `python run_sse.py` first tries loopback `127.0.0.1:8000`; if local `8000` is already occupied by the main backend, it automatically falls back to `127.0.0.1:8010`. When that happens, the startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. You can still override both `HOST` and `PORT` explicitly. SSE mode remains protected by `MCP_API_KEY`.
 >
 > The same SSE process also provides a lightweight `/health` endpoint, mainly for standalone local debugging; the truly open streaming entry point for MCP clients remains `/sse`.
+>
+> This local operator path was also rechecked in the current validation round: stopping `run_sse.py` while an `/sse` stream is still active now exits quietly instead of printing the previous ASGI shutdown traceback.
 >
 > The command above deliberately binds to `127.0.0.1`, which is more suitable for local machine debugging. If you truly need to allow access from other machines, change `HOST` to `0.0.0.0` (or your actual listening address). This will allow remote clients to connect to the listening address, but API Key, reverse proxy, firewall, and transport layer security will still need to be completed by you.
 >

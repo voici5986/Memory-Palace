@@ -944,7 +944,12 @@ fi
 chmod 600 "${env_file}" >/dev/null 2>&1 || true
 export MEMORY_PALACE_DOCKER_ENV_FILE="${env_file}"
 echo "[env-file] using ${env_file}"
-bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
+if [[ "${allow_runtime_env_injection}" -eq 1 && ( "${profile}" == "c" || "${profile}" == "d" ) ]]; then
+  MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS=1 \
+    bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
+else
+  bash "${SCRIPT_DIR}/apply_profile.sh" docker "${profile}" "${env_file}"
+fi
 if [[ "${allow_runtime_env_injection}" -eq 1 ]]; then
   apply_profile_runtime_overrides "${env_file}" "${profile}"
 else

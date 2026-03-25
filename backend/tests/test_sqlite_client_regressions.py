@@ -170,3 +170,94 @@ def test_parse_iso_datetime_normalizes_timezone_offsets_to_utc_naive() -> None:
 
     assert parsed == sqlite_client_module.datetime(2026, 3, 21, 8, 30, 0)
     assert parsed.tzinfo is None
+
+
+def test_mmr_tokens_keep_cjk_chunks_and_bigrams() -> None:
+    tokens = SQLiteClient._mmr_tokens(
+        {
+            "snippet": "部署 deployment guide",
+            "metadata": {"path": "部署/指南"},
+        }
+    )
+
+    assert "deployment" in tokens
+    assert "guide" in tokens
+    assert "部署" in tokens
+    assert "部" not in tokens
+
+
+def test_jaccard_similarity_detects_overlap_for_pure_cjk_results() -> None:
+    first = SQLiteClient._mmr_tokens(
+        {
+            "snippet": "部署指南",
+            "metadata": {"path": "部署/手册"},
+        }
+    )
+    second = SQLiteClient._mmr_tokens(
+        {
+            "snippet": "部署文档",
+            "metadata": {"path": "部署/教程"},
+        }
+    )
+
+    assert first
+    assert second
+    assert SQLiteClient._jaccard_similarity(first, second) > 0.0
+
+
+def test_hash_embedding_keeps_cjk_tokens_in_mixed_text() -> None:
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+
+    mixed = client._hash_embedding("部署 deployment guide", dim=64)
+    latin_only = client._hash_embedding("deployment guide", dim=64)
+    pure_cjk = client._hash_embedding("部署 指南", dim=64)
+
+    assert mixed != latin_only
+    assert any(value != 0.0 for value in pure_cjk)
+
+
+def test_hash_embedding_normalizes_fullwidth_latin_tokens() -> None:
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+
+    fullwidth = client._hash_embedding("ＡＰＩ 错误", dim=64)
+    ascii_text = client._hash_embedding("API 错误", dim=64)
+    tokens = SQLiteClient._mmr_tokens(
+        {
+            "snippet": "ＡＰＩ 错误 修复记录",
+            "metadata": {"path": "api/错误"},
+        }
+    )
+
+    assert fullwidth == ascii_text
+    assert "api" in tokens
+
+
+def test_apply_mmr_rerank_avoids_duplicate_pure_cjk_results() -> None:
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+
+    selected, metadata = client._apply_mmr_rerank(
+        [
+            {
+                "uri": "core://a",
+                "snippet": "部署指南",
+                "metadata": {"path": "部署/指南"},
+                "scores": {"final": 1.0},
+            },
+            {
+                "uri": "core://b",
+                "snippet": "部署指南",
+                "metadata": {"path": "部署/指南-副本"},
+                "scores": {"final": 0.99},
+            },
+            {
+                "uri": "core://c",
+                "snippet": "恢复手册",
+                "metadata": {"path": "恢复/手册"},
+                "scores": {"final": 0.95},
+            },
+        ],
+        max_results=2,
+    )
+
+    assert metadata["mmr_applied"] is True
+    assert [row["uri"] for row in selected] == ["core://a", "core://c"]

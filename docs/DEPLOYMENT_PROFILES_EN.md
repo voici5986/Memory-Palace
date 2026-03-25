@@ -180,6 +180,8 @@ If you adopt the direct connection method, note one boundary first:
 - On each run, it first generates a Docker env file from `deploy/profiles/docker/profile-*.env`, and only then decides whether to inject runtime overrides based on the script arguments.
 - So if you only write your final direct-API settings into the repository-root `.env` and then run `bash scripts/docker_one_click.sh --profile c`, the actual startup still uses the profile template path, not necessarily the final values you just wrote.
 
+> As rechecked in the current `v3.6.5` validation, the local `profile c/d + --allow-runtime-env-injection` path now follows the intended order: generate the Docker env from the template first, defer template placeholder validation for that run, write the injected runtime values, and then still fail closed if the required external settings remain unresolved. In plain language: template placeholders no longer block local debugging before your real values land, but missing injected values are still treated as a hard stop.
+
 The minimum verification path should therefore be split into two cases:
 
 ```bash
@@ -368,6 +370,8 @@ cd <project-root>
 > - optional `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and `INTENT_LLM_*`
 >
 > When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it prioritizes `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as the fallback source for embedding / reranker API base+key. When `RETRIEVAL_RERANKER_MODEL` is not explicitly provided, it also falls back to `ROUTER_RERANKER_MODEL`.
+>
+> Current validation snapshot: local A/B/C/D startup + retrieval smoke were rechecked, and the one-click Docker path was rechecked for B/C/D. For Docker `profile d`, treat reranker reachability as a target-environment check: the stack can start successfully and still degrade at query time with `reranker_request_failed` if the container cannot reach your reranker endpoint.
 >
 > The local build path now also uses checkout-scoped stable image names. The practical effect is simple: once this checkout has completed one successful build, `--no-build` can keep reusing those local images even if you change `COMPOSE_PROJECT_NAME`; you only need to build again on the first run or after deleting the local images.
 

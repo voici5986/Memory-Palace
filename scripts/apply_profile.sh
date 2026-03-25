@@ -550,7 +550,12 @@ ensure_default_env_value "${staged_file}" "RUNTIME_AUTO_FLUSH_ENABLED" "true"
 
 dedupe_env_keys "${staged_file}"
 validate_database_url_placeholder "${staged_file}" "${target_file}"
-validate_profile_placeholders "${staged_file}" "${profile}" "${target_file}"
+allow_unresolved_profile_placeholders="${MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS:-}"
+if [[ "${allow_unresolved_profile_placeholders}" == "1" ]]; then
+  log_info "[placeholder-guard] deferred profile placeholder validation to caller"
+else
+  validate_profile_placeholders "${staged_file}" "${profile}" "${target_file}"
+fi
 
 if [[ "${dry_run}" == "true" ]]; then
   cat "${staged_file}"

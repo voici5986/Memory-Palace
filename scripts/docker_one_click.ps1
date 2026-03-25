@@ -1134,7 +1134,21 @@ if ([string]::IsNullOrWhiteSpace($envFile)) {
 }
 $env:MEMORY_PALACE_DOCKER_ENV_FILE = $envFile
 Write-Host "[env-file] using $envFile"
-& (Join-Path $scriptDir 'apply_profile.ps1') -Platform docker -Profile $profileLower -Target $envFile
+$previousAllowUnresolvedProfilePlaceholders = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS')
+try {
+    if ($AllowRuntimeEnvInjection.IsPresent -and $profileLower -in @('c', 'd')) {
+        $env:MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS = '1'
+    }
+    & (Join-Path $scriptDir 'apply_profile.ps1') -Platform docker -Profile $profileLower -Target $envFile
+}
+finally {
+    if ([string]::IsNullOrWhiteSpace($previousAllowUnresolvedProfilePlaceholders)) {
+        Remove-Item Env:MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS = $previousAllowUnresolvedProfilePlaceholders
+    }
+}
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

@@ -60,6 +60,8 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     assert "Get-Command -Name 'Get-NetTCPConnection'" in ps1_text
     assert "Get-Command -Name 'ss'" in ps1_text
     assert '& ss -ltnH "( sport = :$Port )"' in ps1_text
+    assert "MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS=1" in shell_text
+    assert "MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS = '1'" in ps1_text
     assert '${project_name}_data' in shell_text
     assert '${project_name}_snapshots' in shell_text
     assert "${projectName}_data" in ps1_text

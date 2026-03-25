@@ -351,6 +351,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 
 > 如果你在 `profile c/d` 下开启这类本地联调注入，脚本会把这次运行切到显式 API 模式，并额外强制 `RETRIEVAL_EMBEDDING_BACKEND=api`。当前注入链路会一起带上显式的 `RETRIEVAL_EMBEDDING_*`（包括 `RETRIEVAL_EMBEDDING_DIM`）、`RETRIEVAL_RERANKER_*` 和可选的 `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*`。当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为兜底；如果你还设置了 `INTENT_LLM_*`，这条链路也会一并注入。这个模式更适合本地排障，不等于你正在验证最终发布口径的 `router` 模板。
 >
+> 当前这条 `profile c/d + --allow-runtime-env-injection` 本地联调路径也已经重新复验过。现在脚本会先把这次运行的模板占位符校验延后到运行时注入值落盘之后，再继续做 fail-closed 检查；也就是说，模板里的占位符不再会在你真实值写进去之前提前挡住这条本地排障路径。
+>
 > 如果你只是想先做一轮快速 smoke check，先直接打真实的 `/embeddings` 和 `/rerank` 端点，带上你准备实际使用的 model 和 key，通常会比一上来先跑完整 backend 更快。
 >
 > 但要注意：`--runtime-env-mode` / `--runtime-env-file` **不是** `docker_one_click.sh/.ps1` 的参数。如果你把这两个参数直接传给一键脚本，命令会报 `Unknown argument`。公开仓用户做 `profile c/d` 本地联调时，继续使用上面这条显式注入命令即可；如果你还要做更严格的发布复验，请回到你实际部署时会使用的 `.env` / router 配置，再单独跑那条验证路径。
@@ -596,6 +598,8 @@ python run_sse.py
 > `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给本地独立调试做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
+>
+> 这条本地 operator 路径在当前验证里也重新测过：即使 `/sse` 连接仍然活着，直接停止 `run_sse.py` 现在也会安静退出，不再额外打印之前那条 ASGI shutdown traceback。
 >
 > 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连上监听地址，但 API Key、反向代理、防火墙和传输层安全仍然要你自己补齐。
 >

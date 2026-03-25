@@ -344,6 +344,48 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spac
     assert "ROUTER_API_KEY = replace-with-your-key  # unresolved key" in result.stderr
 
 
+def test_apply_profile_shell_can_defer_profile_placeholder_validation_to_caller(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-c.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db",
+                "ROUTER_API_BASE=http://host.docker.internal:PORT/v1",
+                "ROUTER_API_KEY=replace-with-your-key",
+                "ROUTER_EMBEDDING_MODEL=your-embedding-model-id",
+                "RETRIEVAL_RERANKER_MODEL=your-reranker-model-id",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/apply_profile.sh", "docker", "c", ".env.docker"],
+        cwd=project_root,
+        env={
+            **os.environ,
+            "MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "deferred profile placeholder validation to caller" in result.stdout
+    values = dotenv_values(project_root / ".env.docker")
+    assert values.get("ROUTER_API_BASE") == "http://host.docker.internal:PORT/v1"
+
+
 def test_apply_profile_shell_docker_profile_syncs_compose_wal_overrides(
     tmp_path: Path,
 ) -> None:
