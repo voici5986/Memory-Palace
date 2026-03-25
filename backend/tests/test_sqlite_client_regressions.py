@@ -133,6 +133,96 @@ async def test_permanently_delete_memory_rejects_referenced_orphan_chain_tail(
     assert still_exists is not None
 
 
+@pytest.mark.asyncio
+async def test_priority_inputs_reject_negative_values(tmp_path: Path) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "priority-validation.db"))
+    await client.init_db()
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.create_memory(
+            parent_path="",
+            content="invalid create priority",
+            priority=-1,
+            title="invalid-priority",
+            domain="core",
+        )
+
+    created = await client.create_memory(
+        parent_path="",
+        content="valid root",
+        priority=0,
+        title="valid-root",
+        domain="core",
+    )
+    assert created["priority"] == 0
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.update_memory(
+            path="valid-root",
+            priority=-3,
+            domain="core",
+        )
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.add_path(
+            new_path="valid-root-alias",
+            target_path="valid-root",
+            new_domain="core",
+            target_domain="core",
+            priority=-2,
+        )
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.restore_path_metadata(
+            path="valid-root",
+            priority=-4,
+            disclosure=None,
+            domain="core",
+        )
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_priority_inputs_reject_non_integer_numeric_values(tmp_path: Path) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "priority-non-integer-validation.db"))
+    await client.init_db()
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.create_memory(
+            parent_path="",
+            content="invalid float priority",
+            priority=1.9,
+            title="invalid-float-priority",
+            domain="core",
+        )
+
+    await client.create_memory(
+        parent_path="",
+        content="valid priority target",
+        priority=1,
+        title="valid-priority-target",
+        domain="core",
+    )
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.update_memory(
+            path="valid-priority-target",
+            priority=True,
+            domain="core",
+        )
+
+    with pytest.raises(ValueError, match="priority must be an integer >= 0"):
+        await client.restore_path_metadata(
+            path="valid-priority-target",
+            priority=False,
+            disclosure=None,
+            domain="core",
+        )
+
+    await client.close()
+
+
 def test_get_sqlite_client_initializes_singleton_once_under_thread_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -214,6 +304,44 @@ def test_hash_embedding_keeps_cjk_tokens_in_mixed_text() -> None:
 
     assert mixed != latin_only
     assert any(value != 0.0 for value in pure_cjk)
+
+
+@pytest.mark.asyncio
+async def test_reranker_invalid_success_payload_adds_degrade_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_RERANKER_ENABLED", "true")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_API_BASE", "https://rerank.example/v1")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_MODEL", "rerank-model")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "reranker-invalid-payload.db"))
+    await client.init_db()
+
+    async def _fake_post_json_with_optional_error_sink(
+        base: str,
+        endpoint: str,
+        payload,
+        api_key: str = "",
+        error_sink=None,
+    ):
+        _ = base, endpoint, payload, api_key, error_sink
+        return {"results": [{"index": "nope", "score": "bad"}]}
+
+    monkeypatch.setattr(
+        client,
+        "_post_json_with_optional_error_sink",
+        _fake_post_json_with_optional_error_sink,
+    )
+    degrade_reasons: list[str] = []
+    scores = await client._get_rerank_scores(
+        "reranker invalid payload sample",
+        ["alpha", "beta"],
+        degrade_reasons=degrade_reasons,
+    )
+    await client.close()
+
+    assert scores == {}
+    assert "reranker_response_invalid" in degrade_reasons
 
 
 def test_hash_embedding_normalizes_fullwidth_latin_tokens() -> None:

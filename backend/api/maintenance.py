@@ -22,6 +22,7 @@ from security.import_guard import ExternalImportGuard, ExternalImportGuardConfig
 from shared_utils import (
     TRUTHY_ENV_VALUES as _TRUTHY_ENV_VALUES,
     env_bool as _env_bool,
+    env_float as _shared_env_float,
     is_loopback_hostname as _is_loopback_hostname,
     utc_iso_now as _utc_iso_now,
 )
@@ -148,13 +149,9 @@ _cleanup_query_events_guard = asyncio.Lock()
 
 
 def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return default
+    return _shared_env_float(name, default)
+
+
 _CLEANUP_QUERY_SLOW_MS = max(
     1.0, _env_float("OBSERVABILITY_CLEANUP_QUERY_SLOW_MS", 250.0)
 )

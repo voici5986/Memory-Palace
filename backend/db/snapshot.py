@@ -18,6 +18,7 @@ Design Principles:
             └── {safe_resource_id}.json
 """
 
+import errno
 import json
 import hashlib
 import logging
@@ -28,6 +29,7 @@ import stat
 import tempfile
 import threading
 import time
+import unicodedata
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -135,7 +137,22 @@ def _write_json_atomic(path: str, payload: Dict[str, Any]) -> None:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                os.replace(tmp_path, path)
+                break
+            except PermissionError:
+                if attempt >= max_attempts - 1:
+                    raise
+            except OSError as exc:
+                retryable = getattr(exc, "winerror", None) in {5, 32, 33} or exc.errno in {
+                    errno.EACCES,
+                    errno.EPERM,
+                }
+                if not retryable or attempt >= max_attempts - 1:
+                    raise
+            time.sleep(0.05 * (attempt + 1))
     finally:
         if os.path.exists(tmp_path):
             _force_remove(tmp_path)
@@ -163,13 +180,21 @@ class SnapshotManager:
     @staticmethod
     def _validate_session_id(session_id: str) -> str:
         """Validate session_id to prevent path traversal and invalid paths."""
-        value = str(session_id or "").strip()
+        value = str(session_id or "")
         if not value:
             raise ValueError("session_id must not be empty")
         if value in {".", ".."}:
             raise ValueError("session_id contains invalid path segment")
         if "/" in value or "\\" in value or "\x00" in value:
             raise ValueError("session_id contains invalid characters")
+        if any(char in value for char in '<>:"|?*'):
+            raise ValueError("session_id contains invalid filename characters")
+        if any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for char in value):
+            raise ValueError("session_id contains invisible or control characters")
+        if any(char.isspace() for char in value):
+            raise ValueError("session_id must not contain whitespace")
+        if value.endswith(".") or value.endswith(" "):
+            raise ValueError("session_id must not end with dot or space")
         return value
     
     @staticmethod
@@ -762,14 +787,15 @@ class SnapshotManager:
             if not os.path.exists(snapshot_path):
                 return False
 
-            _force_remove(snapshot_path)
-
             if resource_id in manifest.get("resources", {}):
                 del manifest["resources"][resource_id]
                 if not manifest["resources"]:
                     self._clear_session_unlocked(session_id, manifest)
                 else:
                     self._save_manifest(session_id, manifest)
+
+            if os.path.exists(snapshot_path):
+                _force_remove(snapshot_path)
 
             return True
     

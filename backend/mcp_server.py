@@ -13,6 +13,7 @@ Multiple paths can point to the same memory (aliases).
 """
 
 import asyncio
+import threading
 import os
 import re
 import sys
@@ -39,7 +40,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from db.sqlite_client import get_sqlite_client
+from db.sqlite_client import SQLiteClient, get_sqlite_client
 from db.snapshot import get_snapshot_manager
 from runtime_state import runtime_state
 from runtime_bootstrap import initialize_backend_runtime
@@ -201,7 +202,8 @@ def _auto_learn_allowed_domains() -> List[str]:
 
 
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
-_IMPORT_LEARN_META_PERSIST_LOCK = asyncio.Lock()
+_IMPORT_LEARN_META_PERSIST_LOCKS: Dict[int, asyncio.Lock] = {}
+_IMPORT_LEARN_META_PERSIST_LOCKS_GUARD = threading.Lock()
 
 # Session ID for this MCP server instance
 _SESSION_ID = f"mcp_{_utc_now_naive().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -229,6 +231,28 @@ def _normalize_session_fragment(
     if not safe:
         return default
     return safe[:max_len]
+
+
+def _get_import_learn_meta_persist_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    loop_id = id(loop)
+    with _IMPORT_LEARN_META_PERSIST_LOCKS_GUARD:
+        lock = _IMPORT_LEARN_META_PERSIST_LOCKS.get(loop_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _IMPORT_LEARN_META_PERSIST_LOCKS[loop_id] = lock
+        return lock
+
+
+def _validate_priority_value(
+    value: Any,
+    *,
+    field_name: str = "priority",
+) -> int:
+    try:
+        return SQLiteClient._validate_priority(value, field_name=field_name)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an integer >= 0.") from exc
 
 
 def _build_context_session_id() -> Optional[str]:
@@ -799,7 +823,7 @@ async def _record_import_learn_event(
         set_runtime_meta = getattr(client, "set_runtime_meta", None)
         if callable(set_runtime_meta):
             # Serialize summary persistence to avoid stale snapshots overwriting newer values.
-            async with _IMPORT_LEARN_META_PERSIST_LOCK:
+            async with _get_import_learn_meta_persist_lock():
                 summary_payload = await runtime_state.import_learn_tracker.summary()
                 await set_runtime_meta(
                     IMPORT_LEARN_AUDIT_META_KEY,
@@ -3632,6 +3656,7 @@ async def create_memory(
                     created=False,
                     **_guard_fields(guard_decision),
                 )
+        priority = _validate_priority_value(priority)
 
         # Parse parent URI
         domain, parent_path = parse_uri(parent_uri)
@@ -3845,6 +3870,8 @@ async def update_memory(
             operation="update_memory",
             uri=full_uri,
         )
+        if priority is not None:
+            priority = _validate_priority_value(priority)
         # --- Validate mutually exclusive content-editing modes ---
         if old_string is not None and append is not None:
             return _tool_response(
@@ -4190,29 +4217,39 @@ async def delete_memory(uri: str) -> str:
             uri=full_uri,
         )
 
-        # Check if it exists first
-        memory = await client.get_memory_by_path(path, domain)
-        if not memory:
-            return _tool_response(
-                ok=False,
-                message=f"Error: Memory at '{full_uri}' not found.",
-                deleted=False,
-                uri=full_uri,
-            )
-
         async def _write_task():
+            memory = await client.get_memory_by_path(path, domain)
+            if not memory:
+                return _tool_response(
+                    ok=False,
+                    message=f"Error: Memory at '{full_uri}' not found.",
+                    deleted=False,
+                    uri=full_uri,
+                )
             await _snapshot_path_delete(full_uri)
-            return await client.remove_path(path, domain)
+            remove_result = await client.remove_path(path, domain)
+            return {
+                "remove_result": remove_result,
+                "deleted_memory": memory,
+            }
 
         remove_result = await _run_write_lane("delete_memory", _write_task)
-        _ = remove_result
+        if isinstance(remove_result, str):
+            return remove_result
+        deleted_memory = (
+            remove_result.get("deleted_memory", {})
+            if isinstance(remove_result, dict)
+            else {}
+        )
 
         try:
             await _record_session_hit(
                 uri=full_uri,
-                memory_id=memory.get("id"),
-                snippet=f"[deleted] {_event_preview(str(memory.get('content', '')))}",
-                priority=memory.get("priority"),
+                memory_id=deleted_memory.get("id"),
+                snippet=(
+                    f"[deleted] {_event_preview(str(deleted_memory.get('content', '')))}"
+                ),
+                priority=deleted_memory.get("priority"),
                 source="delete_memory",
                 updated_at=_utc_iso_now(),
             )

@@ -664,13 +664,33 @@ class SQLiteClient:
         if raw is None:
             return default
         try:
-            return float(raw)
+            value = float(raw)
         except (TypeError, ValueError):
             return default
+        if not math.isfinite(value):
+            return default
+        return value
 
     @staticmethod
     def _env_bool(name: str, default: bool) -> bool:
         return _shared_env_bool(name, default)
+
+    @staticmethod
+    def _validate_priority(priority: Any, *, field_name: str = "priority") -> int:
+        if isinstance(priority, bool):
+            raise ValueError(f"{field_name} must be an integer >= 0")
+        if isinstance(priority, int):
+            parsed_priority = priority
+        elif isinstance(priority, str):
+            candidate = priority.strip()
+            if not re.fullmatch(r"[+-]?\d+", candidate):
+                raise ValueError(f"{field_name} must be an integer >= 0")
+            parsed_priority = int(candidate)
+        else:
+            raise ValueError(f"{field_name} must be an integer >= 0")
+        if parsed_priority < 0:
+            raise ValueError(f"{field_name} must be an integer >= 0")
+        return parsed_priority
 
     @staticmethod
     def _first_env(names: List[str], default: str = "") -> str:
@@ -1010,6 +1030,51 @@ class SQLiteClient:
             )
             or self._embedding_model
         )
+
+    def _build_embedding_cache_key(
+        self,
+        *,
+        backend: str,
+        text_hash: str,
+        dim: Optional[int] = None,
+        model: Optional[str] = None,
+    ) -> str:
+        backend_value = (backend or "hash").strip().lower() or "hash"
+        dim_value = int(dim if dim is not None else self._embedding_dim)
+        if model is None:
+            if backend_value in {"hash", "none", "off", "disabled", "false", "0"}:
+                model_value = f"hash:{dim_value}"
+            else:
+                model_value = self._resolve_embedding_model(backend_value)
+        else:
+            model_value = str(model).strip() or self._resolve_embedding_model(backend_value)
+        return f"{backend_value}:{model_value}:{dim_value}:{text_hash}"
+
+    def _resolve_embedding_cache_probe_backends(self) -> List[str]:
+        primary_backend = (self._embedding_backend or "hash").strip().lower() or "hash"
+        candidates: List[str] = []
+
+        def append_candidate(backend: str) -> None:
+            backend_value = (backend or "").strip().lower()
+            if backend_value and backend_value not in candidates:
+                candidates.append(backend_value)
+
+        if not self._embedding_provider_chain_enabled:
+            append_candidate(primary_backend)
+            return candidates
+        remote_candidates = [
+            backend
+            for backend in self._embedding_provider_candidates
+            if backend not in {"hash", "none", "off", "disabled", "false", "0"}
+        ]
+        fallback_backend = self._resolve_chain_fallback_backend()
+        if len(remote_candidates) == 1 and fallback_backend not in {"api", "router", "openai"}:
+            append_candidate(remote_candidates[0])
+            return candidates
+        if not remote_candidates:
+            append_candidate("hash")
+            return candidates
+        return candidates
 
     def _resolve_chain_fallback_backend(self) -> str:
         value = (self._embedding_provider_fallback or "hash").strip().lower()
@@ -2723,7 +2788,7 @@ class SQLiteClient:
         *,
         normalized: str,
         degrade_reasons: Optional[List[str]] = None,
-    ) -> List[float]:
+    ) -> Tuple[List[float], str]:
         attempted_backends: set[str] = set()
         for backend in self._embedding_provider_candidates:
             backend_value = (backend or "").strip().lower()
@@ -2740,7 +2805,7 @@ class SQLiteClient:
                 degrade_reasons=degrade_reasons,
             )
             if embedding is not None:
-                return embedding
+                return embedding, backend_value
             self._append_degrade_reason(
                 degrade_reasons, f"embedding_provider_failed:{backend_value}"
             )
@@ -2758,14 +2823,14 @@ class SQLiteClient:
                 degrade_reasons=degrade_reasons,
             )
             if embedding is not None:
-                return embedding
+                return embedding, fallback_backend
             self._append_degrade_reason(
                 degrade_reasons, f"embedding_provider_failed:{fallback_backend}"
             )
 
         if fallback_backend in {"hash", "", "default"} or self._embedding_provider_fail_open:
             self._append_degrade_reason(degrade_reasons, "embedding_fallback_hash")
-            return self._hash_embedding(normalized, self._embedding_dim)
+            return self._hash_embedding(normalized, self._embedding_dim), "hash"
 
         self._append_degrade_reason(degrade_reasons, "embedding_provider_chain_blocked")
         raise RuntimeError("embedding_provider_chain_blocked")
@@ -2922,19 +2987,20 @@ class SQLiteClient:
     ) -> List[float]:
         normalized = re.sub(r"\s+", " ", content.strip().lower())
         text_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        cache_key = (
-            f"{self._embedding_backend}:{self._embedding_model}:"
-            f"{self._embedding_dim}:{text_hash}"
-        )
+        cache_key = ""
 
-        cache_row = await session.get(EmbeddingCache, cache_key)
-        if cache_row:
+        async def _load_cached_embedding(
+            lookup_key: str,
+        ) -> Tuple[Optional[EmbeddingCache], Optional[List[float]]]:
+            cache_row = await session.get(EmbeddingCache, lookup_key)
+            if cache_row is None:
+                return None, None
             try:
                 embedding = json.loads(cache_row.embedding)
                 if isinstance(embedding, list):
                     parsed_embedding = [float(v) for v in embedding]
                     if len(parsed_embedding) == int(self._embedding_dim):
-                        return parsed_embedding
+                        return cache_row, parsed_embedding
                     self._append_degrade_reason(
                         degrade_reasons, "embedding_cache_dim_mismatch"
                     )
@@ -2944,15 +3010,30 @@ class SQLiteClient:
                     )
             except (TypeError, ValueError):
                 pass
+            return cache_row, None
 
+        probe_backends = self._resolve_embedding_cache_probe_backends()
+        cache_row: Optional[EmbeddingCache] = None
+        for probe_backend in probe_backends:
+            cache_key = self._build_embedding_cache_key(
+                backend=probe_backend,
+                text_hash=text_hash,
+            )
+            cache_row, cached_embedding = await _load_cached_embedding(cache_key)
+            if cached_embedding is not None:
+                return cached_embedding
+            if cache_row is not None:
+                break
         embedding: Optional[List[float]] = None
+        actual_backend = (self._embedding_backend or "hash").strip().lower() or "hash"
         if self._embedding_provider_chain_enabled:
-            embedding = await self._get_embedding_via_provider_chain(
+            embedding, actual_backend = await self._get_embedding_via_provider_chain(
                 normalized=normalized,
                 degrade_reasons=degrade_reasons,
             )
         else:
             backend_value = (self._embedding_backend or "hash").strip().lower()
+            actual_backend = backend_value
 
             if backend_value in {"router", "api", "openai"}:
                 embedding = await self._fetch_remote_embedding(
@@ -2972,19 +3053,46 @@ class SQLiteClient:
                 self._append_degrade_reason(degrade_reasons, "embedding_backend_unsupported")
 
         if embedding is None:
+            hash_cache_key = self._build_embedding_cache_key(
+                backend="hash",
+                text_hash=text_hash,
+            )
+            hash_cache_row, cached_hash_embedding = await _load_cached_embedding(
+                hash_cache_key
+            )
+            if cached_hash_embedding is not None:
+                return cached_hash_embedding
+            if cache_row is None:
+                cache_row = hash_cache_row
             embedding = self._hash_embedding(normalized, self._embedding_dim)
+            actual_backend = "hash"
+
+        cache_key = self._build_embedding_cache_key(
+            backend=actual_backend,
+            text_hash=text_hash,
+        )
+        if cache_row is None or cache_row.cache_key != cache_key:
+            cache_row, cached_embedding = await _load_cached_embedding(cache_key)
+            if cached_embedding is not None:
+                return cached_embedding
 
         payload = json.dumps(embedding, separators=(",", ":"))
+        cache_model = (
+            f"hash:{self._embedding_dim}"
+            if actual_backend in {"hash", "none", "off", "disabled", "false", "0"}
+            else self._resolve_embedding_model(actual_backend)
+        )
 
         if cache_row:
             cache_row.embedding = payload
+            cache_row.model = cache_model
             cache_row.updated_at = _utc_now_naive()
         else:
             session.add(
                 EmbeddingCache(
                     cache_key=cache_key,
                     text_hash=text_hash,
-                    model=self._embedding_model,
+                    model=cache_model,
                     embedding=payload,
                 )
             )
@@ -4203,6 +4311,8 @@ class SQLiteClient:
         Returns:
             Created memory info with full path
         """
+        priority_value = self._validate_priority(priority)
+
         async with self.session() as session:
             # Validate parent exists (if specified)
             if parent_path:
@@ -4245,7 +4355,7 @@ class SQLiteClient:
                 domain=domain,
                 path=final_path,
                 memory_id=memory.id,
-                priority=priority,
+                priority=priority_value,
                 disclosure=disclosure,
             )
             session.add(path_obj)
@@ -4258,7 +4368,7 @@ class SQLiteClient:
                 "domain": domain,
                 "path": final_path,
                 "uri": f"{domain}://{final_path}",
-                "priority": priority,
+                "priority": priority_value,
                 "indexed_chunks": indexed_chunks,
                 "index_pending": not index_now,
                 "index_targets": [memory.id],
@@ -4330,6 +4440,9 @@ class SQLiteClient:
                 f"No update fields provided for '{domain}://{path}'. "
                 "At least one of content, priority, or disclosure must be set."
             )
+        priority_value = (
+            self._validate_priority(priority) if priority is not None else None
+        )
 
         async with self.session() as session:
             # 1. Get current memory and path
@@ -4351,8 +4464,8 @@ class SQLiteClient:
             old_id = old_memory.id
 
             # Update Path Metadata
-            if priority is not None:
-                path_obj.priority = priority
+            if priority_value is not None:
+                path_obj.priority = priority_value
             if disclosure is not None:
                 path_obj.disclosure = disclosure
 
@@ -4476,10 +4589,16 @@ class SQLiteClient:
             )
 
             if restore_path_metadata:
+                path_updates: Dict[str, Any] = {
+                    "disclosure": restore_disclosure,
+                }
                 if restore_priority is not None:
-                    path_obj.priority = restore_priority
-                path_obj.disclosure = restore_disclosure
-                session.add(path_obj)
+                    path_updates["priority"] = restore_priority
+                await session.execute(
+                    update(Path)
+                    .where(Path.memory_id == target_memory_id)
+                    .values(**path_updates)
+                )
 
             await self._clear_memory_index(session, current_id)
             if index_now:
@@ -4503,6 +4622,7 @@ class SQLiteClient:
         disclosure: Optional[str],
         domain: str = "core",
     ) -> Dict[str, Any]:
+        priority_value = self._validate_priority(priority)
         async with self.session() as session:
             result = await session.execute(
                 select(Path).where(Path.domain == domain).where(Path.path == path)
@@ -4511,7 +4631,7 @@ class SQLiteClient:
             if path_obj is None:
                 raise ValueError(f"Path '{domain}://{path}' not found")
 
-            path_obj.priority = priority
+            path_obj.priority = priority_value
             path_obj.disclosure = disclosure
             session.add(path_obj)
 
@@ -4626,6 +4746,8 @@ class SQLiteClient:
         Returns:
             Created alias info
         """
+        priority_value = self._validate_priority(priority)
+
         async with self.session() as session:
             # Get target memory_id
             result = await session.execute(
@@ -4668,7 +4790,7 @@ class SQLiteClient:
                 domain=new_domain,
                 path=new_path,
                 memory_id=target_id,
-                priority=priority,
+                priority=priority_value,
                 disclosure=disclosure,
             )
             session.add(path_obj)
@@ -4769,6 +4891,7 @@ class SQLiteClient:
         safe_path = (path or "").strip("/")
         if not safe_path:
             raise ValueError("Path cannot be empty")
+        priority_value = self._validate_priority(priority)
 
         async with self.session() as session:
             # Check if memory exists
@@ -4809,7 +4932,7 @@ class SQLiteClient:
                 domain=domain,
                 path=safe_path,
                 memory_id=memory_id,
-                priority=priority,
+                priority=priority_value,
                 disclosure=disclosure,
             )
             session.add(path_obj)

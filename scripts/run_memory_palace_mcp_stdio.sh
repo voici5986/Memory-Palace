@@ -193,9 +193,11 @@ csv_list_contains_case_insensitive() {
   local needle_lower
   needle_lower="$(printf '%s' "${needle}" | tr '[:upper:]' '[:lower:]')"
   local entry
-  local entries=()
-  IFS=',' read -r -a entries <<< "${csv}"
-  for entry in "${entries[@]}"; do
+  local -a entries=()
+  if [[ -n "${csv}" ]]; then
+    IFS=',' read -r -a entries <<< "${csv}"
+  fi
+  for entry in "${entries[@]-}"; do
     entry="$(normalize_env_value "${entry}")"
     if [[ -z "${entry}" ]]; then
       continue

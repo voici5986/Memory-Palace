@@ -238,14 +238,21 @@ def _read_stream_chunk(stream) -> bytes:
 
 
 def _forward_stream_chunked(source, destination, *, stop_event: threading.Event) -> None:
+    pending_cr = False
     while not stop_event.is_set():
         data = _read_stream_chunk(source)
         if not data:
             break
-        cleaned = data.replace(b"\r", b"")
-        if not cleaned:
-            continue
-        destination.write(cleaned)
+        if pending_cr:
+            data = b"\r" + data
+            pending_cr = False
+        if data.endswith(b"\r"):
+            data = data[:-1]
+            pending_cr = True
+        destination.write(data.replace(b"\r\n", b"\n"))
+        destination.flush()
+    if pending_cr and not stop_event.is_set():
+        destination.write(b"\r")
         destination.flush()
 
 

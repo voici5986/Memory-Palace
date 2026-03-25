@@ -28,7 +28,7 @@ from models import (
 from .utils import get_text_diff
 from .maintenance import require_maintenance_api_key
 from ._write_lane import run_write_lane as _run_api_write_lane
-from db.snapshot import get_snapshot_manager
+from db.snapshot import SnapshotManager, get_snapshot_manager
 from db.sqlite_client import get_sqlite_client
 from shared_utils import env_bool as _env_bool
 
@@ -74,14 +74,10 @@ def _format_permanently_deleted_detail(
 
 
 def _validate_session_id_or_400(session_id: str) -> str:
-    value = str(session_id or "").strip()
-    if not value:
-        raise HTTPException(status_code=400, detail="Invalid session_id: empty value.")
-    if value in {".", ".."}:
-        raise HTTPException(status_code=400, detail="Invalid session_id path segment.")
-    if "/" in value or "\\" in value or "\x00" in value:
-        raise HTTPException(status_code=400, detail="Invalid session_id characters.")
-    return value
+    try:
+        return SnapshotManager._validate_session_id(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid session_id: {exc}.") from exc
 
 
 def _raise_review_internal_error(*, operation: str, error: str, exc: Exception) -> None:

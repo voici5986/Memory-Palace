@@ -6,6 +6,8 @@ import ctypes as stdlib_ctypes
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
+from api import review as review_api
 import db.snapshot as snapshot_module
 from db.snapshot import SnapshotManager
 
@@ -266,6 +268,106 @@ def test_snapshot_manager_windows_pid_check_uses_win32_api(
 
     assert SnapshotManager._pid_is_alive(4242) is True
     assert fake_kernel32.closed_handles == [99]
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    [
+        "\u200b",
+        "abc\u200bdef",
+        "abc\u200ddef",
+        "abc\x1fdef",
+        " abc",
+        "abc ",
+        "\tabc",
+        "abc\t",
+        "abc\n",
+        "abc def",
+        "abc.",
+    ],
+)
+def test_session_id_validation_rejects_invisible_and_control_characters(
+    session_id: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="(invisible or control characters|must not contain whitespace|must not end with dot or space)",
+    ):
+        SnapshotManager._validate_session_id(session_id)
+
+    with pytest.raises(
+        HTTPException,
+        match="(invisible or control characters|must not contain whitespace|must not end with dot or space)",
+    ):
+        review_api._validate_session_id_or_400(session_id)
+
+
+def test_write_json_atomic_retries_retryable_windows_replace_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target_path = tmp_path / "manifest.json"
+    replace_calls: list[tuple[str, str]] = []
+    original_replace = snapshot_module.os.replace
+
+    def _flaky_replace(src: str, dst: str) -> None:
+        replace_calls.append((src, dst))
+        if len(replace_calls) == 1:
+            raise PermissionError("sharing violation")
+        original_replace(src, dst)
+
+    monkeypatch.setattr(snapshot_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(snapshot_module.os, "replace", _flaky_replace)
+
+    snapshot_module._write_json_atomic(
+        str(target_path),
+        {"session_id": "retryable-session"},
+    )
+
+    assert json.loads(target_path.read_text(encoding="utf-8")) == {
+        "session_id": "retryable-session"
+    }
+    assert len(replace_calls) == 2
+
+
+def test_delete_snapshot_keeps_resource_file_when_manifest_save_fails(
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(str(tmp_path / "snapshots"))
+    session_id = "delete-order"
+    first_uri = "notes://first"
+    second_uri = "notes://second"
+
+    assert manager.create_snapshot(
+        session_id,
+        first_uri,
+        "path",
+        {"uri": first_uri, "operation_type": "create"},
+    )
+    assert manager.create_snapshot(
+        session_id,
+        second_uri,
+        "path",
+        {"uri": second_uri, "operation_type": "create"},
+    )
+
+    manifest = manager._load_manifest(session_id)
+    resource_file = manifest["resources"][first_uri]["file"]
+    resource_path = tmp_path / "snapshots" / session_id / "resources" / resource_file
+    assert resource_path.exists()
+
+    original_save_manifest = manager._save_manifest
+
+    def _failing_save_manifest(_session_id: str, _manifest: dict[str, object]) -> None:
+        raise RuntimeError("save_failed")
+
+    manager._save_manifest = _failing_save_manifest  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="save_failed"):
+        manager.delete_snapshot(session_id, first_uri)
+
+    manager._save_manifest = original_save_manifest  # type: ignore[method-assign]
+    assert resource_path.exists()
 
 
 def test_snapshot_manager_sanitize_resource_id_uses_sha256_hash_suffix(

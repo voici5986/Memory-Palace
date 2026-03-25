@@ -116,6 +116,44 @@ async def test_create_memory_rejects_system_domain_writes(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_memory_rejects_negative_priority_before_db_write(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://",
+        content="blocked",
+        priority=-1,
+        title="blocked",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert "priority must be an integer >= 0" in payload["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("priority", [True, False, 0.0, 1.9])
+async def test_create_memory_rejects_non_integer_priority_before_db_write(
+    monkeypatch,
+    priority,
+) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://",
+        content="blocked",
+        priority=priority,
+        title="blocked",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert "priority must be an integer >= 0" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_create_memory_write_lane_timeout_returns_retryable_tool_payload(
     monkeypatch,
 ) -> None:
@@ -154,6 +192,40 @@ async def test_update_memory_rejects_system_domain_writes() -> None:
 
     assert payload["ok"] is False
     assert "read-only" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_update_memory_rejects_negative_priority_before_db_write(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/index",
+        priority=-1,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert "priority must be an integer >= 0" in payload["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("priority", [True, False, 0.0, 1.9])
+async def test_update_memory_rejects_non_integer_priority_before_db_write(
+    monkeypatch,
+    priority,
+) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/index",
+        priority=priority,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert "priority must be an integer >= 0" in payload["message"]
 
 
 @pytest.mark.asyncio

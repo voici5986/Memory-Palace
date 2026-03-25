@@ -175,6 +175,82 @@ async def test_write_lane_metrics_count_cancelled_global_wait_as_failure(
 
 
 @pytest.mark.asyncio
+async def test_write_lane_metrics_survive_second_cancellation_during_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNTIME_WRITE_GLOBAL_CONCURRENCY", "1")
+    coordinator = WriteLaneCoordinator()
+    release_holder = asyncio.Event()
+    metrics_started = asyncio.Event()
+    original_record = coordinator._record_write_metrics
+
+    async def _slow_record_write_metrics(**kwargs):
+        metrics_started.set()
+        await asyncio.sleep(0.05)
+        await original_record(**kwargs)
+
+    monkeypatch.setattr(coordinator, "_record_write_metrics", _slow_record_write_metrics)
+
+    async def _hold_global_slot() -> str:
+        await release_holder.wait()
+        return "holder_done"
+
+    async def _quick_success() -> str:
+        return "quick_done"
+
+    holder = asyncio.create_task(
+        coordinator.run_write(
+            session_id="holder",
+            operation="create_memory",
+            task=_hold_global_slot,
+        )
+    )
+
+    for _ in range(100):
+        if (await coordinator.status())["global_active"] == 1:
+            break
+        await asyncio.sleep(0.001)
+    else:
+        pytest.fail("holder did not acquire global write slot in time")
+
+    waiter = asyncio.create_task(
+        coordinator.run_write(
+            session_id="waiter",
+            operation="update_memory",
+            task=_quick_success,
+        )
+    )
+
+    for _ in range(100):
+        if (await coordinator.status())["global_waiting"] >= 1:
+            break
+        await asyncio.sleep(0.001)
+    else:
+        pytest.fail("waiter did not enter global waiting state in time")
+
+    waiter.cancel()
+    await metrics_started.wait()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    release_holder.set()
+    assert await holder == "holder_done"
+
+    for _ in range(100):
+        status = await coordinator.status()
+        if status["writes_failed"] == 1:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        pytest.fail("cancelled write metrics were lost")
+
+    assert status["writes_total"] == 2
+    assert status["writes_success"] == 1
+    assert status["writes_failed"] == 1
+    assert status["last_error"] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_write_lane_times_out_when_global_slot_is_held_too_long(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

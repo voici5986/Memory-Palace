@@ -265,7 +265,7 @@ def test_read_stream_chunk_prefers_read1_when_available() -> None:
     assert stream.read_sizes == []
 
 
-def test_forward_stream_chunked_strips_carriage_returns_per_chunk() -> None:
+def test_forward_stream_chunked_normalizes_crlf_without_dropping_standalone_carriage_returns() -> None:
     module = _load_module()
     source = io.BytesIO(b"line1\r\nline2\rline3")
     destination = io.BytesIO()
@@ -276,4 +276,26 @@ def test_forward_stream_chunked_strips_carriage_returns_per_chunk() -> None:
         stop_event=threading.Event(),
     )
 
-    assert destination.getvalue() == b"line1\nline2line3"
+    assert destination.getvalue() == b"line1\nline2\rline3"
+
+
+def test_forward_stream_chunked_normalizes_crlf_across_chunk_boundaries() -> None:
+    module = _load_module()
+
+    class _ChunkedStream:
+        def __init__(self) -> None:
+            self._chunks = [b"line1\r", b"\nline2\r", b"line3"]
+
+        def read(self, _size: int) -> bytes:
+            if not self._chunks:
+                return b""
+            return self._chunks.pop(0)
+
+    destination = io.BytesIO()
+    module._forward_stream_chunked(
+        _ChunkedStream(),
+        destination,
+        stop_event=threading.Event(),
+    )
+
+    assert destination.getvalue() == b"line1\nline2\rline3"

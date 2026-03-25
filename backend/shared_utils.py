@@ -1,4 +1,5 @@
 import os
+import math
 from datetime import datetime, timezone
 from ipaddress import ip_address
 from typing import Iterable, Optional
@@ -34,6 +35,26 @@ def env_int(
     try:
         value = int(str(raw).strip())
     except (TypeError, ValueError):
+        return fallback
+    return max(minimum, value)
+
+
+def env_float(
+    name: str,
+    default: float,
+    minimum: float = 0.0,
+    *,
+    clamp_default: bool = False,
+) -> float:
+    fallback = max(minimum, default) if clamp_default else default
+    raw = os.getenv(name)
+    if raw is None:
+        return fallback
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(value):
         return fallback
     return max(minimum, value)
 

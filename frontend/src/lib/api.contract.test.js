@@ -308,6 +308,45 @@ describe('api contract regression', () => {
     expect(config.headers['X-MCP-API-Key']).toBeUndefined();
   });
 
+  it('injects key for protected requests resolved through a configured cross-origin API base', () => {
+    const interceptor = interceptorRef.current;
+    window.sessionStorage.setItem(
+      'memory-palace.dashboardAuth',
+      JSON.stringify({
+        maintenanceApiKey: 'stored-key',
+        maintenanceApiKeyMode: 'header',
+      })
+    );
+
+    const config = interceptor({
+      url: '/maintenance/orphans',
+      baseURL: 'https://api.example.com/api',
+      headers: {},
+      method: 'get',
+    });
+
+    expect(config.headers['X-MCP-API-Key']).toBe('stored-key');
+    expect(config.headers.Authorization).toBeUndefined();
+  });
+
+  it('injects key for protected requests under a same-origin API base path prefix', () => {
+    const interceptor = interceptorRef.current;
+    window.__MEMORY_PALACE_RUNTIME__ = {
+      maintenanceApiKey: 'runtime-key',
+      maintenanceApiKeyMode: 'bearer',
+    };
+
+    const config = interceptor({
+      url: '/browse/node',
+      baseURL: '/memory-palace/api',
+      headers: {},
+      method: 'get',
+    });
+
+    expect(config.headers.Authorization).toBe('Bearer runtime-key');
+    expect(config.headers['X-MCP-API-Key']).toBeUndefined();
+  });
+
   it('injects runtime key for review and browse read/write requests', () => {
     const interceptor = interceptorRef.current;
     window.__MEMORY_PALACE_RUNTIME__ = {

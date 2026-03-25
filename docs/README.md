@@ -37,6 +37,7 @@
 | [GHCR_QUICKSTART.md](GHCR_QUICKSTART.md) | GHCR 预构建镜像的最短用户使用路径 |
 | [GHCR_ACCEPTANCE_CHECKLIST.md](GHCR_ACCEPTANCE_CHECKLIST.md) | GHCR 拉镜像后的最小用户验收清单 |
 | [skills/SKILLS_QUICKSTART.md](skills/SKILLS_QUICKSTART.md) | 一页看懂 CLI 客户端怎么触发 skills、怎么配 MCP、怎么验收 |
+| [changelog/release_v3.7.0_2026-03-26.md](changelog/release_v3.7.0_2026-03-26.md) | `v3.7.0` 的真实修复项、验证范围与保守边界 |
 | [changelog/dashboard_i18n_2026-03-09.md](changelog/dashboard_i18n_2026-03-09.md) | 仪表盘默认英文、中英切换、截图与验证摘要 |
 | [changelog/ghcr_release_2026-03-11.md](changelog/ghcr_release_2026-03-11.md) | GHCR 预构建镜像发布说明与功能边界 |
 

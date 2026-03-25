@@ -272,6 +272,8 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 > With that in place, `/sse`, `/messages`, and `/sse/messages` are also proxied to the local SSE process, so you do not need to hand-wire CORS just for local debugging.
 >
 > If you are doing a **non-root-path deployment** (for example the frontend lives under `/memory-palace/` and the backend API is exposed as `/memory-palace/api`), the frontend build can also set `VITE_API_BASE_URL`. By default it still uses `/api`, which remains the better fit for local Vite proxying and the repository-shipped Docker path.
+>
+> The current frontend behavior was also rechecked on this path: if `VITE_API_BASE_URL` points to a prefixed API root or to your own cross-origin API origin, the browser-saved Dashboard auth key now still follows protected `/browse`, `/review`, `/maintenance`, and `/setup` requests. It still does **not** send that key to unrelated third-party absolute URLs.
 
 <p align="center">
   <img src="images/setup-assistant-en.png" width="900" alt="Memory Palace first-run setup assistant (English mode)" />

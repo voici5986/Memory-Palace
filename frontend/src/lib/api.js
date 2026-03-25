@@ -159,8 +159,15 @@ const readRuntimeMaintenanceAuth = () => {
   return { key: authState.key, mode: authState.mode };
 };
 
-const normalizeProtectedPath = (pathname) => {
+const normalizeProtectedPath = (pathname, apiBasePath = '') => {
   if (!pathname || typeof pathname !== 'string') return '';
+  const normalizedBasePath = typeof apiBasePath === 'string' ? apiBasePath.trim() : '';
+  if (normalizedBasePath) {
+    if (pathname === normalizedBasePath) return '/';
+    if (pathname.startsWith(`${normalizedBasePath}/`)) {
+      return pathname.slice(normalizedBasePath.length) || '/';
+    }
+  }
   if (pathname.startsWith('/api/')) return pathname.slice('/api'.length);
   return pathname;
 };
@@ -174,17 +181,72 @@ const isProtectedPath = (pathname) => {
   return false;
 };
 
-const isProtectedApiRequest = (config) => {
+const ABSOLUTE_URL_PATTERN = /^([a-z][a-z\d+\-.]*:)?\/\//i;
+
+const combineUrlsLikeAxios = (baseURL, relativeURL) => {
+  const normalizedBase = String(baseURL || '').replace(/\/+$/, '');
+  const normalizedRelative = String(relativeURL || '').replace(/^\/+/, '');
+  if (!normalizedBase) {
+    return normalizedRelative ? `/${normalizedRelative}` : '/';
+  }
+  if (!normalizedRelative) {
+    return normalizedBase;
+  }
+  return `${normalizedBase}/${normalizedRelative}`;
+};
+
+const resolveApiBaseUrl = (config) => {
+  if (typeof window === 'undefined') return null;
+  const candidates = [config?.baseURL, api.defaults?.baseURL];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate.trim()) continue;
+    try {
+      return new URL(candidate.trim(), window.location.origin);
+    } catch (_error) {
+      continue;
+    }
+  }
+  return null;
+};
+
+const resolveRequestUrl = (config) => {
   const url = config?.url;
-  if (!url || typeof url !== 'string') return false;
-  if (typeof window === 'undefined') return false;
+  if (!url || typeof url !== 'string') return null;
+  if (typeof window === 'undefined') return null;
   try {
-    const parsed = new URL(url, window.location.origin);
-    if (parsed.origin !== window.location.origin) return false;
-    return isProtectedPath(parsed.pathname, config?.method);
+    if (ABSOLUTE_URL_PATTERN.test(url)) {
+      return new URL(url, window.location.origin);
+    }
+    const apiBaseUrl = resolveApiBaseUrl(config);
+    if (apiBaseUrl) {
+      return new URL(combineUrlsLikeAxios(apiBaseUrl.href, url), window.location.origin);
+    }
+    return new URL(url, window.location.origin);
   } catch (_error) {
+    return null;
+  }
+};
+
+const isProtectedApiRequest = (config) => {
+  if (typeof window === 'undefined') return false;
+  const requestUrl = resolveRequestUrl(config);
+  if (!requestUrl) return false;
+
+  const currentOrigin = window.location.origin;
+  const apiBaseUrl = resolveApiBaseUrl(config);
+  const matchesCurrentOrigin = requestUrl.origin === currentOrigin;
+  const matchesConfiguredApiOrigin = apiBaseUrl
+    ? requestUrl.origin === apiBaseUrl.origin
+    : false;
+  if (!matchesCurrentOrigin && !matchesConfiguredApiOrigin) {
     return false;
   }
+
+  const normalizedPath = normalizeProtectedPath(
+    requestUrl.pathname,
+    apiBaseUrl?.pathname || ''
+  );
+  return isProtectedPath(normalizedPath);
 };
 
 api.interceptors.request.use((config) => {

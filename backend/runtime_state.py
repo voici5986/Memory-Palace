@@ -32,9 +32,12 @@ def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
     if raw is None:
         return default
     try:
-        return max(minimum, float(raw))
+        value = float(raw)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(value):
+        return default
+    return max(minimum, value)
 
 
 def _normalize_session_id(session_id: Optional[str]) -> str:
@@ -270,7 +273,6 @@ class WriteLaneCoordinator:
                         self._global_active += 1
                         global_active_counted = True
 
-                    # Keep this as a metric hook, even when no logger is attached yet.
                     _ = operation
                     _ = waited_session_ms
                     _ = waited_global_ms
@@ -290,35 +292,41 @@ class WriteLaneCoordinator:
                             )
                             attempt_index += 1
                     duration_ms = int((time.monotonic() - write_start) * 1000)
-                    await self._record_write_metrics(
-                        success=True,
-                        session_wait_ms=waited_session_ms,
-                        global_wait_ms=waited_global_ms,
-                        duration_ms=duration_ms,
+                    await asyncio.shield(
+                        self._record_write_metrics(
+                            success=True,
+                            session_wait_ms=waited_session_ms,
+                            global_wait_ms=waited_global_ms,
+                            duration_ms=duration_ms,
+                        )
                     )
                     return result
                 except asyncio.CancelledError:
                     if waited_global_ms <= 0:
                         waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
                     duration_ms = int((time.monotonic() - write_start) * 1000)
-                    await self._record_write_metrics(
-                        success=False,
-                        session_wait_ms=waited_session_ms,
-                        global_wait_ms=waited_global_ms,
-                        duration_ms=duration_ms,
-                        error="cancelled",
+                    await asyncio.shield(
+                        self._record_write_metrics(
+                            success=False,
+                            session_wait_ms=waited_session_ms,
+                            global_wait_ms=waited_global_ms,
+                            duration_ms=duration_ms,
+                            error="cancelled",
+                        )
                     )
                     raise
                 except Exception as exc:
                     if waited_global_ms <= 0:
                         waited_global_ms = int((time.monotonic() - global_wait_start) * 1000)
                     duration_ms = int((time.monotonic() - write_start) * 1000)
-                    await self._record_write_metrics(
-                        success=False,
-                        session_wait_ms=waited_session_ms,
-                        global_wait_ms=waited_global_ms,
-                        duration_ms=duration_ms,
-                        error=str(exc),
+                    await asyncio.shield(
+                        self._record_write_metrics(
+                            success=False,
+                            session_wait_ms=waited_session_ms,
+                            global_wait_ms=waited_global_ms,
+                            duration_ms=duration_ms,
+                            error=str(exc),
+                        )
                     )
                     raise
                 finally:
@@ -1288,6 +1296,47 @@ class IndexTaskWorker:
     ) -> None:
         self._write_runner = write_runner
 
+    def _abandon_nonfinal_jobs_for_loop_switch(self) -> List[IndexTask]:
+        finished_at = _utc_iso_now()
+        queued_tasks: List[IndexTask] = []
+        for job_id, job in list(self._jobs.items()):
+            status = str(job.get("status") or "")
+            if status in self._FINAL_STATES:
+                continue
+            task_type = str(job.get("task_type") or "")
+            if status == "queued" and task_type:
+                memory_id = job.get("memory_id")
+                if not isinstance(memory_id, int):
+                    memory_id = None
+                queued_tasks.append(
+                    IndexTask(
+                        job_id=job_id,
+                        task_type=task_type,
+                        memory_id=memory_id,
+                        reason=str(job.get("reason") or "runtime_resume"),
+                        requested_at=str(job.get("requested_at") or finished_at),
+                    )
+                )
+                continue
+            task_type = str(job.get("task_type") or "")
+            if task_type == "reindex_memory":
+                memory_id = job.get("memory_id")
+                if isinstance(memory_id, int):
+                    self._pending_memory_jobs.pop(memory_id, None)
+            elif task_type == "rebuild_index" and self._rebuild_job_id == job_id:
+                self._rebuild_job_id = None
+            elif task_type == "sleep_consolidation" and self._sleep_job_id == job_id:
+                self._sleep_job_id = None
+            job["status"] = "failed"
+            job["error"] = "event_loop_reset"
+            job["finished_at"] = finished_at
+            job.pop("result", None)
+            self._failed_total += 1
+            self._last_error = "event_loop_reset"
+            self._last_finished_at = finished_at
+            self._append_recent_job_locked(job_id)
+        return queued_tasks
+
     def _ensure_loop_state(self) -> None:
         current_loop = asyncio.get_running_loop()
         if (
@@ -1297,19 +1346,42 @@ class IndexTaskWorker:
         ):
             return
 
+        queued_tasks: List[IndexTask] = []
+        if self._loop is not None and self._loop is not current_loop:
+            queued_tasks = self._abandon_nonfinal_jobs_for_loop_switch()
+
         self._loop = current_loop
         self._queue = asyncio.Queue(maxsize=self._queue_maxsize)
         self._guard = asyncio.Lock()
         self._runner = None
         self._active_execution_task = None
         self._active_job_id = None
-        self._jobs.clear()
         self._job_events.clear()
-        self._recent_job_ids.clear()
         self._pending_memory_jobs.clear()
         self._rebuild_job_id = None
         self._sleep_job_id = None
         self._cancelled_job_ids.clear()
+        for task in queued_tasks:
+            self._job_events[task.job_id] = asyncio.Event()
+            try:
+                self._queue.put_nowait(task)
+            except asyncio.QueueFull:
+                job = self._jobs.get(task.job_id)
+                if job is not None:
+                    job["status"] = "dropped"
+                    job["error"] = "queue_full"
+                    job["finished_at"] = _utc_iso_now()
+                self._dropped_total += 1
+                self._last_error = "queue_full"
+                self._last_finished_at = _utc_iso_now()
+                self._append_recent_job_locked(task.job_id)
+                continue
+            if task.task_type == "rebuild_index":
+                self._rebuild_job_id = task.job_id
+            elif task.task_type == "sleep_consolidation":
+                self._sleep_job_id = task.job_id
+            elif task.memory_id is not None:
+                self._pending_memory_jobs[task.memory_id] = task.job_id
 
     async def ensure_started(self, client_factory: Callable[[], Any]) -> None:
         if not self._enabled:
@@ -2262,41 +2334,49 @@ class SleepTimeConsolidator:
         force: bool = False,
         reason: str = "runtime",
     ) -> Dict[str, Any]:
+        now_ts = time.time()
         async with self._guard:
-            now_ts = time.time()
-            if not self._enabled:
+            enabled = self._enabled
+            check_interval_seconds = self._check_interval_seconds
+            retry_interval_seconds = self._resolve_retry_interval_seconds_locked()
+            last_check_ts = self._last_check_ts
+            last_result = dict(self._last_result)
+
+        if not enabled:
+            async with self._guard:
                 self._last_result = {
                     "scheduled": False,
                     "reason": "sleep_consolidation_disabled",
-                    "check_interval_seconds": self._check_interval_seconds,
-                    "retry_after_seconds": self._check_interval_seconds,
+                    "check_interval_seconds": check_interval_seconds,
+                    "retry_after_seconds": check_interval_seconds,
                 }
                 self._last_check_ts = now_ts
                 return dict(self._last_result)
 
-            retry_interval_seconds = self._resolve_retry_interval_seconds_locked()
-            if (
-                not force
-                and self._last_check_ts > 0
-                and (now_ts - self._last_check_ts) < retry_interval_seconds
-            ):
-                return dict(self._last_result)
+        if (
+            not force
+            and last_check_ts > 0
+            and (now_ts - last_check_ts) < retry_interval_seconds
+        ):
+            return last_result
 
-            payload = await index_worker.enqueue_sleep_consolidation(
-                reason=reason or "runtime"
+        payload = await index_worker.enqueue_sleep_consolidation(
+            reason=reason or "runtime"
+        )
+        scheduled = bool(payload.get("queued")) or bool(payload.get("deduped"))
+        enqueue_reason = str(payload.get("reason") or "")
+        retry_after_seconds = float(check_interval_seconds)
+        if not scheduled and enqueue_reason == "queue_full":
+            retry_after_seconds = min(
+                retry_after_seconds, self._QUEUE_FULL_RETRY_SECONDS
             )
-            scheduled = bool(payload.get("queued")) or bool(payload.get("deduped"))
-            enqueue_reason = str(payload.get("reason") or "")
-            retry_after_seconds = float(self._check_interval_seconds)
-            if not scheduled and enqueue_reason == "queue_full":
-                retry_after_seconds = min(
-                    retry_after_seconds, self._QUEUE_FULL_RETRY_SECONDS
-                )
+
+        async with self._guard:
             self._last_result = {
                 "scheduled": scheduled,
                 "reason": reason or "runtime",
                 "forced": bool(force),
-                "check_interval_seconds": self._check_interval_seconds,
+                "check_interval_seconds": check_interval_seconds,
                 "retry_after_seconds": retry_after_seconds,
                 "enqueue_reason": enqueue_reason,
                 "requested_at": _utc_iso_now(),

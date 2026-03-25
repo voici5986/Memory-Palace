@@ -583,7 +583,8 @@ async def test_search_advanced_embedding_fallback_then_cache_hit_is_observable(
 
     assert "embedding_request_failed" in first_payload.get("degrade_reasons", [])
     assert "embedding_fallback_hash" in first_payload.get("degrade_reasons", [])
-    assert post_call_count["value"] == 1
-    assert second_payload.get("degrade_reasons", []) == []
-    assert second_payload["degraded"] is False
+    assert post_call_count["value"] == 2
+    assert "embedding_request_failed" in second_payload.get("degrade_reasons", [])
+    assert "embedding_fallback_hash" in second_payload.get("degrade_reasons", [])
+    assert second_payload["degraded"] is True
     assert int(status_payload["counts"]["embedding_cache"]) >= 1

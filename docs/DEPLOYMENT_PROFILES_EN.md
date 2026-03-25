@@ -180,7 +180,7 @@ If you adopt the direct connection method, note one boundary first:
 - On each run, it first generates a Docker env file from `deploy/profiles/docker/profile-*.env`, and only then decides whether to inject runtime overrides based on the script arguments.
 - So if you only write your final direct-API settings into the repository-root `.env` and then run `bash scripts/docker_one_click.sh --profile c`, the actual startup still uses the profile template path, not necessarily the final values you just wrote.
 
-> As rechecked in the current `v3.6.5` validation, the local `profile c/d + --allow-runtime-env-injection` path now follows the intended order: generate the Docker env from the template first, defer template placeholder validation for that run, write the injected runtime values, and then still fail closed if the required external settings remain unresolved. In plain language: template placeholders no longer block local debugging before your real values land, but missing injected values are still treated as a hard stop.
+> As rechecked in the current `v3.7.0` validation, the local `profile c/d + --allow-runtime-env-injection` path now follows the intended order: generate the Docker env from the template first, defer template placeholder validation for that run, write the injected runtime values, and then still fail closed if the required external settings remain unresolved. In plain language: template placeholders no longer block local debugging before your real values land, but missing injected values are still treated as a hard stop.
 
 The minimum verification path should therefore be split into two cases:
 

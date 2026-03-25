@@ -271,6 +271,8 @@ VITE v7.x.x  ready in xxx ms
 > 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起代理到本机 SSE 进程；不需要再手动改 CORS。
 >
 > 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。
+>
+> 当前前端对这条路径也补过一轮实际行为复核：如果你把 `VITE_API_BASE_URL` 指到一个带前缀的 API 根路径，或者指到你自己的跨源 API 地址，浏览器里保存的 Dashboard 鉴权 key 现在也会继续附加到 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求上；但它仍然不会把这把 key 发到无关第三方绝对 URL。
 
 <p align="center">
   <img src="images/setup-assistant-zh.png" width="900" alt="Memory Palace 首启配置向导（中文模式）" />

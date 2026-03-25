@@ -294,6 +294,100 @@ async def test_embedding_provider_chain_cache_hit_avoids_second_remote_call(
 
 
 @pytest.mark.asyncio
+async def test_embedding_provider_chain_cache_is_scoped_to_actual_provider_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "router")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_CHAIN_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_FAIL_OPEN", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_FALLBACK", "api")
+    monkeypatch.setenv("ROUTER_API_BASE", "https://router.example/v1")
+    monkeypatch.setenv("ROUTER_API_KEY", "router-key")
+    monkeypatch.setenv("ROUTER_EMBEDDING_MODEL", "router-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://api.example/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "api-key")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "api-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "provider-chain-identity-cache.db"))
+    await client.init_db()
+
+    router_available = {"value": False}
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_post_json(base: str, endpoint: str, payload, api_key: str = "", error_sink=None):
+        _ = endpoint, api_key, error_sink
+        model = str(payload.get("model") or "")
+        calls.append((base, model))
+        if model == "router-model":
+            if not router_available["value"]:
+                return None
+            return {"data": [{"embedding": [0.2] * 16}]}
+        if model == "api-model":
+            return {"data": [{"embedding": [0.1] * 16}]}
+        raise AssertionError(f"unexpected model: {model}")
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    async with client.session() as session:
+        first = await client._get_embedding(session, "provider chain identity cache sample")
+        await session.flush()
+        router_available["value"] = True
+        second = await client._get_embedding(session, "provider chain identity cache sample")
+    await client.close()
+
+    assert first == [0.1] * 16
+    assert second == [0.2] * 16
+    assert calls == [
+        ("https://router.example/v1", "router-model"),
+        ("https://api.example/v1", "api-model"),
+        ("https://router.example/v1", "router-model"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_single_provider_remote_recovery_does_not_reuse_hash_fallback_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_CHAIN_ENABLED", "false")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://api.example/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "api-key")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "api-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "single-provider-hash-fallback-cache.db"))
+    await client.init_db()
+
+    remote_available = {"value": False}
+    calls: list[tuple[str, str, bool]] = []
+
+    async def _fake_post_json(base: str, endpoint: str, payload, api_key: str = "", error_sink=None):
+        _ = endpoint, api_key, error_sink
+        model = str(payload.get("model") or "")
+        calls.append((base, model, remote_available["value"]))
+        if not remote_available["value"]:
+            return None
+        return {"data": [{"embedding": [0.9] * 16}]}
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    async with client.session() as session:
+        first = await client._get_embedding(session, "single provider recovery sample")
+        await session.flush()
+        remote_available["value"] = True
+        second = await client._get_embedding(session, "single provider recovery sample")
+    await client.close()
+
+    assert first != [0.9] * 16
+    assert second == [0.9] * 16
+    assert calls == [
+        ("https://api.example/v1", "api-model", False),
+        ("https://api.example/v1", "api-model", True),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_embedding_provider_chain_refreshes_stale_cached_embedding_dimension(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -311,9 +405,10 @@ async def test_embedding_provider_chain_refreshes_stale_cached_embedding_dimensi
         client._embedding_dim = 1024
         normalized = "provider chain cache dim sample"
         text_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        cache_key = (
-            f"{client._embedding_backend}:{client._embedding_model}:"
-            f"{client._embedding_dim}:{text_hash}"
+        cache_key = client._build_embedding_cache_key(
+            backend=client._embedding_backend,
+            text_hash=text_hash,
+            dim=client._embedding_dim,
         )
         session.add(
             EmbeddingCache(

@@ -58,7 +58,11 @@ If you want the AI to guide installation step by step, start with the standalone
 - **Multilingual retrieval loses less signal now**: local hash embedding, MMR deduplication, and session-first cache now keep mixed CJK/Latin text more consistently, and fold full-width Latin forms such as `ＡＰＩ` into the same retrieval path as `API`.
 - **Local C/D Docker debugging is less brittle**: for `docker_one_click.sh/.ps1 --allow-runtime-env-injection`, template placeholder validation is now deferred until the injected runtime values are written, while the run still fails closed afterwards if required settings remain unresolved.
 - **Repo-local SSE shutdown is quieter**: stopping `run_sse.py` while an `/sse` stream is still active no longer emits the previous ASGI shutdown traceback in the current validation path.
-- **The current `v3.6.5` validation is wider**: backend `748 passed, 18 skipped`, frontend `112 passed` plus build success, real-browser Dashboard smoke rechecked all four pages and locale persistence, live MCP-only e2e passed, and local A/B/C/D plus Docker B/C/D startup paths were rechecked. Native Windows host runs and `Gemini live` still keep explicit target-environment caveats.
+- **The current `v3.7.0` validation is tighter where it matters**: backend `785 passed, 18 skipped`, frontend `114 passed` plus build success, live MCP-only e2e passed, repo-local skill sync check passed again, macOS local Profile B and Linux Docker Profile B were rechecked, and a D-style retrieval chain was rechecked against real embedding / reranker / intent-LLM services. Native Windows host runs and host-specific skill smokes still keep explicit target-environment caveats.
+- **`session_id` now really fails closed**: leading/trailing whitespace and control-style characters are rejected before a snapshot or Review session can normalize them into something else. In plain terms: values like `' abc'`, `'abc '`, or `'\tabc'` are no longer silently accepted as `abc`.
+- **The public `priority` contract is now consistent**: the MCP tool layer no longer coerces `True`, `False`, or `1.9` into integers before they reach the stricter SQLite validation. In plain terms: non-integer priority values are now rejected early on the public tool path too.
+- **Dashboard auth now follows the configured API base**: if you set `VITE_API_BASE_URL` to a prefixed path or your own API origin, the browser-saved Dashboard key still attaches to protected `/browse`, `/review`, `/maintenance`, and `/setup` requests. It still does **not** get sent to unrelated third-party absolute URLs.
+- **Repo-local skill mirrors are back in sync**: the canonical `memory-palace` skill and the `.agent/.cursor` mirrors now match again, so `python scripts/sync_memory_palace_skill.py --check` returns `PASS` on the current repository state.
 - **skills + MCP now feel productized**: installation, sync, smoke, and live e2e are all part of the documented path.
 - **Deployment is safer**: the Docker one-click scripts now use deployment locks, runtime env injection is opt-in, and there is a dedicated repository hygiene check before sharing or publishing your workspace.
 - **Write-path recovery is tighter**: same-session snapshots now use file locks, transient SQLite lock conflicts get a small bounded retry, and background index jobs share the same write gate as foreground writes.
@@ -867,7 +871,7 @@ Full guides:
 
 > This section keeps the **user-facing summary tables** from the current benchmark suite.
 >
-> For methodology, caveats, and reproduction commands, see [EVALUATION_EN.md](docs/EVALUATION_EN.md). For the same-setup old-vs-current summary used in this release note, see [release_summary_vs_old_project_2026-03-06_EN.md](docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md).
+> For methodology, caveats, and reproduction commands, see [EVALUATION_EN.md](docs/EVALUATION_EN.md). For the current `v3.7.0` release note, see [release_v3.7.0_2026-03-26_EN.md](docs/changelog/release_v3.7.0_2026-03-26_EN.md). If you also want the same-setup old-vs-current summary, see [release_summary_vs_old_project_2026-03-06_EN.md](docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md).
 >
 > The numbers below are a release summary, not a guarantee for every hardware or provider setup.
 
@@ -914,7 +918,7 @@ Source: `profile_ab_metrics.json` · Sample size = 100
 
 > ⚠️ The A/B/C/D numbers above are mainly here to help you understand the **profile differences** in the current benchmark set.
 >
-> If you want to see the **same-setup old-vs-current comparison** used in this release note, go straight to:
+> If you also want to see the **same-setup old-vs-current comparison** that complements the current release note, go straight to:
 >
 > - `docs/EVALUATION_EN.md` → `3.5 Old vs Current Version (Same-Metric Summary)`
 > - `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md`

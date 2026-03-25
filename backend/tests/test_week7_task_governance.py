@@ -186,6 +186,46 @@ class _QueueFullSleepCoordinator:
         }
 
 
+@pytest.mark.asyncio
+async def test_sleep_consolidation_status_does_not_block_while_enqueue_waits() -> None:
+    class _BlockingWorker:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def enqueue_sleep_consolidation(
+            self, *, reason: str = "runtime"
+        ) -> Dict[str, Any]:
+            _ = reason
+            self.started.set()
+            await self.release.wait()
+            return {
+                "queued": True,
+                "job_id": "idx-blocking-sleep",
+                "reason": "runtime",
+            }
+
+    worker = _BlockingWorker()
+    coordinator = SleepTimeConsolidator()
+
+    schedule_task = asyncio.create_task(
+        coordinator.schedule(
+            index_worker=worker,
+            force=True,
+            reason="runtime.ensure_started",
+        )
+    )
+    await worker.started.wait()
+
+    status = await asyncio.wait_for(coordinator.status(), timeout=0.1)
+    worker.release.set()
+    result = await schedule_task
+
+    assert status["enabled"] is True
+    assert result["job_id"] == "idx-blocking-sleep"
+    assert result["scheduled"] is True
+
+
 async def _wait_for_job_status(
     worker: IndexTaskWorker,
     *,
@@ -200,6 +240,27 @@ async def _wait_for_job_status(
             return payload["job"]
         await asyncio.sleep(0.01)
     raise AssertionError(f"job {job_id} did not reach status '{expected_status}' in time")
+
+
+def test_index_worker_loop_switch_keeps_pending_job_visible() -> None:
+    worker = IndexTaskWorker()
+
+    async def _enqueue() -> Dict[str, Any]:
+        return await worker.enqueue_rebuild(reason="loop-switch")
+
+    enqueue_result = asyncio.run(_enqueue())
+
+    async def _wait() -> Dict[str, Any]:
+        return await worker.wait_for_job(
+            job_id=enqueue_result["job_id"],
+            timeout_seconds=0.05,
+        )
+
+    wait_result = asyncio.run(_wait())
+
+    assert wait_result["ok"] is True
+    assert wait_result["job"]["job_id"] == enqueue_result["job_id"]
+    assert wait_result["job"]["status"] == "queued"
 
 
 @pytest.mark.asyncio
