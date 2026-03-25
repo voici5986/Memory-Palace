@@ -45,6 +45,44 @@ def _load_skill_eval_module():
     return module
 
 
+def test_read_repo_database_url_parses_quoted_value_and_trailing_comment(
+    monkeypatch, tmp_path: Path
+) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+    project_root = tmp_path / "Memory-Palace"
+    project_root.mkdir(parents=True, exist_ok=True)
+    expected_db = project_root / "quoted.db"
+    (project_root / ".env").write_text(
+        f'DATABASE_URL="sqlite+aiosqlite:///{expected_db.as_posix()}" # local db\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(evaluate_memory_palace_skill, "PROJECT_ROOT", project_root)
+
+    resolved = evaluate_memory_palace_skill._read_repo_database_url()
+
+    assert resolved == f"sqlite+aiosqlite:///{expected_db.as_posix()}"
+
+
+def test_read_repo_database_url_parses_exported_single_quoted_value(
+    monkeypatch, tmp_path: Path
+) -> None:
+    evaluate_memory_palace_skill = _load_skill_eval_module()
+    project_root = tmp_path / "Memory-Palace"
+    project_root.mkdir(parents=True, exist_ok=True)
+    expected_db = project_root / "exported.db"
+    (project_root / ".env").write_text(
+        f"export DATABASE_URL='sqlite+aiosqlite:///{expected_db.as_posix()}'\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(evaluate_memory_palace_skill, "PROJECT_ROOT", project_root)
+
+    resolved = evaluate_memory_palace_skill._read_repo_database_url()
+
+    assert resolved == f"sqlite+aiosqlite:///{expected_db.as_posix()}"
+
+
 def test_repo_local_stdio_wrapper_prefers_repo_env_before_fallback_db() -> None:
     project_root = Path(__file__).resolve().parents[2]
     wrapper_text = (
@@ -619,6 +657,7 @@ def test_smoke_gemini_live_suite_returns_partial_when_db_path_is_unavailable(
 ) -> None:
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setattr(evaluate_memory_palace_skill, "SKIP_GEMINI_LIVE", False)
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ENABLE_GEMINI_LIVE", True)
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/gemini")
     monkeypatch.setattr(
         evaluate_memory_palace_skill,
@@ -638,6 +677,7 @@ def test_smoke_gemini_live_suite_accepts_verified_create_after_timeout(
 ) -> None:
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setattr(evaluate_memory_palace_skill, "SKIP_GEMINI_LIVE", False)
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ENABLE_GEMINI_LIVE", True)
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/gemini")
     monkeypatch.setattr(
         evaluate_memory_palace_skill,
@@ -757,6 +797,7 @@ def test_smoke_gemini_live_suite_accepts_create_verified_via_update_row(
 ) -> None:
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setattr(evaluate_memory_palace_skill, "SKIP_GEMINI_LIVE", False)
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ENABLE_GEMINI_LIVE", True)
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/gemini")
     monkeypatch.setattr(
         evaluate_memory_palace_skill,
@@ -862,6 +903,7 @@ def test_smoke_gemini_live_suite_accepts_prefixed_mcp_tool_names(
 ) -> None:
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setattr(evaluate_memory_palace_skill, "SKIP_GEMINI_LIVE", False)
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ENABLE_GEMINI_LIVE", True)
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/gemini")
     monkeypatch.setattr(
         evaluate_memory_palace_skill,
@@ -976,6 +1018,7 @@ def test_smoke_gemini_live_suite_downgrades_shared_state_interference_to_partial
 ) -> None:
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setattr(evaluate_memory_palace_skill, "SKIP_GEMINI_LIVE", False)
+    monkeypatch.setattr(evaluate_memory_palace_skill, "ENABLE_GEMINI_LIVE", True)
     monkeypatch.setattr(evaluate_memory_palace_skill.shutil, "which", lambda _: "/usr/bin/gemini")
     monkeypatch.setattr(
         evaluate_memory_palace_skill,

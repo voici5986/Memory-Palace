@@ -80,6 +80,23 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     )
 
 
+def test_powershell_one_click_env_io_uses_utf8_no_bom_helpers() -> None:
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$utf8NoBom = [System.Text.UTF8Encoding]::new($false)" in ps1_text
+    assert "function Read-LinesUtf8" in ps1_text
+    assert "function Write-LinesUtf8" in ps1_text
+    assert "[System.IO.File]::ReadAllLines($FilePath, $utf8NoBom)" in ps1_text
+    assert "[System.IO.File]::WriteAllLines($FilePath, $Lines, $utf8NoBom)" in ps1_text
+    assert "$line = Read-LinesUtf8 -FilePath $FilePath | Where-Object" in ps1_text
+    assert "$lines = @(Read-LinesUtf8 -FilePath $FilePath)" in ps1_text
+    assert "Write-LinesUtf8 -FilePath $FilePath -Lines $newLines" in ps1_text
+    assert "Get-Content -Path $FilePath | Where-Object" not in ps1_text
+    assert "Set-Content -Path $FilePath -Value $newLines" not in ps1_text
+
+
 def test_profile_external_settings_gate_checks_required_model_ids() -> None:
     shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
         encoding="utf-8"

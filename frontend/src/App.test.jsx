@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor, within } from '@testing-library/react';
 
-import App, { buildRoutesKey } from './App';
+import App, { buildRoutesKey, resolveAppBasename } from './App';
 import i18n, { LOCALE_STORAGE_KEY } from './i18n';
 
 const { memoryMountCounter, setupApi } = vi.hoisted(() => ({
@@ -80,6 +80,7 @@ describe('App routing', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     window.history.pushState({}, '', '/');
   });
 
@@ -99,6 +100,24 @@ describe('App routing', () => {
 
     expect(await screen.findByText('memory-page')).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe('/memory'));
+  });
+
+  it('derives a router basename from a same-origin prefixed API base', () => {
+    vi.stubEnv('BASE_URL', '/');
+    vi.stubEnv('VITE_API_BASE_URL', '/memory-palace/api/');
+
+    expect(resolveAppBasename()).toBe('/memory-palace');
+  });
+
+  it('keeps redirects inside the resolved app basename', async () => {
+    vi.stubEnv('BASE_URL', '/');
+    vi.stubEnv('VITE_API_BASE_URL', '/memory-palace/api/');
+    window.history.pushState({}, '', '/memory-palace/');
+
+    render(<App />);
+
+    expect(await screen.findByText('memory-page')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe('/memory-palace/memory'));
   });
 
   it('stores API key through header action when runtime config is absent', async () => {

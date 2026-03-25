@@ -181,6 +181,8 @@ If you adopt the direct connection method, note one boundary first:
 - So if you only write your final direct-API settings into the repository-root `.env` and then run `bash scripts/docker_one_click.sh --profile c`, the actual startup still uses the profile template path, not necessarily the final values you just wrote.
 
 > As rechecked in the current `v3.7.0` validation, the local `profile c/d + --allow-runtime-env-injection` path now follows the intended order: generate the Docker env from the template first, defer template placeholder validation for that run, write the injected runtime values, and then still fail closed if the required external settings remain unresolved. In plain language: template placeholders no longer block local debugging before your real values land, but missing injected values are still treated as a hard stop.
+>
+> On the native Windows PowerShell path, later env rewrites in `docker_one_click.ps1` now also keep that generated Docker env file in UTF-8 without BOM, so the same file can continue to be handed to Docker Compose without a PowerShell 5.1 encoding mismatch.
 
 The minimum verification path should therefore be split into two cases:
 

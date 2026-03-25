@@ -10,7 +10,7 @@ records, and some metric JSONs are typically for development or local use only.
 > Status Note (2026-03): This page primarily keeps the public baseline tables
 > from 2026-02 to help users understand the differences between profiles; for
 > current release details, please also refer to
-> `docs/changelog/release_v3.7.0_2026-03-26_EN.md`. If you also want the
+> `docs/changelog/release_v3.7.1_2026-03-26_EN.md`. If you also want the
 > same-setup old-vs-current summary, see
 > `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md`.
 
@@ -23,7 +23,7 @@ records, and some metric JSONs are typically for development or local use only.
 | Public Summary Tables on this page | Key metrics and gate results for A/B/C/D profiles intended for users |
 | Public benchmark helpers and test cases under `backend/tests/benchmark/` | Used to understand the evaluation methodology; specific metric files are usually maintenance-phase or local review artifacts |
 | Maintenance-phase benchmark artifacts | One-off re-test logs, gate drafts, and local run results; not distributed with the user repository by default |
-| Current Release Notes | `docs/changelog/release_v3.7.0_2026-03-26_EN.md` |
+| Current Release Notes | `docs/changelog/release_v3.7.1_2026-03-26_EN.md` |
 | Release Comparison Summary | `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md` |
 
 > Data Generation Time: `2026-02-19T06:55:30+00:00` (Gate) /

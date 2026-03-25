@@ -90,6 +90,80 @@ normalize_cli_path() {
   printf '%s\n' "${raw_path//\\//}"
 }
 
+is_mangled_windows_absolute_path() {
+  local raw_path="${1:-}"
+  [[ "${raw_path}" =~ ^[A-Za-z]:[^/\\].* ]] && [[ ! "${raw_path}" =~ ^[A-Za-z]:[\\/].* ]]
+}
+
+reconstruct_mangled_windows_path() {
+  local raw_path="${1:-}"
+  local normalized="${raw_path//\\//}"
+  if [[ ! "${normalized}" =~ ^([A-Za-z]):([^/].*)$ ]]; then
+    return 1
+  fi
+
+  local drive="${BASH_REMATCH[1]}"
+  local remainder="${BASH_REMATCH[2]}"
+  local drive_root=""
+  if command -v cygpath >/dev/null 2>&1; then
+    drive_root="$(cygpath -u "${drive}:/" 2>/dev/null || true)"
+  fi
+  if [[ -z "${drive_root}" ]] && command -v wslpath >/dev/null 2>&1; then
+    drive_root="$(wslpath -u "${drive}:/" 2>/dev/null || true)"
+  fi
+  if [[ -z "${drive_root}" || ! -d "${drive_root}" ]]; then
+    return 1
+  fi
+
+  local current="${drive_root%/}"
+  local remainder_value="${remainder}"
+  local best_match=""
+  local child=""
+  local name=""
+  shopt -s nullglob dotglob
+  while [[ -n "${remainder_value}" && -d "${current}" ]]; do
+    best_match=""
+    for child in "${current}"/* "${current}"/.[!.]* "${current}"/..?*; do
+      [[ -e "${child}" ]] || continue
+      name="$(basename "${child}")"
+      if [[ "${remainder_value}" == "${name}"* ]]; then
+        if [[ -z "${best_match}" || ${#name} -gt ${#best_match} ]]; then
+          best_match="${name}"
+        fi
+      fi
+    done
+    if [[ -z "${best_match}" ]]; then
+      break
+    fi
+    current="${current}/${best_match}"
+    remainder_value="${remainder_value#${best_match}}"
+  done
+  shopt -u nullglob dotglob
+
+  if [[ -z "${remainder_value}" ]]; then
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  if [[ -d "${current}" ]]; then
+    printf '%s\n' "${current}/${remainder_value}"
+    return 0
+  fi
+  return 1
+}
+
+target_file="$(normalize_cli_path "${target_file}")"
+
+if [[ -n "${target_file_input}" ]] && is_mangled_windows_absolute_path "${target_file}"; then
+  if reconstructed_target_file="$(reconstruct_mangled_windows_path "${target_file}")"; then
+    target_file="${reconstructed_target_file}"
+  else
+    echo "Refusing mangled Windows absolute target path: ${target_file_input}" >&2
+    echo "bash received it without directory separators before apply_profile.sh could normalize it." >&2
+    echo "Re-run with C:/... or a repo-relative POSIX path instead." >&2
+    exit 2
+  fi
+fi
+
 is_windows_host_shell() {
   case "${OSTYPE:-}" in
     msys*|cygwin*|win32*)
@@ -358,6 +432,39 @@ trim_env_value() {
   printf '%s\n' "${value}"
 }
 
+read_windows_host_env_value() {
+  local key="${1:-}"
+  if [[ -z "${key}" ]]; then
+    printf '%s\n' ""
+    return 0
+  fi
+  if ! command -v cmd.exe >/dev/null 2>&1; then
+    printf '%s\n' ""
+    return 0
+  fi
+
+  local value=""
+  value="$(cmd.exe /d /c "echo %${key}%" 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
+  value="$(trim_env_value "${value}")"
+  if [[ "${value}" == "%${key}%" ]]; then
+    value=""
+  fi
+  printf '%s\n' "${value}"
+}
+
+resolve_shell_or_host_env_value() {
+  local key="${1:-}"
+  local value=""
+  if [[ -n "${key}" ]]; then
+    value="$(trim_env_value "${!key-}")"
+  fi
+  if [[ -n "${value}" ]]; then
+    printf '%s\n' "${value}"
+    return 0
+  fi
+  read_windows_host_env_value "${key}"
+}
+
 validate_database_url_placeholder() {
   local file_path="$1"
   local display_path="${2:-${file_path}}"
@@ -550,7 +657,9 @@ ensure_default_env_value "${staged_file}" "RUNTIME_AUTO_FLUSH_ENABLED" "true"
 
 dedupe_env_keys "${staged_file}"
 validate_database_url_placeholder "${staged_file}" "${target_file}"
-allow_unresolved_profile_placeholders="${MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS:-}"
+allow_unresolved_profile_placeholders="$(
+  resolve_shell_or_host_env_value "MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS"
+)"
 if [[ "${allow_unresolved_profile_placeholders}" == "1" ]]; then
   log_info "[placeholder-guard] deferred profile placeholder validation to caller"
 else

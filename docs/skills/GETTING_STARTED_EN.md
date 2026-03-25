@@ -330,8 +330,8 @@ If you do not want to overwrite the default file during parallel review or CI, s
 If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 
 This check sequentially calls multiple CLIs; if you have `claude`, `codex`, `opencode`, and `gemini` installed, it usually takes a few minutes to complete. Don't assume it's "hung" if there's no output for dozens of seconds.
-Additionally, it defaults to attempting `gemini_live`: if the current Gemini configuration can resolve a real database path, it will perform a round of `create/update/guard` verification on that database and may leave test memories like `notes://gemini_suite_*`. If you only want a normal smoke test, explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
-If that live round hits a shared real database or a neighboring Gemini live session mutates the same note first, it can also stop at `PARTIAL`; treat that as a live-host verification limit before assuming the isolated mainline skill/MCP path is broken.
+`gemini_live` is now **explicitly opt-in**: the script only attempts that real-database `create/update/guard` round when you set `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`, and it may still leave test memories like `notes://gemini_suite_*`. If you also want to force-skip it, you can keep using `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
+Even when you opt in, that live round can still stop at `PARTIAL` if it hits a shared real database or a neighboring Gemini live session mutates the same note first; treat that as a live-host verification limit before assuming the isolated mainline skill/MCP path is broken.
 If the report only shows `mcp_bindings` as failed, first rerun the unified `user-scope` install and then rerun smoke:
 
 ```bash

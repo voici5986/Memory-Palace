@@ -64,6 +64,7 @@ GEMINI_FALLBACK_MODEL = (
     or GEMINI_TEST_MODEL
 )
 SKIP_GEMINI_LIVE = os.getenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
+ENABLE_GEMINI_LIVE = os.getenv("MEMORY_PALACE_ENABLE_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
 
 
 def _read_timeout_seconds(env_name: str, default: int, *, minimum: int = 5) -> int:
@@ -90,6 +91,32 @@ PROMPT = (
 )
 
 
+def _normalize_dotenv_value(raw_value: str) -> str:
+    text = str(raw_value or "").strip()
+    if not text:
+        return ""
+
+    chars: list[str] = []
+    active_quote: str | None = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "#" and active_quote is None:
+            break
+        if char in {'"', "'"}:
+            if active_quote is None:
+                active_quote = char
+            elif active_quote == char:
+                active_quote = None
+        chars.append(char)
+        index += 1
+
+    normalized = "".join(chars).strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        normalized = normalized[1:-1]
+    return normalized.strip()
+
+
 def _read_repo_database_url() -> str:
     env_file = PROJECT_ROOT / ".env"
     if env_file.is_file():
@@ -98,8 +125,11 @@ def _read_repo_database_url() -> str:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            if key.strip() == "DATABASE_URL":
-                normalized = value.strip()
+            normalized_key = key.strip()
+            if normalized_key.lower().startswith("export "):
+                normalized_key = normalized_key[7:].strip()
+            if normalized_key == "DATABASE_URL":
+                normalized = _normalize_dotenv_value(value)
                 if normalized:
                     return normalized
 
@@ -862,7 +892,8 @@ def _binding_block_is_missing(
 
 def check_client_mcp_bindings() -> CheckResult:
     details: list[str] = ["[workspace-local entrypoints]"]
-    failures = 0
+    workspace_failures = 0
+    user_scope_failures = 0
     partials = 0
 
     workspace_claude = REPO_ROOT / ".mcp.json"
@@ -888,7 +919,7 @@ def check_client_mcp_bindings() -> CheckResult:
     else:
         ok, status, message = True, "INFO", f"claude(workspace): 未找到配置文件（{workspace_claude}），repo-local 入口按需安装"
         partials += 1
-    failures += 0 if ok else 1
+    workspace_failures += 0 if ok else 1
     details.append(f"{status} {message}")
 
     workspace_gemini = REPO_ROOT / ".gemini" / "settings.json"
@@ -914,7 +945,7 @@ def check_client_mcp_bindings() -> CheckResult:
     else:
         ok, status, message = True, "INFO", f"gemini(project): 未找到配置文件（{workspace_gemini}），repo-local 入口按需安装"
         partials += 1
-    failures += 0 if ok else 1
+    workspace_failures += 0 if ok else 1
     details.append(f"{status} {message}")
     details.append("INFO codex(workspace): 当前仓库依赖 user-scope MCP 配置，无稳定的 repo-local config.toml 入口")
     details.append("INFO opencode(workspace): 当前仓库依赖 user-scope MCP 配置，无稳定的 repo-local opencode.json 入口")
@@ -945,7 +976,7 @@ def check_client_mcp_bindings() -> CheckResult:
     else:
         ok, status, message = True, "INFO", f"claude(user): 未找到配置文件（{claude_config}）"
         partials += 1
-    failures += 0 if ok else 1
+    user_scope_failures += 0 if ok else 1
     details.append(f"{status} {message}")
 
     codex_config = Path.home() / ".codex" / "config.toml"
@@ -969,11 +1000,12 @@ def check_client_mcp_bindings() -> CheckResult:
         except Exception as exc:
             ok, status, message = False, "FAIL", f"codex(user): 解析失败（{codex_config}）\n{exc}"
     elif tomllib is None:
-        ok, status, message = False, "FAIL", "codex(user): 当前 Python 不支持 tomllib，无法审计 config.toml"
+        ok, status, message = True, "PARTIAL", "codex(user): 当前 Python 不支持 tomllib，跳过 config.toml 审计"
+        partials += 1
     else:
         ok, status, message = True, "INFO", f"codex(user): 未找到配置文件（{codex_config}）"
         partials += 1
-    failures += 0 if ok else 1
+    user_scope_failures += 0 if ok else 1
     details.append(f"{status} {message}")
 
     gemini_config = Path.home() / ".gemini" / "settings.json"
@@ -998,7 +1030,7 @@ def check_client_mcp_bindings() -> CheckResult:
     else:
         ok, status, message = True, "INFO", f"gemini(user): 未找到配置文件（{gemini_config}）"
         partials += 1
-    failures += 0 if ok else 1
+    user_scope_failures += 0 if ok else 1
     details.append(f"{status} {message}")
 
     opencode_config = Path.home() / ".config" / "opencode" / "opencode.json"
@@ -1022,13 +1054,19 @@ def check_client_mcp_bindings() -> CheckResult:
     else:
         ok, status, message = True, "INFO", f"opencode(user): 未找到配置文件（{opencode_config}）"
         partials += 1
-    failures += 0 if ok else 1
+    user_scope_failures += 0 if ok else 1
     details.append(f"{status} {message}")
 
-    if failures:
+    if workspace_failures:
         return CheckResult(
             "FAIL",
-            "至少一个 repo-local 或 user-scope 的 memory-palace MCP 入口未指向当前项目",
+            "至少一个 repo-local 的 memory-palace MCP 入口未指向当前项目",
+            "\n\n".join(details),
+        )
+    if user_scope_failures:
+        return CheckResult(
+            "PARTIAL",
+            "至少一个 user-scope 的 memory-palace MCP 入口未指向当前项目；repo-local 入口未发现错误绑定",
             "\n\n".join(details),
         )
     if partials:
@@ -1201,6 +1239,8 @@ def smoke_gemini() -> CheckResult:
         return CheckResult("PASS", "Gemini smoke 通过", model_note + merged)
     lowered = merged.lower()
     if discovered:
+        if any(token in lowered for token in ["authentication page", "do you want to continue", "login", "sign in"]):
+            return CheckResult("PARTIAL", "Gemini 发现 skill 成功，但当前机器缺少 CLI 登录/鉴权", merged or discovery_text)
         if any(token in lowered for token in ["429", "resource_exhausted", "model_capacity_exhausted", "econnreset", "tls", "socket disconnected"]):
             return CheckResult("PARTIAL", "Gemini 发现 skill 成功，但执行受上游容量或网络波动影响", merged or discovery_text)
         return CheckResult("FAIL", "Gemini 已发现 skill，但调用结果不符合预期", merged or discovery_text)
@@ -1210,6 +1250,11 @@ def smoke_gemini() -> CheckResult:
 def smoke_gemini_live_suite() -> CheckResult:
     if SKIP_GEMINI_LIVE:
         return CheckResult("SKIP", "Gemini live suite 被环境变量跳过")
+    if not ENABLE_GEMINI_LIVE:
+        return CheckResult(
+            "SKIP",
+            "Gemini live suite 默认关闭；如需执行请设置 MEMORY_PALACE_ENABLE_GEMINI_LIVE=1",
+        )
     if _cli_executable("gemini") is None:
         return CheckResult("SKIP", "gemini CLI 未安装")
     db_path = _extract_gemini_memory_palace_db_path()

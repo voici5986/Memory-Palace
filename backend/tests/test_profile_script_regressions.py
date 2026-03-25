@@ -386,6 +386,47 @@ def test_apply_profile_shell_can_defer_profile_placeholder_validation_to_caller(
     assert values.get("ROUTER_API_BASE") == "http://host.docker.internal:PORT/v1"
 
 
+def test_apply_profile_shell_accepts_windows_absolute_target_path_on_native_windows(
+    tmp_path: Path,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("native Windows host required")
+
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "RETRIEVAL_EMBEDDING_BACKEND=hash",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    target_path = project_root / "generated" / "profile-b.env"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    result = _run_command(
+        ["bash", "scripts/apply_profile.sh", "docker", "b", str(target_path.resolve())],
+        cwd=project_root,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert target_path.is_file()
+    generated = dotenv_values(target_path)
+    assert generated.get("SEARCH_DEFAULT_MODE") == "hybrid"
+    assert generated.get("RETRIEVAL_EMBEDDING_BACKEND") == "hash"
+    assert generated.get("MCP_API_KEY")
+
+
 def test_apply_profile_shell_docker_profile_syncs_compose_wal_overrides(
     tmp_path: Path,
 ) -> None:
@@ -552,6 +593,57 @@ def test_apply_profile_shell_backs_up_existing_target_before_overwrite(
     assert backup_path.read_text(encoding="utf-8") == "EXISTING_KEY=keep-me\n"
     assert "EXISTING_KEY=keep-me" not in existing_target.read_text(encoding="utf-8")
     assert "[backup] Existing .env.generated saved to .env.generated.bak" in result.stdout
+
+
+def test_apply_profile_shell_normalizes_windows_absolute_target_path(
+    tmp_path: Path,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows absolute target path normalization is only relevant on native Windows hosts")
+
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "apply_profile.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "apply_profile.sh", script_path)
+
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+    profile_path = project_root / "deploy" / "profiles" / "docker" / "profile-b.env"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db",
+                "SEARCH_DEFAULT_MODE=hybrid",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    expected_target = project_root / ".tmp" / "windows-target.generated.env"
+    expected_target.parent.mkdir(parents=True, exist_ok=True)
+
+    result = _run_command(
+        [
+            "bash",
+            "scripts/apply_profile.sh",
+            "docker",
+            "b",
+            expected_target.resolve().as_posix(),
+        ],
+        cwd=project_root,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert expected_target.is_file()
+    assert dotenv_values(expected_target).get("SEARCH_DEFAULT_MODE") == "hybrid"
+    stray_matches = [
+        item.name
+        for item in project_root.iterdir()
+        if item.is_file()
+        and item != expected_target
+        and "windows-target.generated.env" in item.name
+    ]
+    assert stray_matches == []
 
 
 def test_apply_profile_shell_rejects_concurrent_writer_for_same_target(
@@ -1183,8 +1275,11 @@ def test_repo_local_stdio_wrapper_merges_local_hosts_into_no_proxy(
     no_proxy_upper, no_proxy_lower, http_proxy = result.stdout.split("|")
     assert http_proxy == "http://proxy.example:8080"
     assert no_proxy_upper == no_proxy_lower
-    assert "upper.internal" in no_proxy_upper.split(",")
-    assert "corp.internal" in no_proxy_upper.split(",")
+    visible_entries = set(no_proxy_upper.split(","))
+    # Native Windows -> WSL/Git Bash launches can collapse NO_PROXY/no_proxy into one
+    # inherited key before the shell script runs, so keep the contract at "preserve at
+    # least one inherited no_proxy value" plus the repo-local hosts we append.
+    assert {"upper.internal", "corp.internal"} & visible_entries
     assert "localhost" in no_proxy_upper.split(",")
     assert "127.0.0.1" in no_proxy_upper.split(",")
     assert "::1" in no_proxy_upper.split(",")

@@ -333,8 +333,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
 如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
-另外，这条脚本默认还会尝试 `gemini_live`。如果 Gemini 当前配置能反推出真实数据库路径，它会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
-如果这轮 live 验证撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
+`gemini_live` 现在改为**显式可选**：只有当你设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会对 Gemini 当前配置反推出的真实数据库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；如果只想做普通 smoke，保持默认即可，或显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+即使手动开启这轮 live 验证，只要撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
 如果当前机器没有 `Antigravity` 宿主 runtime，这一项更适合看成“目标宿主上的手工补验还没做”，不要先把它理解成仓库主链路失败。
 如果你看到的失败项只剩 `mcp_bindings`，先不要急着怀疑仓库本身。更常见的情况是你机器上的 user-scope MCP 条目还没同步到当前 checkout；优先先重跑：
 

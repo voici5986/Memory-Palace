@@ -1652,12 +1652,17 @@ class IndexTaskWorker:
                 }
 
             if status == "queued":
+                removed_from_queue = self._remove_queued_job_from_queue_locked(
+                    normalized_job_id
+                )
                 job["status"] = "cancelled"
                 job["cancel_reason"] = cancel_reason
                 job["cancelled_at"] = cancellation_ts
                 job["finished_at"] = cancellation_ts
+                job["removed_from_queue"] = removed_from_queue
                 self._cancelled_total += 1
-                self._cancelled_job_ids.add(normalized_job_id)
+                if not removed_from_queue:
+                    self._cancelled_job_ids.add(normalized_job_id)
                 if job.get("task_type") == "rebuild_index":
                     if self._rebuild_job_id == normalized_job_id:
                         self._rebuild_job_id = None
@@ -1702,6 +1707,25 @@ class IndexTaskWorker:
 
         execution_task.cancel()
         return {"ok": True, "cancel_requested": True, "job": snapshot}
+
+    def _remove_queued_job_from_queue_locked(self, job_id: str) -> bool:
+        assert self._queue is not None
+        retained: List[IndexTask] = []
+        removed = False
+        while True:
+            try:
+                task = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if task.job_id == job_id and not removed:
+                removed = True
+                self._queue.task_done()
+                continue
+            retained.append(task)
+            self._queue.task_done()
+        for task in retained:
+            self._queue.put_nowait(task)
+        return removed
 
     async def status(self) -> Dict[str, Any]:
         self._ensure_loop_state()

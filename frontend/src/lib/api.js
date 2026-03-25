@@ -159,10 +159,18 @@ const readRuntimeMaintenanceAuth = () => {
   return { key: authState.key, mode: authState.mode };
 };
 
+const normalizeApiBasePath = (apiBasePath = '') => {
+  if (typeof apiBasePath !== 'string') return '';
+  const trimmed = apiBasePath.trim();
+  if (!trimmed) return '';
+  if (trimmed === '/') return '/';
+  return trimmed.replace(/\/+$/, '');
+};
+
 const normalizeProtectedPath = (pathname, apiBasePath = '') => {
   if (!pathname || typeof pathname !== 'string') return '';
-  const normalizedBasePath = typeof apiBasePath === 'string' ? apiBasePath.trim() : '';
-  if (normalizedBasePath) {
+  const normalizedBasePath = normalizeApiBasePath(apiBasePath);
+  if (normalizedBasePath && normalizedBasePath !== '/') {
     if (pathname === normalizedBasePath) return '/';
     if (pathname.startsWith(`${normalizedBasePath}/`)) {
       return pathname.slice(normalizedBasePath.length) || '/';

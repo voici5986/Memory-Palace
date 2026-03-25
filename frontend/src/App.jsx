@@ -23,6 +23,47 @@ import {
 } from './lib/browserProfile';
 import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
 
+const ABSOLUTE_URL_PATTERN = /^([a-z][a-z\d+\-.]*:)?\/\//i;
+
+const normalizeBasePath = (value) => {
+  if (typeof value !== 'string') return '/';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '/') return '/';
+  const normalized = trimmed.replace(/^\/+/, '/').replace(/\/+$/, '');
+  return normalized || '/';
+};
+
+const resolveSameOriginPath = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return '/';
+  const trimmed = value.trim();
+  if (typeof window === 'undefined' || !ABSOLUTE_URL_PATTERN.test(trimmed)) {
+    return normalizeBasePath(trimmed);
+  }
+  try {
+    const url = new URL(trimmed, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return '/';
+    }
+    return normalizeBasePath(url.pathname);
+  } catch (_error) {
+    return normalizeBasePath(trimmed);
+  }
+};
+
+export function resolveAppBasename() {
+  const viteBase = normalizeBasePath(import.meta.env?.BASE_URL);
+  if (viteBase !== '/') {
+    return viteBase;
+  }
+
+  const apiBasePath = resolveSameOriginPath(import.meta.env?.VITE_API_BASE_URL);
+  if (apiBasePath !== '/' && apiBasePath.endsWith('/api')) {
+    return apiBasePath.slice(0, -'/api'.length) || '/';
+  }
+
+  return undefined;
+}
+
 function NavItem({ to, icon: Icon, label }) {
   return (
     <NavLink
@@ -204,6 +245,7 @@ function App() {
   const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
   const [authRevision, setAuthRevision] = React.useState(0);
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const routerBasename = resolveAppBasename();
 
   const readDismissedState = React.useCallback(() => {
     if (typeof window === 'undefined') return null;
@@ -276,7 +318,10 @@ function App() {
   }, [persistDismissedState]);
 
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter
+      basename={routerBasename}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <Layout
         authState={authState}
         authRevision={authRevision}

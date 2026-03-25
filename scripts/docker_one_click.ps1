@@ -14,12 +14,37 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:PortProbeFallbackWarned = $false
 $script:FrontendPortLockDir = $null
 $script:BackendPortLockDir = $null
 $script:DeploymentLockDir = $null
 $script:GeneratedDockerEnvFile = $null
 $script:PreviousDockerEnvFile = $null
+
+function Read-LinesUtf8 {
+    param([string]$FilePath)
+
+    if (-not (Test-Path $FilePath)) {
+        return @()
+    }
+
+    return [System.IO.File]::ReadAllLines($FilePath, $utf8NoBom)
+}
+
+function Write-LinesUtf8 {
+    param(
+        [string]$FilePath,
+        [string[]]$Lines
+    )
+
+    $parent = Split-Path -Parent $FilePath
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    [System.IO.File]::WriteAllLines($FilePath, $Lines, $utf8NoBom)
+}
 
 function Get-DefaultComposeProjectName {
     $projectSlug = (Split-Path -Leaf $projectRoot).ToLower() -replace '[^a-z0-9]+', '-'
@@ -250,7 +275,7 @@ function Get-EnvValueFromFile {
     }
 
     $escaped = [regex]::Escape($Key)
-    $line = Get-Content -Path $FilePath | Where-Object { $_ -match "^${escaped}=" } | Select-Object -Last 1
+    $line = Read-LinesUtf8 -FilePath $FilePath | Where-Object { $_ -match "^${escaped}=" } | Select-Object -Last 1
     if (-not $line) {
         return ''
     }
@@ -264,10 +289,7 @@ function Set-EnvValueInFile {
         [string]$Value
     )
 
-    $lines = @()
-    if (Test-Path $FilePath) {
-        $lines = Get-Content -Path $FilePath
-    }
+    $lines = @(Read-LinesUtf8 -FilePath $FilePath)
 
     $escaped = [regex]::Escape($Key)
     $updated = $false
@@ -287,7 +309,7 @@ function Set-EnvValueInFile {
         $newLines += "$Key=$Value"
     }
 
-    Set-Content -Path $FilePath -Value $newLines
+    Write-LinesUtf8 -FilePath $FilePath -Lines $newLines
 }
 
 function Apply-ProfileRuntimeOverrides {

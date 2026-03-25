@@ -327,8 +327,8 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 如果当前机器根本没有 `Antigravity` 宿主 runtime，就把 `antigravity` 那一项看成“目标宿主上的手工补验还没做”，不要先理解成仓库主链路失败。
 
 这条检查会串行调用多种 CLI；如果你的机器上已经装了 `claude`、`codex`、`opencode`、`gemini`，完整跑完通常要几分钟，不建议看到几十秒无输出就直接当成“挂死”。
-另外它默认还会尝试 `gemini_live`：如果当前 Gemini 配置能反推出真实数据库路径，会对那份库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；只想做普通 smoke 时，可显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
-如果这轮 live 验证撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
+`gemini_live` 现在改为**显式可选**：只有当你主动设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会对 Gemini 当前配置解析出的真实数据库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；如果你还想强制跳过，也可以继续设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+即使手动开启这轮 live 验证，只要撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
 如果这条报告里只有 `mcp_bindings` 失败，优先先重跑一次统一的 `user-scope` 安装，再重新执行 smoke：
 
 ```bash

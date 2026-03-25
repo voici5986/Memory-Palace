@@ -182,6 +182,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 - 所以如果你只是把最终直连配置写进仓库根的 `.env`，然后直接执行 `bash scripts/docker_one_click.sh --profile c`，实际启动的仍然是档位模板，不一定是你刚写进去的那套最终值
 
 > 按当前 `v3.7.0` 的复验结果，本地 `profile c/d + --allow-runtime-env-injection` 现在已经会按预期顺序工作：先基于模板生成 Docker env，再把这次运行的模板占位符校验延后，写入运行时注入值，最后仍然对缺失的外部配置做 fail-closed 检查。用人话说就是：模板里的占位符不再会在你真实值落盘前提前挡住本地联调，但缺失必填注入值时仍然会直接拦下。
+>
+> 对 native Windows PowerShell 路径来说，`docker_one_click.ps1` 后续对这个 Docker env 文件做运行时覆写时，现在也会继续保持 UTF-8 without BOM，不会再把同一个文件改写成 PowerShell 5.1 默认的 UTF-16 形态再交给 Docker Compose。
 
 最小验证建议分成两种：
 

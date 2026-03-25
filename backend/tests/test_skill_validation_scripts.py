@@ -101,6 +101,48 @@ def test_check_sync_script_uses_current_python_interpreter(monkeypatch):
     assert recorded["cmd"][1:] == ["-B", str(module.PROJECT_ROOT / "scripts" / "sync_memory_palace_skill.py"), "--check"]
 
 
+def test_smoke_gemini_live_suite_is_opt_in_by_default(monkeypatch):
+    monkeypatch.delenv("MEMORY_PALACE_ENABLE_GEMINI_LIVE", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", raising=False)
+    module = _load_skill_eval_module()
+
+    result = module.smoke_gemini_live_suite()
+
+    assert result.status == "SKIP"
+    assert "MEMORY_PALACE_ENABLE_GEMINI_LIVE=1" in result.summary
+
+
+def test_smoke_gemini_treats_auth_prompt_as_partial(monkeypatch):
+    module = _load_skill_eval_module()
+
+    monkeypatch.setattr(module, "_cli_executable", lambda name: "gemini" if name == "gemini" else None)
+    monkeypatch.setattr(
+        module,
+        "run_command_capture",
+        lambda *_args, **_kwargs: module.CommandCapture(
+            returncode=0,
+            stdout="memory-palace [Enabled]",
+            stderr="",
+            timed_out=False,
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "run_gemini_prompt",
+        lambda *_args, **_kwargs: module.CommandCapture(
+            returncode=1,
+            stdout="",
+            stderr="Opening authentication page in your browser. Do you want to continue? [Y/n]:",
+            timed_out=False,
+        ),
+    )
+
+    result = module.smoke_gemini()
+
+    assert result.status == "PARTIAL"
+    assert "登录/鉴权" in result.summary
+
+
 def test_install_skill_reports_invalid_json_with_actionable_message(tmp_path):
     module = _load_install_skill_module()
     broken = tmp_path / "settings.json"

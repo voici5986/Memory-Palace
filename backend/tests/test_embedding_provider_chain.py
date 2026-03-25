@@ -346,6 +346,54 @@ async def test_embedding_provider_chain_cache_is_scoped_to_actual_provider_ident
 
 
 @pytest.mark.asyncio
+async def test_embedding_provider_chain_probes_fallback_cache_for_multi_provider_fail_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "router")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_CHAIN_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_FAIL_OPEN", "true")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_CANDIDATES", "router,api")
+    monkeypatch.setenv("EMBEDDING_PROVIDER_FALLBACK", "hash")
+    monkeypatch.setenv("ROUTER_API_BASE", "https://router.example/v1")
+    monkeypatch.setenv("ROUTER_API_KEY", "router-key")
+    monkeypatch.setenv("ROUTER_EMBEDDING_MODEL", "router-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "https://api.example/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "api-key")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "api-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "provider-chain-fail-open-cache.db"))
+    await client.init_db()
+
+    calls: list[tuple[str, str]] = []
+
+    async def _fake_post_json(base: str, endpoint: str, payload, api_key: str = "", error_sink=None):
+        _ = endpoint, api_key, error_sink
+        model = str(payload.get("model") or "")
+        calls.append((base, model))
+        if "router" in base:
+            return None
+        return {"data": [{"embedding": [0.3] * 16}]}
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+
+    async with client.session() as session:
+        first = await client._get_embedding(session, "provider chain multi cache sample")
+        await session.flush()
+        second = await client._get_embedding(session, "provider chain multi cache sample")
+    await client.close()
+
+    assert first == [0.3] * 16
+    assert second == [0.3] * 16
+    assert calls == [
+        ("https://router.example/v1", "router-model"),
+        ("https://api.example/v1", "api-model"),
+        ("https://router.example/v1", "router-model"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_single_provider_remote_recovery_does_not_reuse_hash_fallback_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

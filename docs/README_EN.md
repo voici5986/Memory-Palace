@@ -37,7 +37,7 @@
 | [GHCR_QUICKSTART_EN.md](GHCR_QUICKSTART_EN.md) | Shortest user path for GHCR prebuilt images |
 | [GHCR_ACCEPTANCE_CHECKLIST_EN.md](GHCR_ACCEPTANCE_CHECKLIST_EN.md) | Minimal post-pull user acceptance checklist for GHCR images |
 | [skills/SKILLS_QUICKSTART_EN.md](skills/SKILLS_QUICKSTART_EN.md) | Understand in one page how the CLI-client skill path is triggered, how MCP is configured, and how acceptance is verified |
-| [changelog/release_v3.7.0_2026-03-26_EN.md](changelog/release_v3.7.0_2026-03-26_EN.md) | Actual fixes, verification scope, and conservative boundaries for `v3.7.0` |
+| [changelog/release_v3.7.1_2026-03-26_EN.md](changelog/release_v3.7.1_2026-03-26_EN.md) | Actual fixes, verification scope, and conservative boundaries for `v3.7.1` |
 | [changelog/dashboard_i18n_2026-03-09_EN.md](changelog/dashboard_i18n_2026-03-09_EN.md) | Summary of the dashboard's default English setting, Chinese/English switching, screenshots, and verification |
 | [changelog/ghcr_release_2026-03-11_EN.md](changelog/ghcr_release_2026-03-11_EN.md) | GHCR prebuilt image release notes and scope boundaries |
 

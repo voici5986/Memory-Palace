@@ -490,6 +490,49 @@ async def test_index_job_retry_requeues_cancelled_reindex_job(
 
 
 @pytest.mark.asyncio
+async def test_index_job_cancelled_queued_job_frees_queue_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNTIME_INDEX_QUEUE_MAXSIZE", "8")
+    worker = IndexTaskWorker()
+    client = _FakeIndexClient()
+    await worker.ensure_started(lambda: client)
+
+    jobs = [
+        await worker.enqueue_reindex_memory(
+            memory_id=1,
+            reason="week7-queue-fill-1",
+        )
+    ]
+    await _wait_for_job_status(worker, job_id=jobs[0]["job_id"], expected_status="running")
+
+    for memory_id in range(2, 10):
+        jobs.append(
+            await worker.enqueue_reindex_memory(
+                memory_id=memory_id,
+                reason=f"week7-queue-fill-{memory_id}",
+            )
+        )
+
+    await _wait_for_job_status(worker, job_id=jobs[-1]["job_id"], expected_status="queued")
+
+    cancel_result = await worker.cancel_job(job_id=jobs[-1]["job_id"], reason="make-room")
+    status_after_cancel = await worker.status()
+    replacement = await worker.enqueue_reindex_memory(
+        memory_id=99,
+        reason="week7-replacement",
+    )
+
+    await worker.shutdown()
+
+    assert cancel_result["ok"] is True
+    assert cancel_result.get("cancelled") is True
+    assert cancel_result["job"].get("removed_from_queue") is True
+    assert status_after_cancel["queue_depth"] == 7
+    assert replacement["queued"] is True
+
+
+@pytest.mark.asyncio
 async def test_index_job_retry_returns_404_when_job_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

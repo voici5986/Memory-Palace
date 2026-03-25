@@ -722,7 +722,11 @@ class SnapshotManager:
         for session_id in os.listdir(self.snapshot_dir):
             if session_id.startswith("."):
                 continue
-            session_dir = self._get_session_dir(session_id)
+            try:
+                session_dir = self._get_session_dir(session_id)
+            except ValueError:
+                logger.warning("Skipping invalid snapshot session directory: %s", session_id)
+                continue
             if os.path.isdir(session_dir):
                 manifest = self._load_manifest(session_id)
                 if not self._manifest_visible_for_current_database(session_id, manifest):

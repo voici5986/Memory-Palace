@@ -180,6 +180,39 @@ normalize_env_value() {
   printf '%s' "${value}"
 }
 
+read_windows_host_env_value() {
+  local key="${1:-}"
+  if [[ -z "${key}" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  if ! command -v cmd.exe >/dev/null 2>&1; then
+    printf '%s' ""
+    return 0
+  fi
+
+  local value=""
+  value="$(cmd.exe /d /c "echo %${key}%" 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
+  value="$(normalize_env_value "${value}")"
+  if [[ "${value}" == "%${key}%" ]]; then
+    value=""
+  fi
+  printf '%s' "${value}"
+}
+
+resolve_passthrough_env_value() {
+  local key="${1:-}"
+  local value=""
+  if [[ -n "${key}" ]]; then
+    value="$(normalize_env_value "${!key-}")"
+  fi
+  if [[ -n "${value}" ]]; then
+    printf '%s' "${value}"
+    return 0
+  fi
+  read_windows_host_env_value "${key}"
+}
+
 _LOCAL_NO_PROXY_HOSTS=("localhost" "127.0.0.1" "::1" "host.docker.internal")
 
 csv_list_contains_case_insensitive() {
@@ -233,7 +266,9 @@ ensure_local_no_proxy_defaults() {
   local existing_value
   local existing_entry
   local existing_entries=()
-  for existing_value in "${NO_PROXY:-}" "${no_proxy:-}"; do
+  for existing_value in \
+    "$(resolve_passthrough_env_value "NO_PROXY")" \
+    "$(resolve_passthrough_env_value "no_proxy")"; do
     existing_value="$(normalize_env_value "${existing_value}")"
     if [[ -z "${existing_value}" ]]; then
       continue
@@ -251,6 +286,17 @@ ensure_local_no_proxy_defaults() {
 
   export NO_PROXY="${merged}"
   export no_proxy="${merged}"
+}
+
+restore_proxy_env_values() {
+  local proxy_var
+  local proxy_value
+  for proxy_var in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do
+    proxy_value="$(resolve_passthrough_env_value "${proxy_var}")"
+    if [[ -n "${proxy_value}" ]]; then
+      export "${proxy_var}=${proxy_value}"
+    fi
+  done
 }
 
 format_sqlite_absolute_url() {
@@ -347,6 +393,7 @@ fi
 # Keep common host-local model endpoints off inherited shell proxies so repo-local
 # stdio remains compatible with local Ollama / OpenAI-compatible services.
 ensure_local_no_proxy_defaults
+restore_proxy_env_values
 
 export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 export PYTHONUTF8="${PYTHONUTF8:-1}"

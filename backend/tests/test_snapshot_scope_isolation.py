@@ -557,3 +557,18 @@ def test_snapshot_manager_list_sessions_does_not_delete_unrecoverable_corrupted_
 
     assert manager.list_sessions() == []
     assert session_dir.exists() is True
+
+
+def test_snapshot_manager_list_sessions_skips_invalid_legacy_session_names(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    snapshot_dir = tmp_path / "snapshots"
+    invalid_session_dir = snapshot_dir / "legacy session"
+    invalid_session_dir.mkdir(parents=True, exist_ok=True)
+    (invalid_session_dir / "manifest.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(tmp_path / "active.db"))
+    manager = SnapshotManager(str(snapshot_dir))
+
+    assert manager.list_sessions() == []

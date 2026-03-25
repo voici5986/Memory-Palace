@@ -23,18 +23,25 @@ class _NoWriteClient:
     async def add_path(self, *_args, **_kwargs):  # pragma: no cover
         raise AssertionError("add_path should not be called for system:// writes")
 
+    async def delete_path_atomically(self, *_args, **_kwargs):  # pragma: no cover
+        raise AssertionError("delete_path_atomically should not be called for system:// writes")
+
 
 class _DeleteMemoryClient:
-    async def get_memory_by_path(self, _path: str, _domain: str):
-        return {
+    async def delete_path_atomically(self, _path: str, _domain: str, *, before_delete=None):
+        memory = {
             "id": 9,
             "content": "stale memory",
             "priority": 2,
             "created_at": "2026-01-01T00:00:00Z",
         }
-
-    async def remove_path(self, _path: str, _domain: str):
-        return {"ok": True}
+        if before_delete is not None:
+            await before_delete(dict(memory))
+        return {
+            "removed_uri": "core://agent/stale",
+            "memory_id": memory["id"],
+            "deleted_memory": memory,
+        }
 
 
 class _TimeoutWriteClient:
@@ -277,6 +284,24 @@ async def test_add_alias_rejects_system_domain_writes(monkeypatch) -> None:
     raw = await mcp_server.add_alias("core://alias-node", "system://boot")
     assert raw.startswith("Error:")
     assert "read-only" in raw
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("priority", [True, False, 0.0, 1.9])
+async def test_add_alias_rejects_non_integer_priority_before_db_write(
+    monkeypatch,
+    priority,
+) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.add_alias(
+        "core://alias-node",
+        "core://target-node",
+        priority=priority,
+    )
+
+    assert raw.startswith("Error:")
+    assert "priority must be an integer >= 0" in raw
 
 
 def test_get_session_id_stays_stable_within_shared_context_session(

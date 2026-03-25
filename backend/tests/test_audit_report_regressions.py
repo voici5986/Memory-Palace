@@ -25,11 +25,17 @@ class _RacyDeleteClient:
             "created_at": "2026-03-20T11:59:00Z",
         }
 
-    async def get_memory_by_path(self, _path: str, _domain: str):
-        return dict(self.current) if self.current is not None else None
-
-    async def remove_path(self, _path: str, _domain: str):
-        return {"ok": True}
+    async def delete_path_atomically(self, _path: str, _domain: str, *, before_delete=None):
+        memory = dict(self.current) if self.current is not None else None
+        if memory is None:
+            raise ValueError("Path 'core://agent/stale' not found")
+        if before_delete is not None:
+            await before_delete(dict(memory))
+        return {
+            "removed_uri": "core://agent/stale",
+            "memory_id": memory["id"],
+            "deleted_memory": memory,
+        }
 
 
 @pytest.mark.asyncio
@@ -116,7 +122,7 @@ def test_review_validator_rejects_zero_width_session_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rollback_to_memory_restores_metadata_for_all_alias_paths(
+async def test_rollback_to_memory_restores_primary_metadata_without_overwriting_alias_metadata(
     tmp_path: Path,
 ) -> None:
     client = SQLiteClient(_sqlite_url(tmp_path / "rollback-alias-metadata.db"))
@@ -168,6 +174,6 @@ async def test_rollback_to_memory_restores_metadata_for_all_alias_paths(
     assert primary["id"] == original["id"]
     assert alias["id"] == original["id"]
     assert primary["priority"] == 1
-    assert alias["priority"] == 1
+    assert alias["priority"] == 9
     assert primary["disclosure"] == "old disclosure"
-    assert alias["disclosure"] == "old disclosure"
+    assert alias["disclosure"] == "alias disclosure"

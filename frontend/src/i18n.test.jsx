@@ -114,6 +114,40 @@ describe('i18n bootstrap', () => {
     }
   });
 
+  it('falls back to english for non-Chinese navigator locales on fresh init', async () => {
+    const originalLanguage = window.navigator.language;
+    const originalLanguages = window.navigator.languages;
+
+    Object.defineProperty(window.navigator, 'language', {
+      configurable: true,
+      value: 'fr-FR',
+    });
+    Object.defineProperty(window.navigator, 'languages', {
+      configurable: true,
+      value: ['fr-FR', 'fr'],
+    });
+
+    try {
+      vi.resetModules();
+      const [{ default: freshI18n, LOCALE_STORAGE_KEY }] = await Promise.all([
+        import('./i18n'),
+      ]);
+
+      await waitFor(() => expect(freshI18n.resolvedLanguage).toBe('en'));
+      expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en');
+      expect(document.documentElement.lang).toBe('en');
+    } finally {
+      Object.defineProperty(window.navigator, 'language', {
+        configurable: true,
+        value: originalLanguage,
+      });
+      Object.defineProperty(window.navigator, 'languages', {
+        configurable: true,
+        value: originalLanguages,
+      });
+    }
+  });
+
   it('renders interpolated html-like values without double-escaping in React', async () => {
     vi.resetModules();
     const [{ default: freshI18n }] = await Promise.all([

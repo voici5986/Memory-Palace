@@ -21,7 +21,7 @@ import unicodedata
 import httpx
 from pathlib import Path as FilePath
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List, Tuple, Sequence, Mapping
+from typing import Optional, Dict, Any, List, Tuple, Sequence, Mapping, Callable, Awaitable
 from contextlib import asynccontextmanager
 from urllib.parse import unquote
 from filelock import AsyncFileLock
@@ -1062,18 +1062,9 @@ class SQLiteClient:
         if not self._embedding_provider_chain_enabled:
             append_candidate(primary_backend)
             return candidates
-        remote_candidates = [
-            backend
-            for backend in self._embedding_provider_candidates
-            if backend not in {"hash", "none", "off", "disabled", "false", "0"}
-        ]
-        fallback_backend = self._resolve_chain_fallback_backend()
-        if len(remote_candidates) == 1 and fallback_backend not in {"api", "router", "openai"}:
-            append_candidate(remote_candidates[0])
-            return candidates
-        if not remote_candidates:
+        append_candidate(primary_backend)
+        if not candidates:
             append_candidate("hash")
-            return candidates
         return candidates
 
     def _resolve_chain_fallback_backend(self) -> str:
@@ -2788,8 +2779,10 @@ class SQLiteClient:
         *,
         normalized: str,
         degrade_reasons: Optional[List[str]] = None,
+        try_cached_backend: Optional[Callable[[str], Awaitable[Optional[List[float]]]]] = None,
     ) -> Tuple[List[float], str]:
         attempted_backends: set[str] = set()
+        remote_failure_seen = False
         for backend in self._embedding_provider_candidates:
             backend_value = (backend or "").strip().lower()
             if not backend_value:
@@ -2798,6 +2791,11 @@ class SQLiteClient:
 
             if backend_value in {"hash", "none", "off", "disabled", "false", "0"}:
                 continue
+
+            if remote_failure_seen and try_cached_backend is not None:
+                cached_embedding = await try_cached_backend(backend_value)
+                if cached_embedding is not None:
+                    return cached_embedding, backend_value
 
             embedding = await self._fetch_remote_embedding_for_backend(
                 backend=backend_value,
@@ -2809,6 +2807,7 @@ class SQLiteClient:
             self._append_degrade_reason(
                 degrade_reasons, f"embedding_provider_failed:{backend_value}"
             )
+            remote_failure_seen = True
             if not self._embedding_provider_fail_open:
                 break
 
@@ -3027,9 +3026,20 @@ class SQLiteClient:
         embedding: Optional[List[float]] = None
         actual_backend = (self._embedding_backend or "hash").strip().lower() or "hash"
         if self._embedding_provider_chain_enabled:
+            async def _try_cached_backend(backend: str) -> Optional[List[float]]:
+                backend_cache_key = self._build_embedding_cache_key(
+                    backend=backend,
+                    text_hash=text_hash,
+                )
+                _cache_row, cached_backend_embedding = await _load_cached_embedding(
+                    backend_cache_key
+                )
+                return cached_backend_embedding
+
             embedding, actual_backend = await self._get_embedding_via_provider_chain(
                 normalized=normalized,
                 degrade_reasons=degrade_reasons,
+                try_cached_backend=_try_cached_backend,
             )
         else:
             backend_value = (self._embedding_backend or "hash").strip().lower()
@@ -4596,7 +4606,8 @@ class SQLiteClient:
                     path_updates["priority"] = restore_priority
                 await session.execute(
                     update(Path)
-                    .where(Path.memory_id == target_memory_id)
+                    .where(Path.domain == domain)
+                    .where(Path.path == path)
                     .values(**path_updates)
                 )
 
@@ -4866,6 +4877,92 @@ class SQLiteClient:
             await session.delete(path_obj)
 
             return {"removed_uri": f"{domain}://{path}", "memory_id": memory_id}
+
+    async def delete_path_atomically(
+        self,
+        path: str,
+        domain: str = "core",
+        *,
+        before_delete: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Delete a path after acquiring a SQLite write transaction up front.
+
+        This keeps the "read current occupant -> validate children -> delete path"
+        sequence inside one database write transaction so another process sharing
+        the same SQLite file cannot swap the path occupant between those steps.
+        """
+        async with self.session() as session:
+            await session.execute(text("BEGIN IMMEDIATE"))
+            result = await session.execute(
+                select(Memory, Path)
+                .join(Path, Memory.id == Path.memory_id)
+                .where(Path.domain == domain)
+                .where(Path.path == path)
+                .where(Memory.deprecated == False)
+            )
+            row = result.first()
+            if not row:
+                raise ValueError(f"Path '{domain}://{path}' not found")
+
+            memory, path_obj = row
+
+            safe_path = (
+                path.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            child_prefix = f"{safe_path}/"
+            child_result = await session.execute(
+                select(func.count())
+                .select_from(Path)
+                .where(Path.domain == domain)
+                .where(Path.path.like(f"{child_prefix}%", escape="\\"))
+            )
+            child_count = child_result.scalar()
+
+            if child_count > 0:
+                sample_result = await session.execute(
+                    select(Path.path)
+                    .where(Path.domain == domain)
+                    .where(Path.path.like(f"{child_prefix}%", escape="\\"))
+                    .order_by(Path.path)
+                    .limit(5)
+                )
+                sample_paths = [
+                    f"{domain}://{row[0]}" for row in sample_result.all()
+                ]
+                listing = ", ".join(sample_paths)
+                suffix = f" (and {child_count - 5} more)" if child_count > 5 else ""
+                raise ValueError(
+                    f"Cannot delete '{domain}://{path}': "
+                    f"it still has {child_count} child path(s). "
+                    f"Delete children first: {listing}{suffix}"
+                )
+
+            deleted_memory = {
+                "id": memory.id,
+                "content": memory.content,
+                "priority": path_obj.priority,
+                "disclosure": path_obj.disclosure,
+                "deprecated": memory.deprecated,
+                "created_at": memory.created_at.isoformat()
+                if memory.created_at
+                else None,
+                "domain": path_obj.domain,
+                "path": path_obj.path,
+            }
+            if before_delete is not None:
+                await before_delete(dict(deleted_memory))
+
+            memory_id = path_obj.memory_id
+            await session.delete(path_obj)
+
+            return {
+                "removed_uri": f"{domain}://{path}",
+                "memory_id": memory_id,
+                "deleted_memory": deleted_memory,
+            }
 
     async def restore_path(
         self,

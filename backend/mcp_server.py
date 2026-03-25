@@ -530,7 +530,7 @@ async def _snapshot_path_create(
     )
 
 
-async def _snapshot_path_delete(uri: str) -> bool:
+async def _snapshot_path_delete(uri: str, *, memory: Optional[Dict[str, Any]] = None) -> bool:
     """
     Record that a path is being deleted (for rollback = re-create).
 
@@ -563,8 +563,9 @@ async def _snapshot_path_delete(uri: str) -> bool:
 
     # Capture current state before deletion
     domain, path = parse_uri(uri)
-    client = get_sqlite_client()
-    memory = await client.get_memory_by_path(path, domain)
+    if memory is None:
+        client = get_sqlite_client()
+        memory = await client.get_memory_by_path(path, domain)
 
     if not memory:
         return False
@@ -4218,24 +4219,16 @@ async def delete_memory(uri: str) -> str:
         )
 
         async def _write_task():
-            memory = await client.get_memory_by_path(path, domain)
-            if not memory:
-                return _tool_response(
-                    ok=False,
-                    message=f"Error: Memory at '{full_uri}' not found.",
-                    deleted=False,
-                    uri=full_uri,
-                )
-            await _snapshot_path_delete(full_uri)
-            remove_result = await client.remove_path(path, domain)
-            return {
-                "remove_result": remove_result,
-                "deleted_memory": memory,
-            }
+            async def _snapshot_before_delete(memory: Dict[str, Any]) -> None:
+                await _snapshot_path_delete(full_uri, memory=memory)
+
+            return await client.delete_path_atomically(
+                path,
+                domain,
+                before_delete=_snapshot_before_delete,
+            )
 
         remove_result = await _run_write_lane("delete_memory", _write_task)
-        if isinstance(remove_result, str):
-            return remove_result
         deleted_memory = (
             remove_result.get("deleted_memory", {})
             if isinstance(remove_result, dict)
@@ -4314,6 +4307,7 @@ async def add_alias(
     try:
         new_domain, new_path = parse_uri(new_uri)
         target_domain, target_path = parse_uri(target_uri)
+        priority = _validate_priority_value(priority)
         _validate_writable_domain(
             new_domain,
             operation="add_alias",

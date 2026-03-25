@@ -110,6 +110,8 @@ bash scripts/apply_profile.sh macos b
 
 > The `apply_profile` script copies `.env.example` to a generated env file and then appends the override configuration for the corresponding Profile. Local shell runs (`macos` / `linux`) and native Windows still default to `.env`; if you run the `docker` variant without an explicit target, it now defaults to `.env.docker`. On the shell path, `apply_profile.sh` also automatically rewrites the common local `DATABASE_URL` placeholder, including `/Users/...` and `/home/...`. On macOS / Linux, `apply_profile.sh` now also creates a `*.bak` backup before overwriting an existing target file. If another `apply_profile.sh` process is already writing the same target file, the later one exits early and asks you to retry instead of letting the two runs overwrite each other; its staged/update temp files are also created next to the target file, reducing cross-filesystem replace surprises.
 >
+> If you invoke `bash scripts/apply_profile.sh ... <Windows-absolute-target>` from PowerShell / WSL / Git Bash on a native Windows checkout, the shell path now normalizes that target more safely as well; the common separator-mangled form no longer drops a broken filename into the repository root.
+>
 > Native Windows PowerShell now follows the same operator-facing behavior on its own path. `apply_profile.ps1` also creates a `*.bak` backup before overwrite, rejects a second `apply_profile.ps1` writer for the same target file, and writes the staged temp file next to the target file instead of assuming a shared temp directory.
 >
 > `apply_profile.sh/.ps1` currently deduplicates environment keys after generation; however, running it again in the target environment is still recommended for native Windows / native `pwsh`.
