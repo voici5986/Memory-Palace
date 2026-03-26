@@ -25,7 +25,7 @@
 
 ## 3. 这次实际复验了什么
 
-- 后端测试：`809 passed, 8 skipped`
+- 后端测试：`797 passed, 20 skipped`
 - 前端测试：`119 passed`
 - 前端生产构建：通过
 - live stdio MCP e2e：通过
@@ -33,22 +33,26 @@
 - repo-local skill evaluator：
   - 当前机器上已重新确认退出码为成功
   - user-scope 漂移、Gemini 登录、宿主 runtime 缺失这类环境问题，会保留为 `PARTIAL` / `MANUAL`，不再把整份 repo 校验误报成失败
+- native macOS 本机验证：
+  - repo-local backend + standalone SSE + Vite 路径已复验
+  - Memory / Review / Maintenance / Observability 四页已在真实浏览器中复验
+  - 中英文切换与持久化已复验
+  - repo-local browse 创建、Review 交互、Observability 诊断搜索已复验
 - native Windows 本机 smoke：
-  - repo-local backend + SSE + Vite 路径已复验
-  - Dashboard 已在真实浏览器中打开
-  - setup assistant 的语言切换已复验
-- Windows 宿主上的 Docker Profile B smoke：
-  - 手动 `docker compose` 路径已复验
-  - `docker_one_click.sh --profile b` 路径已复验
+  - 已在发布标签上完成后续真实宿主复验
+  - 宿主机启动与主功能路径已复验
+- Docker 路径验证：
+  - Profile B one-click 路径已复验
+  - Profile C / D 的 runtime injection 检索链路已结合真实 embedding / reranker / LLM 服务复验
   - 已复验 Dashboard 根页面、backend health、带鉴权的 browse、以及 `/sse` 可达
 
 ---
 
 ## 4. 这次没有写成“已完全通过”的内容
 
-- 这次**没有**把 native macOS 主机端到端终验写成已完成。macOS 仍建议在目标环境补验。
 - `Gemini CLI`、`Cursor`、`agent`、`Antigravity` 这类项，仍可能因为本机登录状态、宿主 runtime 是否安装、或目标机器可用性而落在 `PARTIAL` / `MANUAL`。
 - 这次也没有声称“所有 A/B/C/D 启动组合都在所有环境里从头重跑过”。公开口径只覆盖上面已经列出的实际复验项。
+- 第三方 provider 的可用性仍依赖目标环境本身的网络可达性，以及 embedding / reranker / LLM 服务配置。
 
 ---
 
@@ -63,5 +67,4 @@
 
 如果你要对外写发布摘要，建议保持保守口径：
 
-> `v3.7.1` 收紧了本地 delete-path 原子性，保住了 alias 自身的 rollback metadata，修稳了 Windows 运维脚本边界，并重新复验了当前机器上的主后端/前端链路；native macOS 和宿主侧 skill 环境仍然继续保留明确边界说明。
-
+> `v3.7.1` 收紧了本地 delete-path 原子性，保住了 alias 自身的 rollback metadata，修稳了 Windows 运维脚本边界，并完成了原生 macOS / Windows 宿主上的主链路复验；宿主侧 skill 环境与第三方 provider 可用性仍继续保留明确边界说明。

@@ -49,7 +49,7 @@ check than a false repo failure.
 
 ## 3. What Was Re-verified For This Release
 
-- Backend test suite: `809 passed, 8 skipped`
+- Backend test suite: `797 passed, 20 skipped`
 - Frontend test suite: `119 passed`
 - Frontend production build: passed
 - Live stdio MCP e2e: passed
@@ -59,13 +59,19 @@ check than a false repo failure.
   - environment-sensitive items such as user-scope drift, Gemini login, or
     missing host runtimes remain `PARTIAL` / `MANUAL` instead of turning the
     whole repo check into a false failure
+- Native macOS local validation:
+  - repo-local backend + standalone SSE + Vite path rechecked
+  - Memory / Review / Maintenance / Observability pages rechecked in a real browser
+  - English/Chinese toggle and persistence rechecked
+  - repo-local browse create flow, Review integration flow, and Observability
+    diagnostic search rechecked
 - Native Windows local smoke:
-  - repo-local backend + SSE + Vite path rechecked
-  - Dashboard opened in a real browser
-  - setup-assistant language toggle rechecked
-- Windows-host Docker Profile B smoke:
-  - manual `docker compose` path rechecked
-  - `docker_one_click.sh --profile b` path rechecked
+  - follow-up real-host validation confirmed on the released tag
+  - host-side startup and the main functional path were rechecked
+- Docker validation:
+  - Profile B one-click path rechecked
+  - Profile C / D runtime-injection retrieval paths rechecked against real
+    embedding / reranker / LLM services
   - Dashboard root, backend health, authenticated browse, and `/sse` were
     reachable on the verified paths
 
@@ -73,14 +79,14 @@ check than a false repo failure.
 
 ## 4. What This Release Still Does Not Claim
 
-- Native macOS host end-to-end verification was **not** re-run in this release
-  note. macOS should still be rechecked in the target environment.
 - `Gemini CLI`, `Cursor`, `agent`, or `Antigravity` items can still be
   `PARTIAL` / `MANUAL` depending on local login state, installed host runtimes,
   or target-machine availability.
 - This release note does not claim that every A/B/C/D startup combination was
   re-run from scratch in every environment. The concrete rechecks listed above
   are the only ones claimed.
+- Third-party provider availability still depends on the target environment,
+  network reachability, and the configured embedding / reranker / LLM services.
 
 ---
 
@@ -98,6 +104,6 @@ If you are writing a release summary for others, keep the wording conservative:
 
 > `v3.7.1` tightens local delete-path atomicity, preserves alias-specific
 > rollback metadata, hardens Windows operator script boundaries, re-verifies
-> the main backend/frontend paths on the current machine, and keeps explicit
-> caveats for native macOS and host-specific skill environments.
-
+> the main backend/frontend paths on real macOS and Windows hosts, and keeps
+> explicit caveats for host-specific skill environments and third-party
+> provider availability.
