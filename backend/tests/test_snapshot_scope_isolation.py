@@ -251,7 +251,7 @@ def test_snapshot_manager_windows_pid_check_uses_win32_api(
         def get_last_error():
             return 0
 
-    monkeypatch.setattr(snapshot_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(snapshot_module, "_is_windows_host", lambda: True)
     monkeypatch.setattr(
         snapshot_module,
         "_get_ctypes_module",
@@ -316,7 +316,6 @@ def test_write_json_atomic_retries_retryable_windows_replace_failures(
             raise PermissionError("sharing violation")
         original_replace(src, dst)
 
-    monkeypatch.setattr(snapshot_module.os, "name", "nt", raising=False)
     monkeypatch.setattr(snapshot_module.os, "replace", _flaky_replace)
 
     snapshot_module._write_json_atomic(

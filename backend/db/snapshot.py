@@ -56,6 +56,10 @@ def _get_ctypes_module():
     return ctypes
 
 
+def _is_windows_host() -> bool:
+    return os.name == "nt"
+
+
 def _resolve_current_database_scope() -> Dict[str, str]:
     """
     Build a stable scope identifier for the current database target.
@@ -266,7 +270,7 @@ class SnapshotManager:
     def _pid_is_alive(pid: int) -> bool:
         if pid <= 0:
             return False
-        if os.name == "nt":
+        if _is_windows_host():
             ctypes = _get_ctypes_module()
             process_query_limited_information = 0x1000
             error_access_denied = 5
