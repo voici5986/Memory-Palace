@@ -149,6 +149,7 @@ The following are the most commonly used configuration items in `.env` (for more
 | `SEARCH_DEFAULT_MODE` | Search mode: `keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | Embedding backend: `none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding model name | `your-embedding-model-id` |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding vector dimension (must match the provider's real output) | `<provider-vector-dim>` |
 | `RETRIEVAL_RERANKER_ENABLED` | Whether to enable Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API address | Empty |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API key | Empty |
@@ -164,7 +165,9 @@ The following are the most commonly used configuration items in `.env` (for more
 
 > Profile B uses local hash Embedding by default and does not enable Reranker; it remains the **default starting profile**.
 >
-> If you have prepared model services, **it is highly recommended to upgrade to Profile C as soon as possible**: it requires you to fill in the Embedding / Reranker chain in `.env`; if you also want to enable LLM-assisted write guard / gist / intent routing, continue filling in `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optional `INTENT_LLM_*`. See [DEPLOYMENT_PROFILES_EN.md](DEPLOYMENT_PROFILES_EN.md) for details.
+> If you have model services ready and you explicitly want higher-quality deep retrieval, then move to `Profile C/D`: it requires you to fill in the Embedding / Reranker chain in `.env`; if you also want to enable LLM-assisted write guard / gist / intent routing, continue filling in `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optional `INTENT_LLM_*`. See [DEPLOYMENT_PROFILES_EN.md](DEPLOYMENT_PROFILES_EN.md) for details.
+>
+> One important boundary: this is not a seamless hot-switch. B uses local hash vectors by default, while C/D depend on the real embedding dimension you configure. Once you change embedding backend / model / dimension, the old index may no longer be reusable as-is. The safer path is: back up first, check with `index_status()`, and if the runtime reports a dimension mismatch, run `rebuild_index(wait=true)` or validate against a fresh database.
 >
 > The table above shows template example values from `.env.example`; if certain retrieval environment variables are completely missing at runtime, the backend will use its own fallback values (e.g., `hash` / `hash-v1` / `64`).
 >
@@ -255,7 +258,7 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 > If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key in the assistant. If you only want the Dashboard to authenticate first, prefer the browser-only save path.
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
 
-> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
+> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets only fill a suggested group of fields. They do not prove that your router is reachable, that the embedding dimension is correct, or that any old index has already been migrated. If your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging; if you just changed embedding backend / model / dimension, remember to restart the backend and reindex when needed.
 
 > The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
@@ -486,7 +489,7 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If you only want to override that model locally for one run, set `MEMORY_PALACE_GEMINI_TEST_MODEL`; if you also need a separate fallback model, add `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is now reported as `PARTIAL` instead of stalling the whole run.
+The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves. If you only want to override the Gemini smoke model locally for one run, set `MEMORY_PALACE_GEMINI_TEST_MODEL`; if you also need a separate fallback model, add `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is now reported as `PARTIAL` instead of stalling the whole run.
 If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first.
 If you just cloned the GitHub repository, it is normal if you don't see these two files yet; they are local artifacts generated after running the scripts.
 

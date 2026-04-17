@@ -24,13 +24,13 @@
 
 ## 1. 三步上手
 
-1. **选择档位**：根据你的硬件选择 `A`、`B`、`C` 或 `D`（不确定就先选 **B** 跑通；要长期用、且模型服务已就绪时优先上 **C**）
+1. **选择档位**：根据你的硬件选择 `A`、`B`、`C` 或 `D`（不确定就先选 **B** 跑通；如果你已经有稳定模型服务且明确需要更强语义检索，再考虑上 **C/D**）
 2. **生成配置**：运行 `apply_profile` 脚本生成 `.env` 文件
 3. **启动服务**：使用 Docker 一键部署 **或** 手动启动后端 + 前端
 
 > `deploy/profiles/*/profile-*.env` 是模板输入，不是建议你直接复制提交或直接运行的最终 `.env`。面向用户的稳定路径仍然是先跑 `apply_profile.sh/.ps1`，再按实际环境微调生成结果。
 
-> **💡 建议口径**：**Profile B 仍是默认起步档位**，因为它零外部依赖；但只要你已经准备好模型服务，**Profile C 是强烈推荐档位**。升级到 C 前，请确认你会在 `.env` 的相应位置填写 embedding / reranker；如果还要启用 LLM 辅助能力，再继续填写对应的 LLM 配置。
+> **💡 建议口径**：**Profile B 仍是默认起步档位**，因为它零外部依赖；`Profile C/D` 更适合作为“模型服务已经就绪后的深检索档位”，不是无感热切换。升级前，请先确认 embedding / reranker 可达、向量维度配置正确；如果当前库里已经写过旧向量，再用 `index_status()` 检查，必要时执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 
 ---
 
@@ -40,16 +40,16 @@
 |:---:|---|---|---|---|
 | **A** | `keyword` | 关闭（`none`） | ❌ 关闭 | 最低配要求，纯关键词检索，快速验证 |
 | **B** | `hybrid` | 本地哈希（`hash`） | ❌ 关闭 | **默认起步档位**，单机开发，无需额外服务 |
-| **C** | `hybrid` | API 调用（`router`） | ✅ 开启 | **强烈推荐档位**，本地部署 embedding/reranker 模型服务 |
-| **D** | `hybrid` | API 调用（`router`） | ✅ 开启 | 使用远程 API 服务，无需本地 GPU |
+| **C** | `hybrid` | API 调用（`router`） | ✅ 开启 | 模型服务已就绪后的深检索档位，本地部署 embedding/reranker 模型服务 |
+| **D** | `hybrid` | API 调用（`router`） | ✅ 开启 | 质量优先的远程 API 档位，无需本地 GPU |
 
 **关键区别**：
 
 - **A → B**：从纯关键词升级为混合检索，使用内置哈希向量（不依赖任何外部服务）
-- **B → C/D**：接入真实的 embedding + reranker 模型，获得最佳语义检索效果
+- **B → C/D**：接入真实的 embedding + reranker 模型后，有机会获得更强的语义检索；如果旧索引仍是另一套 embedding backend / model / dim 写出来的，运行时会先降级并要求重建索引
 - **C vs D**：算法路径一致；默认模板中主要差异为模型服务地址（本地 vs 远程），并且默认 `RETRIEVAL_RERANKER_WEIGHT` 也不同（C=`0.30`，D=`0.35`）
 
-> **口径说明（避免与评测文档混淆）**：部署模板里的 C 默认开启 reranker；`docs/EVALUATION.md` 的“真实 A/B/C/D 运行”里，`profile_c` 作为对照组会关闭 reranker（`profile_d` 才开启），用于观测增益。
+> **口径说明（避免与评测文档混淆）**：部署模板里的 C 默认开启 reranker；`docs/EVALUATION.md` 的“真实 A/B/C/D 运行”里，`profile_c` 作为对照组会关闭 reranker（`profile_d` 才开启），用于观测增益。这是当前 helper / smoke 的评测边界，不等于产品里存在一个“可智能热切换”的正式运行语义。
 >
 > **补充说明**：C/D 模板默认走 `router` 路线；如果你的部署不使用统一 router，也可以直接配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 连接 OpenAI-compatible 服务。
 >
@@ -97,14 +97,14 @@ RUNTIME_INDEX_WORKER_ENABLED=true     # 开启异步索引
 RUNTIME_INDEX_DEFER_ON_WRITE=true
 ```
 
-### Profile C/D —— 混合检索 + 真实模型（推荐目标；C 为强烈推荐）
+### Profile C/D —— 混合检索 + 真实模型（深检索档位）
 
 C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatible API；默认模板中 D 的 reranker 权重更高（`0.35`）。
 
 > **先说结论**：
 > - **Profile B**：默认起步，先保证你今天就能跑起来
-> - **Profile C**：强烈推荐，只要你已经有可用的模型服务
-> - **Profile D**：远程 API / 客户环境
+> - **Profile C**：模型服务已就绪后的深检索档位
+> - **Profile D**：质量优先的远程 API 档位
 >
 > **升级到 Profile C 前最少要准备什么**：
 > - Embedding：`RETRIEVAL_EMBEDDING_*`
@@ -116,7 +116,9 @@ C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatibl
 > - **Profile D**：在 Profile C 的基础上再把 Reranker 链路配通
 > - `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*` 不是检索 smoke 的硬前提
 >
-> 当前仓库附带的 real-profile helper 也是按这个边界定义的：`Profile C = API embedding`，`Profile D = API embedding + reranker`。本地小样本 smoke 也已经按这条边界重新核对过。
+> 当前仓库附带的 real-profile helper 也是按这个边界定义的：`Profile C = API embedding`，`Profile D = API embedding + reranker`。本地小样本 smoke 也已经按这条边界重新核对过。这是 helper / smoke 的工作定义，不表示你可以对同一批旧向量“智能切档”。
+>
+> **再强调一次**：Profile B 默认是 64 维 hash 向量；Profile C/D 则取决于你实际配置的外部 embedding 维度。只要 backend / model / dim 变了，就要把“旧索引可能需要重建”当成前置条件，而不是当成故障后的附加排障动作。
 
 **Profile C**（本地模型服务）——适合有 GPU 或使用 Ollama/vLLM 等本地推理：
 
@@ -132,7 +134,7 @@ ROUTER_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
-RETRIEVAL_EMBEDDING_DIM=4096
+RETRIEVAL_EMBEDDING_DIM=<provider-vector-dim>
 
 # Reranker 配置
 RETRIEVAL_RERANKER_ENABLED=true
@@ -158,7 +160,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 > 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求。如果最终返回的真实维度还是和你的配置不一致，运行时现在会立刻拒绝这条向量并走 fallback / degrade，不会再静默写入一条错维度索引。
 >
-> 如果你本地用的是 Ollama 这类 OpenAI-compatible 路径，也优先走 `/v1/embeddings`；只有在模型本身确实返回 1024 维向量时，再显式设置 `dimensions=1024`。
+> 如果你本地用的是 Ollama 这类 OpenAI-compatible 路径，也优先走 `/v1/embeddings`；只有在模型本身确实返回某个固定维度时，再把 `RETRIEVAL_EMBEDDING_DIM` 填成那个真实值，不要照抄别处的 `1024` 或 `4096` 示例。
+>
+> 如果你已经用另一套维度写过索引，再把 `.env` 切到这里的直连配置，当前运行时不会帮你自动迁移旧向量。更稳的顺序是：先备份，再 `index_status()`，出现维度不一致告警就 `rebuild_index(wait=true)`，或者直接换一份新库验证。
 
 **Profile D**（远程 API 服务）——无需本地 GPU，使用云端模型：
 

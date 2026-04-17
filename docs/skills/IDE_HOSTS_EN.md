@@ -21,6 +21,18 @@ So in `Memory-Palace`, the primary IDE-host path is no longer hidden `SKILL.md` 
 2. an MCP config snippet
 3. an optional host-specific compatibility layer
 
+## Retrieval Tier Recommendation (2026-04 Public Verification)
+
+- The default interaction tier for IDE hosts is still `Profile B`, because it
+  fits low-latency editor recall better.
+- `Profile C` / `Profile D` are available only as explicit deep-retrieval
+  tiers and should not be described as default tiers.
+- This verification round did not change the IDE-host integration path: it is
+  still `AGENTS.md + MCP snippet`, not hidden-mirror direct consumption.
+- The launcher split is also unchanged:
+  - native Windows: `backend/mcp_wrapper.py`
+  - macOS / Linux: `scripts/run_memory_palace_mcp_stdio.sh`
+
 ---
 
 ## Core Positioning
@@ -174,6 +186,18 @@ The safer layered approach is:
    - `read_memory("system://boot")`
    - create one `notes://ide_smoke_*`
    - try the duplicate write path and confirm guard blocks it
+
+### Current verified boundary
+
+- The public repository only promises that the static integration chain
+  `AGENTS.md + MCP snippet + launcher` is aligned.
+- `Cursor / Windsurf / VSCode-host / Antigravity` still need one host-side
+  manual smoke each before the claim can be upgraded to "live-ready on that
+  host."
+- If a host is currently only `PARTIAL`, read it as:
+  - the host-side login / auth / runtime prerequisite is still missing, or
+  - this machine only completed static contract checks, not host-side live
+    verification yet.
 
 ---
 

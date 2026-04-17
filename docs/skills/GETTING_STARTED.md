@@ -271,7 +271,10 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍以 user-scope 注册为主
-- 最近一次验证环境里，补完 `python scripts/install_skill.py --targets codex --scope user --with-mcp --force` 之后，`mcp_bindings` 和 `Codex smoke` 都能通过
+- 当前这轮实测里，`Codex` 的 skill 发现仍然可用，但 `mcp_bindings` / smoke 仍应按 `PARTIAL` 理解：
+  - user-scope MCP 绑定已对齐当前仓库
+  - `codex exec` smoke 可能因为超时或缺少结构化输出而停在 `PARTIAL`
+  - 对外更稳的口径应写成“当前仓库已具备接线条件，但仍建议本机再做一次 user-scope 复核”
 
 ### OpenCode
 
@@ -322,7 +325,7 @@ python scripts/evaluate_memory_palace_skill.py
 docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
-如果你是刚 clone 下来的 GitHub 仓库，这个文件默认可能还不存在；先跑完命令再看，属于正常现象。它属于本地验证产物，分享前建议自己检查是否包含本机路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
+如果你是刚 clone 下来的 GitHub 仓库，这个文件默认可能还不存在；先跑完命令再看，属于正常现象。它属于本地验证产物，分享前建议自己检查是否包含本机路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
 如果当前机器根本没有 `Antigravity` 宿主 runtime，就把 `antigravity` 那一项看成“目标宿主上的手工补验还没做”，不要先理解成仓库主链路失败。
 

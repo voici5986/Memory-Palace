@@ -274,7 +274,13 @@ Conclusion:
 - The accurate statement is:
   - Skill is repo-local auto-discoverable
   - MCP still primarily relies on user-scope registration
-- In the most recent validation environment, after running `python scripts/install_skill.py --targets codex --scope user --with-mcp --force`, both `mcp_bindings` and `Codex smoke` passed
+- In the current verification round, Codex skill discovery is still usable,
+  but `mcp_bindings` / smoke should still be treated as `PARTIAL`:
+  - the user-scope MCP binding is aligned to the current repository
+  - `codex exec` smoke can still stop at `PARTIAL` because of timeout or
+    missing structured output
+  - the safer public wording is therefore "wired and reviewable on this
+    machine," not "fully passed everywhere"
 
 ### OpenCode
 
@@ -325,7 +331,7 @@ This command will generate a smoke summary locally:
 docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
-If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is reported as `PARTIAL` instead of stalling the whole run.
+If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is reported as `PARTIAL` instead of stalling the whole run.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
 If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 

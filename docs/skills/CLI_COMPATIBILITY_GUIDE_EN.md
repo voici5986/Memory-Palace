@@ -35,6 +35,20 @@ The concrete manual examples now live in:
 
 - `6.3.1 ~ 6.3.4` of `docs/GETTING_STARTED_EN.md`
 
+## Interaction Tier Recommendation (2026-04 Public Verification)
+
+- `Profile B` remains the recommended default for CLI / IDE day-to-day memory
+  recall.
+- `Profile C` / `Profile D` are now described explicitly as **deep retrieval
+  tiers**. Enable them only when you intentionally want higher recall and
+  ranking quality.
+- The launcher paths did not change in this round:
+  - Native Windows: `backend/mcp_wrapper.py`
+  - macOS / Linux / `Git Bash` / `WSL`:
+    `scripts/run_memory_palace_mcp_stdio.sh`
+- This guide keeps only public-safe conclusions. It does not write local
+  benchmark endpoints, API keys, or model IDs into the repository.
+
 ## Distinguish the Two Layers
 
 The `memory-palace` link is divided into two layers:
@@ -253,7 +267,13 @@ Conclusion:
 - The accurate statement is:
   - Skill can be auto-discovered repo-locally.
   - MCP is still recommended to be registered to the current repository via `--scope user --with-mcp`.
-- In the most recent validation environment, after `--scope user --with-mcp` was installed, both `Codex` `mcp_bindings` and `Codex smoke` passed.
+- In the current verification round, Codex skill discovery is still usable,
+  but `mcp_bindings` / smoke should still be treated as `PARTIAL`:
+  - the user-scope MCP binding is aligned to the current repository
+  - `codex exec` smoke can still stop at `PARTIAL` because of timeout or
+    missing structured output
+  - the public wording should therefore stay at "wired and reviewable on this
+    machine," not "fully passed everywhere"
 
 ### OpenCode
 
@@ -342,7 +362,13 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 If this file is temporarily missing from a newly cloned GitHub repository, it is normal; it is a local verification summary generated after running.
-If you plan to forward it to others, read the content yourself first; these local reports might include paths on your machine, client configuration paths, or other environment traces. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is reported as `PARTIAL` instead of stalling the whole run.
+If you plan to forward it to others, read the content yourself first; these
+local reports might include paths on your machine, client configuration paths,
+or other environment traces. `evaluate_memory_palace_skill.py` now returns a
+non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` /
+`MANUAL` do not fail the process by themselves. If `codex exec` does not emit
+structured output before the smoke timeout, the `codex` item is reported as
+`PARTIAL` instead of stalling the whole run.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
 `gemini_live` is now **explicitly opt-in**: the script only attempts that real-database `create/update/guard` round when you set `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`, and it may still leave `notes://gemini_suite_*` test memories. For a normal smoke test, keep the default or explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
 Even when you opt in, that live round can still stop at `PARTIAL` if it hits a shared real database or a neighboring Gemini live session mutates the same note first; treat that as a live-host verification limit before assuming the isolated mainline skill/MCP path is broken.

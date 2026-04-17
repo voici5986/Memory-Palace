@@ -148,6 +148,7 @@ bash scripts/apply_profile.sh macos b
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding 模型名 | `your-embedding-model-id` |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding 向量维度（必须和 provider 实际返回一致） | `<provider-vector-dim>` |
 | `RETRIEVAL_RERANKER_ENABLED` | 是否启用 Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API 地址 | 空 |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
@@ -163,7 +164,9 @@ bash scripts/apply_profile.sh macos b
 
 > B 档位默认使用本地 hash Embedding 且不启用 Reranker；它仍然是**默认起步档位**。
 >
-> 如果你已经准备好模型服务，**更推荐尽快升级到 Profile C**：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+> 如果你已经准备好模型服务，并且明确要更高质量的深检索，再考虑升级到 `Profile C/D`：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+>
+> 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
 > 上表展示的是 `.env.example` 里的模板示例值；如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
 >
@@ -254,7 +257,7 @@ VITE v7.x.x  ready in xxx ms
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
-> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
+> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障；如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
 
 > 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要你改的是 embedding / reranker / write_guard / intent 这类后端运行参数，保存后仍然需要重启 `backend` / `sse`（Docker 路径则继续建议用 profile 脚本重启容器）。
 
@@ -485,7 +488,7 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。如果你只想在本机临时换一套 Gemini smoke 模型，可设置 `MEMORY_PALACE_GEMINI_TEST_MODEL`；如果还要把 fallback 模型单独改开，再额外设置 `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
+脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果你只想在本机临时换一套 Gemini smoke 模型，可设置 `MEMORY_PALACE_GEMINI_TEST_MODEL`；如果还要把 fallback 模型单独改开，再额外设置 `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
 如果你在并行 review 或 CI 里想隔离输出，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。
 如果你是刚 clone 下来的 GitHub 仓库，暂时看不到这两份文件也正常；它们是运行脚本后才生成的本地产物。
 

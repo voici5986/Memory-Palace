@@ -24,13 +24,13 @@ This document helps you choose the appropriate Memory Palace configuration profi
 
 ## 1. Three-Step Quick Start
 
-1.  **Choose a Profile**: Select `A`, `B`, `C`, or `D` based on your hardware (choose **B** if unsure; choose **C** if you have model services ready and want long-term use).
+1.  **Choose a Profile**: Select `A`, `B`, `C`, or `D` based on your hardware (choose **B** if unsure; if you already have stable model services and explicitly want stronger semantic retrieval, then move to **C/D**).
 2.  **Generate Configuration**: Run the `apply_profile` script to generate the `.env` file.
 3.  **Start Services**: Use Docker one-click deployment **OR** manually start the backend + frontend.
 
 > `deploy/profiles/*/profile-*.env` files are template inputs, not the final `.env` files we recommend you copy, commit, or run directly. The stable user path is still: run `apply_profile.sh/.ps1` first, then fine-tune the generated result for your real environment.
 
-> **💡 Note**: **Profile B remains the default starting profile** because it has zero external dependencies. However, as long as you have model services ready, **Profile C is the strongly recommended profile**. Before upgrading to C, please ensure you fill in the embedding / reranker settings in the `.env` file; if you also want to enable LLM-assisted capabilities, continue filling in the corresponding LLM configurations.
+> **💡 Note**: **Profile B remains the default starting profile** because it has zero external dependencies. `Profile C/D` are better described as deep-retrieval profiles once your model services are actually ready, not as a seamless hot switch. Before upgrading, confirm that embedding / reranker are reachable and that the vector-dimension settings are correct. If the current database already contains old vectors, check with `index_status()` first and run `rebuild_index(wait=true)` when needed, or validate against a fresh database.
 
 ---
 
@@ -40,16 +40,16 @@ This document helps you choose the appropriate Memory Palace configuration profi
 |:---:|---|---|---|---|
 | **A** | `keyword` | Disabled (`none`) | ❌ Disabled | Minimum requirements, pure keyword search, fast verification |
 | **B** | `hybrid` | Local Hash (`hash`) | ❌ Disabled | **Default starting profile**, single-machine development, no extra services |
-| **C** | `hybrid` | API Call (`router`) | ✅ Enabled | **Strongly recommended**, local deployment of embedding/reranker model services |
-| **D** | `hybrid` | API Call (`router`) | ✅ Enabled | Uses remote API services, no local GPU required |
+| **C** | `hybrid` | API Call (`router`) | ✅ Enabled | Deep-retrieval profile once local/private embedding+rereanker services are ready |
+| **D** | `hybrid` | API Call (`router`) | ✅ Enabled | Quality-first remote API profile, no local GPU required |
 
 **Key Differences**:
 
 *   **A → B**: Upgrades from pure keyword to hybrid search using built-in hash vectors (no external dependencies).
-*   **B → C/D**: Connects to real embedding + reranker models for optimal semantic retrieval.
+*   **B → C/D**: Once connected to real embedding + reranker models, you may get much better semantic retrieval; if the existing index was written with a different embedding backend / model / dimension, the runtime degrades first and asks for reindex instead of pretending the switch already succeeded.
 *   **C vs D**: Identical algorithm paths; the main difference in the default template is the model service address (local vs remote) and the default `RETRIEVAL_RERANKER_WEIGHT` (C=`0.30`, D=`0.35`).
 
-> **Terminology Note (to avoid confusion with evaluation docs)**: In the deployment templates, C has the reranker enabled by default. In the "Real A/B/C/D Runs" section of `docs/EVALUATION_EN.md`, `profile_c` acts as a control group with the reranker disabled (`profile_d` enables it) to observe the gain.
+> **Terminology Note (to avoid confusion with evaluation docs)**: In the deployment templates, C has the reranker enabled by default. In the "Real A/B/C/D Runs" section of `docs/EVALUATION_EN.md`, `profile_c` acts as a control group with the reranker disabled (`profile_d` enables it) to observe the gain. That is the current helper / smoke boundary, not a product promise that the same old vectors can be "smart-switched" across profiles.
 >
 > **Additional Note**: C/D templates follow the `router` path by default. If your deployment doesn't use a unified router, you can also directly configure `RETRIEVAL_EMBEDDING_*`, `RETRIEVAL_RERANKER_*`, and `WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` to connect to OpenAI-compatible services.
 >
@@ -96,14 +96,14 @@ RUNTIME_INDEX_WORKER_ENABLED=true     # Enable asynchronous indexing
 RUNTIME_INDEX_DEFER_ON_WRITE=true
 ```
 
-### Profile C/D —— Hybrid Retrieval + Real Models (Recommended Goal; C is Highly Recommended)
+### Profile C/D —— Hybrid Retrieval + Real Models (Deep Retrieval Profiles)
 
 Profiles C and D use the same algorithm path, both calling OpenAI-compatible APIs via a `router`; in the default template, D has a higher reranker weight (`0.35`).
 
 > **The Bottom Line**:
 > - **Profile B**: Default start, ensures you can get up and running today.
-> - **Profile C**: Strongly recommended if you already have available model services.
-> - **Profile D**: Remote API / Customer environments.
+> - **Profile C**: Deep-retrieval profile once model services are ready.
+> - **Profile D**: Quality-first remote API profile.
 >
 > **Minimum requirements before upgrading to Profile C**:
 > - Embedding: `RETRIEVAL_EMBEDDING_*`
@@ -115,7 +115,9 @@ Profiles C and D use the same algorithm path, both calling OpenAI-compatible API
 > - **Profile D**: add the reranker path on top of Profile C
 > - `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and `INTENT_LLM_*` are not hard prerequisites for a retrieval smoke test
 >
-> The repository's real-profile helper follows the same boundary today: `Profile C = API embedding`, `Profile D = API embedding + reranker`. A local small-sample smoke run was rechecked against that same boundary as well.
+> The repository's real-profile helper follows the same boundary today: `Profile C = API embedding`, `Profile D = API embedding + reranker`. A local small-sample smoke run was rechecked against that same boundary as well. This is the helper / smoke definition, not proof that one batch of old vectors can be smart-switched across profiles.
+>
+> **One more thing to keep explicit**: Profile B defaults to 64-d hash vectors, while Profile C/D depend on the external embedding dimension you really configure. As soon as backend / model / dim changes, treat "old vectors may need reindex" as a prerequisite, not as an afterthought.
 
 **Profile C** (Local Model Services) —— Suitable for those with a GPU or using local inference like Ollama/vLLM:
 
@@ -131,7 +133,7 @@ ROUTER_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
 RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:PORT/v1
 RETRIEVAL_EMBEDDING_API_KEY=replace-with-your-key
-RETRIEVAL_EMBEDDING_DIM=4096
+RETRIEVAL_EMBEDDING_DIM=<provider-vector-dim>
 
 # Reranker Configuration
 RETRIEVAL_RERANKER_ENABLED=true
@@ -157,7 +159,9 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 > If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field. If the final response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry.
 >
-> If you are using a local OpenAI-compatible path such as Ollama, prefer `/v1/embeddings` and only set an explicit `dimensions=1024` when the model really returns 1024-dimensional vectors.
+> If you are using a local OpenAI-compatible path such as Ollama, prefer `/v1/embeddings` and only set `RETRIEVAL_EMBEDDING_DIM` to the real vector size that provider returns. Do not blindly copy someone else's `1024` or `4096` example.
+>
+> If an older index was written with another dimension and you then switch `.env` to this direct API configuration, the current runtime does not auto-migrate those old vectors. The safer order is: back up first, run `index_status()`, and if the runtime reports a dimension mismatch, run `rebuild_index(wait=true)` or move to a fresh database.
 
 **Profile D** (Remote API Services) —— No local GPU required, uses cloud models:
 

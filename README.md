@@ -360,7 +360,7 @@ docker compose -f docker-compose.ghcr.yml down --remove-orphans
 ### Option 2: Manual Local Setup (Recommended for Beginners)
 
 > **💡 Tip**: The recommended starting target in this guide is still **Profile B**, so you can boot with zero external model services.
-> For real day-to-day retrieval quality, **Profile C is the strongly recommended target profile** once you are ready to fill the embedding / reranker / LLM settings described in [Upgrading to Profile C/D](#-upgrading-to-profile-cd).
+> If you later want stronger semantic retrieval and already have stable model services, move to **Profile C** first, and treat **Profile D** as the quality-first remote option. That is not a seamless hot switch: once embedding backend / model / dimension changes, be ready to check the index and reindex when needed.
 
 #### Step 1: Clone the Repository
 
@@ -520,7 +520,7 @@ Open your browser at **<http://localhost:5173>** — you should see the Memory P
 >
 > If you set `MCP_API_KEY`, click `Set API key` to open the setup assistant, then either save the same key to the current browser session or, on a local non-Docker checkout, write it into `.env` together with the other common runtime fields. If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct loopback requests (`127.0.0.1` / `::1` / `localhost`, without forwarded headers) can load those protected requests without manually entering a key.
 >
-> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. When the frontend encounters an old Dashboard key left in `localStorage`, it still migrates it forward only once, but now only deletes the old copy when it can confirm that another tab did not replace it in the meantime. The setup assistant's `Profile C/D` presets now follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging.
+> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. When the frontend encounters an old Dashboard key left in `localStorage`, it still migrates it forward only once, but now only deletes the old copy when it can confirm that another tab did not replace it in the meantime. The setup assistant's `Profile C/D` presets now only fill a suggested group of `router + reranker` fields. They do **not** prove that your router is reachable, that the embedding dimension is correct, or that an old index has already been migrated. If your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging; if you just changed embedding backend / model / dimension, restart the backend and reindex when needed.
 >
 > If you choose **Save local `.env` settings** and also fill a Dashboard key, remember that `.env` writing and browser key storage are two separate steps. If the browser blocks local storage, the assistant now shows a save failure instead of a false success. In practice that usually means the `.env` change may already be written, but the browser-side auth is still not ready; check the top-right auth state and retry if needed.
 >
@@ -650,11 +650,13 @@ Memory Palace provides four deployment profiles to match your hardware and requi
 
 ### 🔼 Upgrading to Profile C/D
 
-**Profile C is the strongly recommended target profile**, but it is not zero-config.
+`Profile C/D` are the deeper retrieval profiles, but they are not zero-config and should not be treated as a seamless hot switch.
 
 - Keep **Profile B** as the default starting point when you want the repo to work with no extra model services.
 - Move to **Profile C** when you are ready to configure the embedding and reranker endpoints yourself.
+- Only move to **Profile D** when the higher latency is acceptable and you really want the extra quality headroom from the remote path.
 - If you also want LLM-assisted write guard / gist / intent routing, fill the matching `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optional `INTENT_LLM_*` settings in the same `.env`.
+- If the current database already contains vectors written under another embedding backend / model / dimension, do **not** assume the profile switch is already complete. Check `index_status()` and run `rebuild_index(wait=true)` when the runtime reports a dimension mismatch, or validate against a fresh database.
 
 Configure these parameters in your `.env` file. All endpoints support the **OpenAI-compatible API** format, including locally deployed Ollama or LM Studio:
 
@@ -664,7 +666,7 @@ RETRIEVAL_EMBEDDING_BACKEND=api
 RETRIEVAL_EMBEDDING_API_BASE=http://localhost:11434/v1   # e.g., Ollama
 RETRIEVAL_EMBEDDING_API_KEY=your-api-key
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
-RETRIEVAL_EMBEDDING_DIM=1024          # Match the provider's actual vector size
+RETRIEVAL_EMBEDDING_DIM=<provider-vector-dim>   # Must match the provider's actual vector size
 
 # ── Reranker Model ───────────────────────────────────────────
 RETRIEVAL_RERANKER_ENABLED=true
@@ -684,7 +686,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.25
 > - If the final embedding response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry.
 >
 > The model IDs above are placeholders only. Memory Palace does not require a specific provider or model family; use the exact embedding / reranker / chat model IDs exposed by your own OpenAI-compatible service.
-> If you are using a local OpenAI-compatible endpoint such as Ollama, prefer the `/v1/embeddings` path as well; only set an explicit `dimensions=1024` when the model really returns 1024-dimensional vectors.
+> If you are using a local OpenAI-compatible endpoint such as Ollama, prefer the `/v1/embeddings` path as well; only set `RETRIEVAL_EMBEDDING_DIM` to the real vector size that provider returns. Do not blindly copy someone else's `1024` / `4096` example.
 > For a quick local smoke test, it is usually faster to hit the real `/embeddings` and `/rerank` endpoints with the same model/key you plan to use before blaming the backend. The troubleshooting guide includes copyable `curl` examples.
 > If you use `docker_one_click.sh/.ps1` for `profile c/d`, unresolved placeholder model IDs are treated the same as placeholder endpoint/key values: the script stops before `docker compose` until you replace them with real values.
 >
@@ -861,7 +863,7 @@ The canonical skill is aligned with the current code contract:
 - when `guard_action=NOOP`, stop writing, inspect the suggested target, and only then decide whether to switch to `update_memory`
 - the trigger sample set lives at `<repo-root>/docs/skills/memory-palace/references/trigger-samples.md`
 
-If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. By default they generate local reports under `docs/skills/`; if you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`. If you only want to override that model locally for one run, set `MEMORY_PALACE_GEMINI_TEST_MODEL`; if you also need a separate fallback model, add `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`. On a clean clone, "workspace mirrors not installed yet" is now reported as `PARTIAL` instead of a hard failure. If `codex exec` starts but does not emit structured output before the smoke timeout, the `codex` item also lands as `PARTIAL` instead of stalling the whole run. If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as manual host-side follow-up rather than a repository-mainline failure.
+If you want to re-check skill smoke or the live MCP path, run `python scripts/evaluate_memory_palace_skill.py` and `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`. By default they generate local reports under `docs/skills/`; if you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves. If you only want to override the Gemini smoke model locally for one run, set `MEMORY_PALACE_GEMINI_TEST_MODEL`; if you also need a separate fallback model, add `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`. On a clean clone, "workspace mirrors not installed yet" is now reported as `PARTIAL` instead of a hard failure. If `codex exec` starts but does not emit structured output before the smoke timeout, the `codex` item also lands as `PARTIAL` instead of stalling the whole run. If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as manual host-side follow-up rather than a repository-mainline failure.
 
 The live MCP e2e script now follows the same repo-local wrapper path that users actually connect to. In the current verified path, it also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory.
 
