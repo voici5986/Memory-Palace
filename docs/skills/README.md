@@ -59,7 +59,7 @@
 它们主要用来帮你复核当前环境的接通结果，不是主入口文档。
 刚 clone 下来的 GitHub 仓库里如果暂时看不到这两份文件，属于正常现象；先运行上面的命令再看即可。
 如果你准备把它们转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径或客户端配置痕迹。
-如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把报告改写到别的本地路径。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把结果放到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制位置，优先传仓库外的绝对路径。
 
 ---
 

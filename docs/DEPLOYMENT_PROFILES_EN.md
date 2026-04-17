@@ -111,11 +111,11 @@ Profiles C and D use the same algorithm path, both calling OpenAI-compatible API
 > - If you also want to enable LLM-assisted write guard / gist / intent routing: Fill in `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and optionally `INTENT_LLM_*`.
 >
 > **If you are only doing a retrieval smoke test right now**:
-> - **Profile C**: first make the embedding path work
-> - **Profile D**: add the reranker path on top of Profile C
+> - **Profile C**: first make the embedding path work; the shipped `profile-c` template still enables the Reranker by default
+> - **Profile D**: keep the same Embedding + Reranker retrieval chain, but point it at remote endpoints with a higher default reranker weight
 > - `WRITE_GUARD_LLM_*`, `COMPACT_GIST_LLM_*`, and `INTENT_LLM_*` are not hard prerequisites for a retrieval smoke test
 >
-> The repository's real-profile helper follows the same boundary today: `Profile C = API embedding`, `Profile D = API embedding + reranker`. A local small-sample smoke run was rechecked against that same boundary as well. This is the helper / smoke definition, not proof that one batch of old vectors can be smart-switched across profiles.
+> The repository's real-profile helper and the “minimum prep” wording are only emphasizing that Embedding is the first new dependency when you move into deeper retrieval tiers; that does **not** mean the shipped `profile-c` template disables the Reranker. With the current templates, `Profile C` is still the local/private API path with the Reranker enabled by default, while `Profile D` keeps the same retrieval chain but points it at remote APIs with a higher default reranker weight. A local small-sample smoke run was rechecked against those real templates as well. This is not proof that one batch of old vectors can be smart-switched across profiles.
 >
 > **One more thing to keep explicit**: Profile B defaults to 64-d hash vectors, while Profile C/D depend on the external embedding dimension you really configure. As soon as backend / model / dim changes, treat "old vectors may need reindex" as a prerequisite, not as an afterthought.
 

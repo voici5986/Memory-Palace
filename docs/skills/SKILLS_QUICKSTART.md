@@ -134,7 +134,7 @@
 - 默认推荐先跑一遍统一的 `--scope user --with-mcp`
 - `Claude Code`、`Gemini CLI` 如果还想补当前仓库项目级入口，再额外执行 workspace 安装
 - `Codex CLI` 和 `OpenCode` 的 **skill** 已经就位
-- 最近验证环境里，补完 `--scope user --with-mcp` 之后，`Codex` 的 `mcp_bindings` 和 `Codex smoke` 都能通过
+- 最近验证环境里，补完 `--scope user --with-mcp` 之后，`Codex` 的 user-scope MCP 绑定可以对齐当前仓库，但 `mcp_bindings` / `Codex smoke` 仍应按 `PARTIAL` 理解
 - `OpenCode` 建议先手动确认一次 `mcp list`
 
 如果你接的是 IDE 宿主，请不要继续按 hidden skill mirrors 的心智往下读，直接切到：
@@ -438,7 +438,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 - `docs/skills/MCP_LIVE_E2E_REPORT.md`
 
 默认建议把它们当成你自己机器上的复核产物，不把它们当成主入口文档；这两份文件默认也被 `.gitignore` 排除，所以公开 GitHub 仓库里通常不会带上。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。
-如果你在并行 review 或 CI 里想隔离输出，可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把报告改写到别的本地路径。
+如果你在并行 review 或 CI 里想隔离输出，可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把结果放到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制位置，优先传仓库外的绝对路径。
 
 补一句体验口径：`evaluate_memory_palace_skill.py` 会串行调多个 CLI，完整跑完往往要几分钟；如果你机器上这几种客户端都装了，看到它跑一阵子没新输出，先别急着判定为卡死。当前 `codex` 这一项如果只是 `codex exec` 在 smoke 超时前没产出结构化输出，会直接记成 `PARTIAL`，而不是把整轮卡死。
 再补一句副作用口径：`gemini_live` 现在改为**显式可选**。只有当你设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会做这轮真实数据库 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；普通 smoke 保持默认即可，或显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。

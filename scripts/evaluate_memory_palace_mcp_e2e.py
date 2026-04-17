@@ -13,6 +13,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
+REPORT_OVERRIDE_ROOT = Path(tempfile.gettempdir()) / "memory-palace-reports"
 
 
 def _resolve_report_path() -> Path:
@@ -21,7 +22,12 @@ def _resolve_report_path() -> Path:
         return DEFAULT_REPORT_PATH
     path = Path(raw_value).expanduser()
     if not path.is_absolute():
-        path = PROJECT_ROOT / path
+        safe_parts = [part for part in path.parts if part not in {"", ".", ".."}]
+        path = (
+            REPORT_OVERRIDE_ROOT.joinpath(*safe_parts)
+            if safe_parts
+            else REPORT_OVERRIDE_ROOT / DEFAULT_REPORT_PATH.name
+        )
     return path
 
 

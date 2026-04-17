@@ -177,3 +177,66 @@ def test_docs_keep_wal_network_bind_mount_safety_boundary_consistent() -> None:
         assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false" in text
         assert "MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in text
         assert "手动 `docker compose up`" in text or "绕过一键脚本" in text
+
+
+def test_docs_keep_embedding_dim_codex_partial_and_profile_c_guidance_consistent() -> None:
+    zh_getting_started = (PROJECT_ROOT / "docs" / "GETTING_STARTED.md").read_text(
+        encoding="utf-8"
+    )
+    en_getting_started = (
+        PROJECT_ROOT / "docs" / "GETTING_STARTED_EN.md"
+    ).read_text(encoding="utf-8")
+    quickstart_zh = (
+        PROJECT_ROOT / "docs" / "skills" / "SKILLS_QUICKSTART.md"
+    ).read_text(encoding="utf-8")
+    quickstart_en = (
+        PROJECT_ROOT / "docs" / "skills" / "SKILLS_QUICKSTART_EN.md"
+    ).read_text(encoding="utf-8")
+    profiles_zh = (
+        PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES.md"
+    ).read_text(encoding="utf-8")
+    profiles_en = (
+        PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES_EN.md"
+    ).read_text(encoding="utf-8")
+
+    assert "默认模板值；切到 API/router 时改成 provider 实际维度" in zh_getting_started
+    assert "default template value; switch it to the provider's real dimension" in en_getting_started
+    assert "`PARTIAL`" in quickstart_zh
+    assert "`PARTIAL`" in quickstart_en
+    assert "都能通过" not in quickstart_zh
+    assert "both `mcp_bindings` and `Codex smoke` passed" not in quickstart_en
+    assert "仓库自带的 `profile-c` 模板默认仍会把 Reranker 一起打开" in profiles_zh
+    assert "the shipped `profile-c` template still enables the Reranker by default" in profiles_en
+
+
+def test_docs_keep_report_override_guidance_consistent() -> None:
+    readme_zh = (PROJECT_ROOT / "README_CN.md").read_text(encoding="utf-8")
+    readme_en = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    skill_readme_zh = (
+        PROJECT_ROOT / "docs" / "skills" / "README.md"
+    ).read_text(encoding="utf-8")
+    skill_readme_en = (
+        PROJECT_ROOT / "docs" / "skills" / "README_EN.md"
+    ).read_text(encoding="utf-8")
+    skill_getting_started_zh = (
+        PROJECT_ROOT / "docs" / "skills" / "GETTING_STARTED.md"
+    ).read_text(encoding="utf-8")
+    skill_getting_started_en = (
+        PROJECT_ROOT / "docs" / "skills" / "GETTING_STARTED_EN.md"
+    ).read_text(encoding="utf-8")
+    quickstart_zh = (
+        PROJECT_ROOT / "docs" / "skills" / "SKILLS_QUICKSTART.md"
+    ).read_text(encoding="utf-8")
+    quickstart_en = (
+        PROJECT_ROOT / "docs" / "skills" / "SKILLS_QUICKSTART_EN.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (readme_zh, skill_readme_zh, skill_getting_started_zh, quickstart_zh):
+        assert "memory-palace-reports" in text
+        assert "仓库外的绝对路径" in text
+        assert "改写到别的本地路径" not in text
+
+    for text in (readme_en, skill_readme_en, skill_getting_started_en, quickstart_en):
+        assert "memory-palace-reports" in text
+        assert "outside the repository" in text or "outside the repo" in text
+        assert "write the reports to another local path" not in text

@@ -112,11 +112,11 @@ C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatibl
 > - 如果你还想启用 LLM 辅助的 write guard / gist / intent routing：再填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`
 >
 > **如果你现在只是做检索链路 smoke**：
-> - **Profile C**：最少先把 Embedding 链路配通
-> - **Profile D**：在 Profile C 的基础上再把 Reranker 链路配通
+> - **Profile C**：最少先把 Embedding 链路配通；仓库自带的 `profile-c` 模板默认仍会把 Reranker 一起打开
+> - **Profile D**：沿用同一条 Embedding + Reranker 检索链路，但默认指向远程端点，且 reranker 权重更高
 > - `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*` 不是检索 smoke 的硬前提
 >
-> 当前仓库附带的 real-profile helper 也是按这个边界定义的：`Profile C = API embedding`，`Profile D = API embedding + reranker`。本地小样本 smoke 也已经按这条边界重新核对过。这是 helper / smoke 的工作定义，不表示你可以对同一批旧向量“智能切档”。
+> 当前仓库附带的 real-profile helper 和这里的“最少准备什么”说法，只是在强调更深检索首先新增的是 Embedding 依赖；它**不等于**仓库自带 `profile-c` 模板会默认关闭 Reranker。按当前模板，`Profile C` 仍是本地/private API 优先且默认启用 Reranker，`Profile D` 则是在同一条检索链路上切到 remote API 并给更高的默认 reranker 权重。本地小样本 smoke 也已经按这组实际模板重新核对过。这不是在说你可以对同一批旧向量“智能切档”。
 >
 > **再强调一次**：Profile B 默认是 64 维 hash 向量；Profile C/D 则取决于你实际配置的外部 embedding 维度。只要 backend / model / dim 变了，就要把“旧索引可能需要重建”当成前置条件，而不是当成故障后的附加排障动作。
 

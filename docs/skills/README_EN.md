@@ -59,7 +59,7 @@ If this is your first time looking here, it is recommended to read in this order
 They are mainly used to help you re-check the connection results in the current environment, and they are not the primary entry documents.
 If you do not temporarily see these two files in a freshly cloned GitHub repository, that is normal; run the commands above first and then check again.
 If you plan to forward them to someone else, read through the contents yourself first; this kind of local report may include paths on your machine or traces of client configuration.
-If you do not want to overwrite the default files during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first and write the reports to another local path.
+If you do not want to overwrite the default files during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use relative paths, the scripts now redirect them under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer absolute paths outside the repository.
 
 ---
 

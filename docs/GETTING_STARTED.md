@@ -148,7 +148,7 @@ bash scripts/apply_profile.sh macos b
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding 模型名 | `your-embedding-model-id` |
-| `RETRIEVAL_EMBEDDING_DIM` | Embedding 向量维度（必须和 provider 实际返回一致） | `<provider-vector-dim>` |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding 向量维度（必须和 provider 实际返回一致） | `64`（默认模板值；切到 API/router 时改成 provider 实际维度） |
 | `RETRIEVAL_RERANKER_ENABLED` | 是否启用 Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API 地址 | 空 |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
@@ -168,7 +168,7 @@ bash scripts/apply_profile.sh macos b
 >
 > 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
-> 上表展示的是 `.env.example` 里的模板示例值；如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
+> 上表展示的是 `.env.example` 里的模板示例值；其中 `RETRIEVAL_EMBEDDING_DIM` 在默认模板里仍是 `64`，只有当你切到真实 API / router provider 时，才应该把它改成 provider 实际返回的维度。如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 只作用于 Embedding。Reranker 不存在 `RETRIEVAL_RERANKER_BACKEND` 开关，优先读取 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
@@ -489,7 +489,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果你只想在本机临时换一套 Gemini smoke 模型，可设置 `MEMORY_PALACE_GEMINI_TEST_MODEL`；如果还要把 fallback 模型单独改开，再额外设置 `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
-如果你在并行 review 或 CI 里想隔离输出，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。
+如果你在并行 review 或 CI 里想隔离输出，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。这两个变量如果写相对路径，脚本现在会自动把结果放到系统临时目录下的 `memory-palace-reports/`，避免把日志类产物直接落进当前仓库；如果你想完全自己控制位置，优先传仓库外的绝对路径。
 如果你是刚 clone 下来的 GitHub 仓库，暂时看不到这两份文件也正常；它们是运行脚本后才生成的本地产物。
 
 ---

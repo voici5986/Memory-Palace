@@ -33,6 +33,7 @@ REPO_ROOT = PROJECT_ROOT
 CANONICAL_DIR = PROJECT_ROOT / "docs" / "skills" / "memory-palace"
 BACKEND_DIR = PROJECT_ROOT / "backend"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md"
+REPORT_OVERRIDE_ROOT = Path(tempfile.gettempdir()) / "memory-palace-reports"
 WRAPPER_RELATIVE = Path("scripts/run_memory_palace_mcp_stdio.sh")
 WRAPPER_ABSOLUTE = PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh"
 PYTHON_WRAPPER_RELATIVE = Path("backend/mcp_wrapper.py")
@@ -182,7 +183,12 @@ def _resolve_report_path(env_name: str, default_path: Path) -> Path:
         return default_path
     path = Path(raw_value).expanduser()
     if not path.is_absolute():
-        path = PROJECT_ROOT / path
+        safe_parts = [part for part in path.parts if part not in {"", ".", ".."}]
+        path = (
+            REPORT_OVERRIDE_ROOT.joinpath(*safe_parts)
+            if safe_parts
+            else REPORT_OVERRIDE_ROOT / default_path.name
+        )
     return path
 
 

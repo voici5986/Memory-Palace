@@ -1544,13 +1544,18 @@ def test_resolve_report_path_supports_relative_override(monkeypatch, tmp_path: P
     evaluate_memory_palace_skill = _load_skill_eval_module()
     monkeypatch.setenv("MEMORY_PALACE_SKILL_REPORT_PATH", "tmp/skill-report.md")
     monkeypatch.setattr(evaluate_memory_palace_skill, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evaluate_memory_palace_skill,
+        "REPORT_OVERRIDE_ROOT",
+        tmp_path / "tmp-root",
+    )
 
     resolved = evaluate_memory_palace_skill._resolve_report_path(
         "MEMORY_PALACE_SKILL_REPORT_PATH",
         tmp_path / "docs" / "skills" / "TRIGGER_SMOKE_REPORT.md",
     )
 
-    assert resolved == tmp_path / "tmp" / "skill-report.md"
+    assert resolved == tmp_path / "tmp-root" / "tmp" / "skill-report.md"
 
 
 def test_smoke_antigravity_accepts_agents_and_gemini_rule_hints(

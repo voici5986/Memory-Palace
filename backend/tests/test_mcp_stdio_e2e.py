@@ -43,6 +43,18 @@ def test_repo_local_stdio_command_uses_python_wrapper_on_windows(
     assert args == [str(backend_root / "mcp_wrapper.py")]
 
 
+def test_resolve_report_path_supports_relative_override_under_temp_root(
+    monkeypatch, tmp_path: Path
+) -> None:
+    harness = _load_harness()
+    monkeypatch.setenv("MEMORY_PALACE_MCP_E2E_REPORT_PATH", "tmp/custom-e2e-report.md")
+    monkeypatch.setattr(harness, "REPORT_OVERRIDE_ROOT", tmp_path / "tmp-root")
+
+    resolved = harness._resolve_report_path()
+
+    assert resolved == tmp_path / "tmp-root" / "tmp" / "custom-e2e-report.md"
+
+
 def test_python_wrapper_live_stdio_smoke() -> None:
     harness = _load_harness()
     backend_python = harness._resolve_backend_python()

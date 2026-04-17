@@ -134,7 +134,7 @@ So:
 - The default recommendation is to run one unified `--scope user --with-mcp` install first.
 - For `Claude Code` and `Gemini CLI`, add workspace install only when you also want project-level entries in the current repo.
 - The **skill** for `Codex CLI` and `OpenCode` is already in place.
-- In the recent validation environment, after `--scope user --with-mcp` was installed, both `mcp_bindings` and `Codex smoke` passed.
+- In the recent validation environment, after `--scope user --with-mcp` was installed, the user-scope MCP binding for `Codex` could be aligned to the current repo, but `mcp_bindings` / `Codex smoke` should still be treated as `PARTIAL`.
 - For `OpenCode`, it is recommended to manually confirm once with `mcp list`.
 
 If you are integrating an IDE host, do not keep reading with a hidden-mirror mental model. Jump directly to:
@@ -438,7 +438,7 @@ Both scripts will generate validation reports locally:
 - `docs/skills/MCP_LIVE_E2E_REPORT.md`
 
 It is recommended to treat these as review artifacts on your own machine rather than primary documentation; these files are excluded by `.gitignore` by default. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves, and the current default Gemini smoke model is `gemini-3-flash-preview`.
-If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first and write the reports to another local path.
+If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use relative paths, the scripts now redirect them under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer absolute paths outside the repository.
 
 A note on the experience: `evaluate_memory_palace_skill.py` runs multiple CLIs serially; it often takes a few minutes to complete. If you see no new output for a while, don't immediately assume it's stuck. The current `codex` item now falls back to `PARTIAL` when `codex exec` reaches the smoke timeout without producing structured output, so one slow Codex host CLI should not stall the whole run.
 A note on side effects: `gemini_live` is now **explicitly opt-in**. The script only attempts that real-database `create/update/guard` round when you set `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`, and it may leave test memories like `notes://gemini_suite_*`. For regular smoke tests, keep the default or explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.

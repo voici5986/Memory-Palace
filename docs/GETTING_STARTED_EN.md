@@ -149,7 +149,7 @@ The following are the most commonly used configuration items in `.env` (for more
 | `SEARCH_DEFAULT_MODE` | Search mode: `keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | Embedding backend: `none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding model name | `your-embedding-model-id` |
-| `RETRIEVAL_EMBEDDING_DIM` | Embedding vector dimension (must match the provider's real output) | `<provider-vector-dim>` |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding vector dimension (must match the provider's real output) | `64` (default template value; switch it to the provider's real dimension when using API/router) |
 | `RETRIEVAL_RERANKER_ENABLED` | Whether to enable Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API address | Empty |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API key | Empty |
@@ -169,7 +169,7 @@ The following are the most commonly used configuration items in `.env` (for more
 >
 > One important boundary: this is not a seamless hot-switch. B uses local hash vectors by default, while C/D depend on the real embedding dimension you configure. Once you change embedding backend / model / dimension, the old index may no longer be reusable as-is. The safer path is: back up first, check with `index_status()`, and if the runtime reports a dimension mismatch, run `rebuild_index(wait=true)` or validate against a fresh database.
 >
-> The table above shows template example values from `.env.example`; if certain retrieval environment variables are completely missing at runtime, the backend will use its own fallback values (e.g., `hash` / `hash-v1` / `64`).
+> The table above shows template example values from `.env.example`. In particular, `RETRIEVAL_EMBEDDING_DIM` is still `64` in the default template; only change it to the provider's real dimension after you switch to a real API / router embedding path. If certain retrieval environment variables are completely missing at runtime, the backend will use its own fallback values (e.g., `hash` / `hash-v1` / `64`).
 >
 > Configuration semantics: `RETRIEVAL_EMBEDDING_BACKEND` only affects Embedding. Reranker does not have a `RETRIEVAL_RERANKER_BACKEND` toggle; it prioritizes reading `RETRIEVAL_RERANKER_*`, falling back to `ROUTER_*` (and finally to `OPENAI_*` base/key) if missing.
 >
@@ -490,7 +490,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
 The scripts default to generating summaries in `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` and `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` respectively. These two results are mainly for local review and are not the primary instruction documents. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves. If you only want to override the Gemini smoke model locally for one run, set `MEMORY_PALACE_GEMINI_TEST_MODEL`; if you also need a separate fallback model, add `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is now reported as `PARTIAL` instead of stalling the whole run.
-If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first.
+If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When those variables use relative paths, the scripts now redirect them under the system temp directory's `memory-palace-reports/` root instead of writing back into the repository; if you want a fully controlled location, prefer an absolute path outside the repo.
 If you just cloned the GitHub repository, it is normal if you don't see these two files yet; they are local artifacts generated after running the scripts.
 
 ---

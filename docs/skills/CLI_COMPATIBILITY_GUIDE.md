@@ -344,7 +344,7 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
 如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
-如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 `gemini_live` 现在改为**显式可选**：只有当你设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会对 Gemini 当前配置反推出的真实数据库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；如果只想做普通 smoke，保持默认即可，或显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
 即使手动开启这轮 live 验证，只要撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
 如果当前机器没有 `Antigravity` 宿主 runtime，这一项更适合看成“目标宿主上的手工补验还没做”，不要先把它理解成仓库主链路失败。
@@ -369,7 +369,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
-如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`，把 e2e 报告改写到别的本地路径。
+如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 `MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
 现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper。按当前验证链路，它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。
 

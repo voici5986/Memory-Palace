@@ -332,7 +332,7 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 If you are in a newly cloned GitHub repository, this file may not exist by default; it is normal to see it after running the command. It is a local verification artifact; we suggest checking if it contains local paths, client configuration paths, or other environment traces before sharing. `evaluate_memory_palace_skill.py` now returns a non-zero exit code whenever any check is `FAIL`; `SKIP` / `PARTIAL` / `MANUAL` do not fail the process by themselves. If `codex exec` does not emit structured output before the smoke timeout, the `codex` item is reported as `PARTIAL` instead of stalling the whole run.
-If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first and write the smoke report to another local path.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_SKILL_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 If the current machine simply does not have the `Antigravity` host runtime, treat the `antigravity` item as "manual verification on the target host still pending" rather than a repository-mainline failure.
 
 This check sequentially calls multiple CLIs; if you have `claude`, `codex`, `opencode`, and `gemini` installed, it usually takes a few minutes to complete. Don't assume it's "hung" if there's no output for dozens of seconds.
@@ -366,7 +366,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 ```
 
 Similarly, this report is a local artifact that "appears after running"; it is normal that it's not in the public GitHub repository.
-If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first and write the e2e report to another local path.
+If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 It uses an isolated temporary database by default and won't touch your formal database; however, it may still write stderr, logs, or temporary directory paths into the report upon failure. Check the content yourself before forwarding it to others.
 This script now follows the same repo-local wrapper path that users actually connect to. In the current verified path, it also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory.
 
