@@ -166,11 +166,11 @@ bash scripts/apply_profile.sh macos b
 >
 > 如果你已经准备好模型服务，并且明确要更高质量的深检索，再考虑升级到 `Profile C/D`：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
-> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。
+> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。对 `Profile C/D` 来说，真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为只点了预设就把表单伪装成已经可保存。`Profile C` 预填的是本地 router 调试地址 `http://127.0.0.1:8001/v1`，它本身不是占位符；`Profile D` 预填的是远端模板地址 `https://router.example.com/v1`，保存前必须换成真实值。对直连 `api` / `openai` embedding 路径来说，本地 `.env` 保存前也必须填一个真实的正整数 `embedding_dim`。
 >
 > 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
-> 上表展示的是 `.env.example` 里的模板示例值；其中 `RETRIEVAL_EMBEDDING_DIM` 在默认模板里仍是 `64`。现在如果你通过 setup 流程切到真实远端 embedding backend，保存时也会一起写入 `RETRIEVAL_EMBEDDING_DIM`，不再继续沿用 hash 档位的旧 `64`。当前未额外指定时，远端默认按 `1024` 写入；`hash` 仍是 `64`；最终仍要以 provider 实际返回的维度为准。如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
+> 上表展示的是 `.env.example` 里的模板示例值；其中 `RETRIEVAL_EMBEDDING_DIM` 在默认模板里仍是 `64`，也就是**默认模板值；切到 API/router 时改成 provider 实际维度**。如果你走 `openai` embedding backend，也按同一条原则处理。现在如果你通过 setup 流程切到真实远端 embedding backend，保存时也会一起写入 `RETRIEVAL_EMBEDDING_DIM`，不再继续沿用 hash 档位的旧 `64`。当前未额外指定时，远端默认按 `1024` 写入；`hash` 仍是 `64`；最终仍要以 provider 实际返回的维度为准。如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
 >
 > 另外，当前代码已经支持 `openai` 作为 embedding backend；这里只是配置能力补齐，不代表前端多出一个单独的新档位。Profile B/C/D 的口径还是保持原来的分层语义。
 >
@@ -254,7 +254,7 @@ VITE v7.x.x  ready in xxx ms
 
 - `docs/DASHBOARD_GUIDE_CN.md`
 
-> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
+> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。当前状态有时会晚一点返回，但你已经自己输入过的字段不会再被后到的状态覆盖，没碰过的检索字段会继续按当前 setup 状态补齐。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
 >
 > 如果你走的是标准 Docker 代理这类 proxy-held auth 路径，服务端鉴权已经生效时，首启配置向导现在不会只因为浏览器本地没保存 key 就一上来自动弹出；右上角按钮还可能在，但这时只有你手动点进去才会进入向导。
 >
@@ -263,7 +263,7 @@ VITE v7.x.x  ready in xxx ms
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
-> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障；如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
+> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。`Profile C` 预填的 `http://127.0.0.1:8001/v1` 是允许直接保存的真实本地 router 地址；真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。现在真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为点了 C/D 预设就把表单伪装成已经可保存。对直连 `api` / `openai` embedding 路径来说，本地 `.env` 保存前也会继续要求一个真实的正整数 `embedding_dim`。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的 base/model 补齐，或者先把 reranker 关掉。如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
 >
 > 现在向导在 `hash / api / router` 之间来回切时，也会把已经隐藏掉的旧字段一起清掉；如果你切到远端 embedding backend，保存时还会一起写入 `RETRIEVAL_EMBEDDING_DIM`。这能减少“看起来已经切档，实际还带着上一档残留字段”的情况，但它不等于自动替你验证 provider 一定可达。
 >
@@ -600,7 +600,7 @@ python mcp_server.py
 >
 > 对 shell wrapper 这条路径来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 不是 UTF-8 默认环境，本地 stdio 也更不容易因为编码问题出错。
 >
-> 这条 shell wrapper 现在还会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并额外补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机同时跑 Ollama 或别的 OpenAI-compatible 服务，本地 stdio 更不容易被宿主机代理误伤。这个行为只在 shell wrapper 这条路径上自动生效，不等于所有启动方式都会自动补这一层保护。
+> 现在这两条 repo-local wrapper 都会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并额外补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机同时跑 Ollama 或别的 OpenAI-compatible 服务，本地 stdio 更不容易被宿主机代理误伤。这里说的是仓库自带的两条 repo-local wrapper，不等于所有后端启动方式都会自动补这一层保护。
 
 ### 6.2 SSE 模式
 
@@ -616,7 +616,7 @@ $env:PORT = "8010"
 python run_sse.py
 ```
 
-> `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
+> `run_sse.py` 本地默认会优先尝试监听 `127.0.0.1:8000`；如果本机的 `8000` 已被主后端占用，它会自动回退到 `127.0.0.1:8010`。如果你显式设置的是 `HOST=::1`，它会单独检查 `::1:8000`，不会因为 IPv4 的 `8000` 被占用就误回退。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。你也可以显式设置 `HOST` 和 `PORT`。只有在你真要给远程客户端接入时，才显式设置 `HOST=0.0.0.0`（或你的实际绑定地址）。SSE 模式仍受 `MCP_API_KEY` 鉴权保护。
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给本地独立调试做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >

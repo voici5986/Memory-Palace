@@ -220,6 +220,35 @@ def test_build_runtime_env_prefers_env_file_remote_timeout_when_runtime_env_abse
     assert runtime_env["RETRIEVAL_REMOTE_TIMEOUT_SEC"] == "30"
 
 
+def test_build_runtime_env_merges_local_no_proxy_defaults(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"DATABASE_URL=sqlite+aiosqlite:///{(tmp_path / 'memory.db').as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(
+        module.os,
+        "environ",
+        {
+            "HTTP_PROXY": "http://proxy.example:8080",
+            "NO_PROXY": "corp.internal",
+        },
+    )
+
+    runtime_env = module.build_runtime_env()
+
+    assert runtime_env["HTTP_PROXY"] == "http://proxy.example:8080"
+    assert runtime_env["NO_PROXY"] == "corp.internal,localhost,127.0.0.1,::1,host.docker.internal"
+    assert runtime_env["no_proxy"] == runtime_env["NO_PROXY"]
+
+
 def test_read_env_value_parses_quoted_value_with_inline_comment(tmp_path: Path) -> None:
     module = _load_module()
     env_file = tmp_path / ".env"

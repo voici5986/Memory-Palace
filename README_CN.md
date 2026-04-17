@@ -54,8 +54,8 @@
 - **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
 - **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
 - **repo-local SSE 关闭时更安静了**：在 `/sse` 流仍然活着时停止 `run_sse.py`，当前验证路径下已经不会再冒出之前那条 ASGI shutdown traceback。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端 `834 passed, 20 skipped`，前端 `125 passed` 且 build 成功，live MCP-only e2e 通过，repo-local skill evaluator 仍能在把环境敏感项保留为 `PARTIAL` / `SKIP` 的前提下成功退出；repo-local Profile B（`backend + SSE + Vite`）已重新复验，Docker one-click 的 Profile B 也已做端到端复验，真实 A/B/C/D benchmark 也按当前本地模型服务重新跑过。PowerShell 档位生成脚本另外通过 `smoke_apply_profile_ps1_in_docker.sh` 复验。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍保留目标环境复验边界。
-- **Setup Assistant 和 Dashboard 的写入提示现在更不误导了**：带鉴权的非 loopback 请求仍然可以查看 setup 当前状态，但本地 `.env` 写入依旧只允许直连回环地址，所以保存按钮现在会直接禁用并显示原因，不会再看起来能点、点完再失败。`Review` / `Maintenance` 在当前运行环境缺少 `confirm` / `prompt` / `alert` 时，也会 fail-close 并改成页内提示。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端 `870 passed, 20 skipped`，前端 `138 passed` 且 build 成功，live MCP e2e 再次通过，repo-local skill evaluator 仍能在把宿主相关项保留为 `PARTIAL` / `SKIP` 的前提下成功退出；repo-local macOS 的 Profile B（`backend + SSE + Vite`）已经按真实浏览器链路复验，Docker one-click 的 A/B/C/D 也都重新做过健康检查、受保护接口和代理 `/sse` 复验，真实 A/B/C/D benchmark 也按当前本地模型服务重新跑过。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍保留目标环境复验边界。
+- **Setup Assistant 和 Dashboard 的写入提示现在更不误导了**：带鉴权的非 loopback 请求仍然可以查看 setup 当前状态，但本地 `.env` 写入依旧只允许直连回环地址，所以保存按钮现在会直接禁用并显示原因，不会再看起来能点、点完再失败。现在就算 setup 状态回来的比较晚，没碰过的检索字段也会按真实状态补齐；先输入 Dashboard key，不会再把已有的 router / reranker 配置偷偷重置回 `hash` / `false`。像 `http://127.0.0.1:8001/v1` 这种真实本地 router 地址仍然可以用，但示例 model id 仍然会被当成占位值拦下；如果你切到直连 `api` / `openai` embedding 路径，本地 `.env` 保存前还必须填一个真实的正整数维度。`Review` / `Maintenance` 在当前运行环境缺少 `confirm` / `prompt` / `alert` 时，也会 fail-close 并改成页内提示。
 - **真实 benchmark 产物现在更诚实地记录降级了**：真实 A/B/C/D runner 现在会同时记录查询阶段和建索引阶段的降级信息；对 D 档位来说，`reranker` 配置缺失或响应无效都不会再被算成“干净通过”。
 - **本地验证报告现在更收口了**：skill / MCP smoke 报告会脱敏常见 secret、session token 和本地绝对路径，并在宿主支持时改用更私有的文件权限。
 - **共用本地 SQLite 时，路径删除更稳了**：`delete_memory` 现在会把当前 path 状态读取、删除前 snapshot 取值和 path 删除都放进同一条 SQLite 写事务，而不是拆成多个独立数据库会话。
@@ -70,11 +70,11 @@
 - **skills + MCP 更像产品了**：现在不只是“有工具”，而是补齐了安装、同步、smoke 和 live e2e。
 - **部署更稳了**：Docker 一键脚本补了 deployment lock，运行时环境注入默认关闭，分享或正式发布前也有自检脚本兜底。
 - **写入链路的恢复能力更强了**：同一 session 的 snapshot 现在改成文件锁，SQLite 短暂锁冲突会做一次小范围重试，后台索引任务也会和前台写入共用同一条写入门控。
-- **审查回滚现在更保守了**：如果同一个 URI 已经在另一条 review session 里留下了更晚的内容快照，旧快照的 rollback 会直接拒绝，不再默默把较新的改动回滚掉。
+- **审查回滚现在更保守了**：如果同一个 URI 已经在另一条 review session 里留下了更晚的内容快照，旧快照的 rollback 会直接拒绝，不再默默把较新的改动回滚掉。对 create-tree 这类回滚，后端现在也会在同一条删除事务里重新确认当前 head，并把进入 write lane 前已经挂到这次快照下面的 descendants 一起清掉，所以不容易再留下晚到子节点，也不容易误删已经被更新过的新内容。
 - **高干扰检索在当前基准集里表现更稳**：对照旧版本时，`s8,d200` 与 `s100,d200` 这类更容易被干扰的场景，C/D 档位显示出更好的召回。
 - **前端语言切换更直接了**：前端现在会先恢复浏览器里已保存的语言；如果还没有保存值，常见中文浏览器语言会自动归并到 `zh-CN`，其他首次访问场景则回退到英文。右上角仍然可以一键中英切换，浏览器也会记住你的选择。
 - **Edge 下的 Dashboard 渲染现在更保守了**：当前端检测到 Microsoft Edge 时，会自动切到更轻量的视觉模式，改用静态背景、减轻 blur，并收掉一部分卡片动效，优先减少本地卡顿，同时保留同一套 Dashboard 功能。
-- **本地 operator 路径也更稳了**：repo-local stdio wrapper 现在会继续复用 `.env` 里的 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，stdio 转发也改成了分块而不是逐字节，shell wrapper 这条路径还会先补上 UTF-8 默认编码，Observability 搜索和活力清理确认这类长请求也会给浏览器更长的等待时间。
+- **本地 operator 路径也更稳了**：repo-local stdio wrapper 现在会继续复用 `.env` 里的 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，仓库自带的两条 repo-local wrapper 都会补本地 `NO_PROXY` / `no_proxy` 绕过，stdio 转发也改成了分块而不是逐字节，shell wrapper 这条路径还会先补上 UTF-8 默认编码，Observability 搜索和活力清理确认这类长请求也会给浏览器更长的等待时间。
 - **一些容易卡住的小边界也补齐了**：搜索结果最后一轮会优先批量校验当前 path 状态，Windows 风格宿主如果误把 `backend/mcp_wrapper.py` 跑在 `Git Bash / MSYS / Cygwin` 下也更容易选中正确的 `.venv` 解释器，Docker 前端代理 key 里像制表符这类 ASCII 控制字符现在也会被直接拦下。
 - **公开口径更保守了**：文档现在已经补上原生 Windows 的 repo-local `python-wrapper` 路径，但你自己的远程环境 / GUI 宿主环境仍建议按目标环境再复核一次。
 - **客户端边界写清楚了**：`Claude/Codex/OpenCode/Gemini` 走文档里的 CLI 路径；`Cursor / Windsurf / VSCode-host / Antigravity` 走 `AGENTS.md + MCP 配置片段`；`Gemini live` 和 GUI 宿主验证仍保留边界说明。
@@ -523,7 +523,7 @@ curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.t
 >
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`）打开首启向导；你可以只把同一把 key 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”的场景下，把常见运行参数一起写进 `.env`。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求。如果你是通过带鉴权的非 loopback 路径看的页面，向导仍然能显示当前状态，但本地 `.env` 写入会继续保持禁用，这是现在明确写死的安全边界。
 >
-> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。当前端发现旧版遗留在 `localStorage` 里的 Dashboard key 时，仍然只会迁移一次，但现在只有在确认没有被别的标签页替换掉时，才会删除那份旧值。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障。
+> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。当前端发现旧版遗留在 `localStorage` 里的 Dashboard key 时，仍然只会迁移一次，但现在只有在确认没有被别的标签页替换掉时，才会删除那份旧值。现在就算 setup 状态回来的比较晚，没碰过的检索字段也会按真实状态补齐；先输入 Dashboard key，不会再把已有的 router / reranker 配置偷偷重置回 `hash` / `false`。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；但只靠预设本身已经不能直接保存了，真正落地前仍要把必填远端字段换成真实值。像 `http://127.0.0.1:8001/v1` 这种真实本地 router 地址仍然可以用，但示例 model id 仍然会被当成占位值拦下。对直连 `api` / `openai` embedding 路径来说，现在本地 `.env` 保存前还会继续要求一个真实的正整数维度。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障。
 >
 > 如果你选择的是“保存到本地 `.env`”，并且同时填了 Dashboard key，要记住 `.env` 写入和浏览器 key 持久化是两步。现在只要浏览器本地存储失败，向导就会直接报保存失败，不再给出误导性的成功提示。实际使用时，这通常意味着 `.env` 可能已经写进去了，但浏览器侧鉴权还没准备好；先看右上角状态，再决定是否重试。
 >
@@ -566,7 +566,7 @@ python run_sse.py
 >
 > 对 shell wrapper 这条路径（`macOS / Linux / Git Bash / WSL`）来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：就算当前 shell 默认编码不太友好，本地 stdio 也更不容易因为编码问题变成乱码或直接报错。
 >
-> 同一条 shell wrapper 现在还会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机还跑着 Ollama 或别的本地 OpenAI-compatible 服务，它们更不容易被宿主机代理误走。这条自动代理绕过只针对 shell wrapper 路径本身，不等于所有后端启动方式都会默认带上同样的保护。
+> 现在仓库自带的两条 repo-local wrapper 都会把已有的 `NO_PROXY` / `no_proxy` 合并起来，并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`。说人话就是：如果你本机还跑着 Ollama 或别的本地 OpenAI-compatible 服务，它们更不容易被宿主机代理误走。这条自动代理绕过只针对仓库自带的两条 repo-local wrapper，不等于所有后端启动方式都会默认带上同样的保护。
 >
 > 在原生 Windows 或其它更依赖 wrapper 的宿主路径里，repo-local stdio launcher 现在也会按块转发 stdin/stdout，而不是逐字节转发。说人话就是：遇到更大的 MCP 响应时，体感会比以前顺一些，但原来的 CRLF 清理规则不变。
 >
@@ -574,7 +574,7 @@ python run_sse.py
 >
 > 同样地，如果 `.env` 或你显式传入的 `DATABASE_URL` 仍是 `/app/...` 或 `/data/...` 这类 Docker 容器路径，wrapper 现在也会直接拒绝启动。这不是 MCP 协议故障，而是本机路径配置错了；改成宿主机绝对路径，或者继续走 Docker `/sse`。
 >
-> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；`python run_sse.py` 会优先尝试回环 `127.0.0.1:8000`，如果本机 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志还会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`，所以更应该把它看成“客户端配置要跟着改”的提示，而不是静默故障。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。如果你的远程 hostname / origin 还要通过 MCP 传输层的 host/origin 校验，也要再显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是把非回环监听误解成“默认放开全部来源”。
+> 上面这个 `HOST=127.0.0.1` 是**只给本机访问**的写法；`python run_sse.py` 会优先尝试回环 `127.0.0.1:8000`，如果本机 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。如果你显式绑定的是 `HOST=::1`，它会单独检查 `::1:8000`，不会因为 IPv4 的 `8000` 被占用就误回退。如果你绑定的是 `HOST=localhost`，探测逻辑现在会按当前主机实际可用的回环地址分别检查，不会再因为这台机器不支持 IPv6 localhost，就误以为 `8000` 已占用而直接回退到 `8010`。发生真正需要的回退时，当前启动日志还会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`，所以更应该把它看成“客户端配置要跟着改”的提示，而不是静默故障。真要给远程客户端访问，请改成 `HOST=0.0.0.0`（或你的实际绑定地址）。这一步只是把监听范围放开，**不等于**跳过安全控制；API Key、防火墙、反向代理和传输安全仍然要自己补齐。如果你的远程 hostname / origin 还要通过 MCP 传输层的 host/origin 校验，也要再显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是把非回环监听误解成“默认放开全部来源”。
 
 详细的客户端配置请参阅 [多客户端集成](#-多客户端集成)。
 
@@ -817,6 +817,8 @@ python scripts/install_skill.py --targets claude,gemini --scope workspace --with
 ```
 
 如果你要补 workspace 级 MCP，当前脚本只会为 `Claude Code` 和 `Gemini CLI` 写稳定的 repo-local 绑定；`Codex/OpenCode` 继续走 user-scope MCP 更稳。
+
+现在 `--check` 只会把文档里支持的 repo-local launcher 形态判成通过。说人话就是：`PASS` 的意思是“当前绑定方式在支持列表里”，不是“随便写个差不多的自定义命令也算过”。
 
 如果你接的是 IDE 宿主，不要先找 hidden skill mirrors，直接生成当前仓库的 MCP 配置片段：
 

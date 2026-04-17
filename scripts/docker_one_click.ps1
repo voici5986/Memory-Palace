@@ -800,10 +800,6 @@ function Test-NetworkFilesystemSignal {
         return $true
     }
 
-    if ($normalizedPath -match '(^|[\\/])(nfs|cifs|smb|smbfs)([\\/]|$)') {
-        return $true
-    }
-
     $normalizedSignal = Normalize-ComposeScalar -Value $FilesystemSignal
     if ([string]::IsNullOrWhiteSpace($normalizedSignal)) {
         return $false
@@ -814,7 +810,7 @@ function Test-NetworkFilesystemSignal {
         return $true
     }
 
-    return ($normalizedSignal -match '(?<![a-z])(nfs|nfs4|cifs|smb|smbfs)(?![a-z])')
+    return ($normalizedSignal -match '(?<![a-z])(nfs|nfs4|cifs|smb|smbfs|sshfs|fuse\.sshfs|webdav|davfs|ceph|glusterfs)(?![a-z])')
 }
 
 function Assert-BackendDataBindMountWalSafety {

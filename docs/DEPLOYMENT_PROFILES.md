@@ -49,9 +49,11 @@
 - **B → C/D**：接入真实的 embedding + reranker 模型后，有机会获得更强的语义检索；如果旧索引仍是另一套 embedding backend / model / dim 写出来的，运行时会先降级并要求重建索引
 - **C vs D**：算法路径一致；默认模板中主要差异为模型服务地址（本地 vs 远程），并且默认 `RETRIEVAL_RERANKER_WEIGHT` 也不同（C=`0.30`，D=`0.35`）
 
-> **口径说明（避免与评测文档混淆）**：部署模板里的 C 默认开启 reranker；`docs/EVALUATION.md` 的“真实 A/B/C/D 运行”里，`profile_c` 作为对照组会关闭 reranker（`profile_d` 才开启），用于观测增益。这是当前 helper / smoke 的评测边界，不等于产品里存在一个“可智能热切换”的正式运行语义。
+> **口径说明（避免与评测文档混淆）**：部署模板描述的是你本地真正会写进 `.env` 的默认档位；`docs/EVALUATION.md` 负责汇总公开 A/B/C/D 复核里这些档位跑出来的结果。前者用于决定怎么配，后者用于理解这些档位在那轮复核里的表现；两边都不代表你可以在一批旧向量上无感热切换。
 >
 > **补充说明**：C/D 模板默认走 `router` 路线；如果你的部署不使用统一 router，也可以直接配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 连接 OpenAI-compatible 服务。
+>
+> **首启向导口径也一样**：向导里的 `Profile C` / `Profile D` 只是分别预填一组更像“本地/private router”或“远程 router”的建议起点，不代表你已经完成配置。真正保存前，仍然要把 router 的必填地址 / 模型字段换成你自己的真实值；如果你不走 router，也可以直接切到 `api` / `openai` embedding backend。`openai` 是 embedding backend 选项，不是额外新增的新档位。
 >
 > **本地模板补一条**：仓库内的本地 `profile c/d` 模板现在也显式保留 `RUNTIME_AUTO_FLUSH_ENABLED=true`，所以通过 `apply_profile.sh/.ps1` 生成的 `.env`，默认会和 A/B 一样继续保留 auto-flush。
 >
@@ -178,6 +180,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 >
 > **模型 ID 提醒**：上面的 `your-embedding-model-id` / `your-reranker-model-id` 只是 shell-safe 占位示例。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
 > 如果你使用 `profile c/d`，无论是先跑 `apply_profile.sh/.ps1`，还是继续走 `docker_one_click.sh/.ps1`，这些占位 model id / endpoint / key 都会被当成未解析配置；脚本会先直接拦下，而不是等容器启动后再暴露错误。
+> 像 `http://127.0.0.1:8001/v1` 这种真实本地 / private router 地址，本身**不算**占位值。真正会卡住保存或启动的，是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model`、`your-embedding-model-id`、`your-reranker-model-id` 这类文档示例值。
 
 如果你采用直连方式，先注意一个边界：
 
@@ -188,6 +191,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 > 按当前 `v3.7.0` 的复验结果，本地 `profile c/d + --allow-runtime-env-injection` 现在已经会按预期顺序工作：先基于模板生成 Docker env，再把这次运行的模板占位符校验延后，写入运行时注入值，最后仍然对缺失的外部配置做 fail-closed 检查。用人话说就是：模板里的占位符不再会在你真实值落盘前提前挡住本地联调，但缺失必填注入值时仍然会直接拦下。
 >
 > 对 native Windows PowerShell 路径来说，`docker_one_click.ps1` 后续对这个 Docker env 文件做运行时覆写时，现在也会继续保持 UTF-8 without BOM，不会再把同一个文件改写成 PowerShell 5.1 默认的 UTF-16 形态再交给 Docker Compose。
+>
+> 再补一条这次实测对齐过的边界：运行时注入只会把你当前 shell 里的值**原样复制**进 Docker env，不会自动把 `127.0.0.1` 改写成容器可达地址。如果容器要访问宿主机上的模型服务，请自己传 `host.docker.internal:<port>`（或目标环境里容器真能访问到的地址），不要继续写 `127.0.0.1:<port>`。
 
 最小验证建议分成两种：
 
@@ -373,7 +378,7 @@ cd <project-root>
 >
 > 当 `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` 没显式提供时，它会优先复用当前进程里的 `ROUTER_API_BASE/ROUTER_API_KEY` 作为 embedding / reranker API base+key 的兜底；当 `RETRIEVAL_RERANKER_MODEL` 没显式提供时，也会优先复用 `ROUTER_RERANKER_MODEL`。
 >
-> 当前验证快照里，本机 A/B/C/D 的启动与检索 smoke 都重新跑过，一键 Docker 路径也重新验证了 B/C/D。对 Docker `profile d` 来说，仍然要把 reranker 可达性当成目标环境边界：整套服务可以先正常启动，但如果容器本身连不到 reranker endpoint，查询阶段仍会以 `reranker_request_failed` 的形式降级。
+> 当前验证快照里，本机 A/B/C/D 的启动与检索 smoke 都重新跑过，一键 Docker 路径也重新验证了 A/B/C/D。A 档位这次更多是启动、`/health`、`/sse` 基线 smoke；B/C/D 则额外复验了 setup status、受保护 browse 路由和代理 `/sse` 可达性。对 Docker `profile d` 来说，仍然要把 reranker 可达性当成目标环境边界：整套服务可以先正常启动，但如果容器本身连不到 reranker endpoint，查询阶段仍会以 `reranker_request_failed` 的形式降级。
 >
 > 本地 build 路径现在还会使用按 checkout 固定的本地镜像名。这样做的好处很直接：只要这个 checkout 里已经成功 build 过一次，后续即使切换 `COMPOSE_PROJECT_NAME`，`--no-build` 也还是能复用之前的本地镜像；只有第一次启动或手动删掉本地镜像时，才需要重新 build。
 
@@ -574,7 +579,7 @@ Authorization: Bearer <你的 MCP_API_KEY>
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。发生这类回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。若你的远程 hostname / origin 也需要通过 MCP 传输层的 host/origin 校验，请显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
+> 这里的 `HOST=127.0.0.1` 是本机回环调试示例；`python run_sse.py` 会优先尝试本机 `127.0.0.1:8000`，若 `8000` 已被主后端占用，则自动回退到 `127.0.0.1:8010`。如果你绑定的是 `HOST=localhost`，探测逻辑现在会把 `127.0.0.1` 当成必需检查，把 `::1` 当成尽力检查；对不支持 IPv6 loopback 的机器，不会再因为 `::1` 失败就误判 `8000` 已占用并跳到 `8010`。发生真正需要的回退时，当前启动日志也会明确打印最终 `/sse` 地址，并提醒你更新客户端配置或显式设置 `PORT`。若要给其他机器访问，请改成 `0.0.0.0`（或你的实际监听地址），并自行补齐 `MCP_API_KEY`、网络隔离、反向代理与 TLS 等保护。若你的远程 hostname / origin 也需要通过 MCP 传输层的 host/origin 校验，请显式补上 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`。Docker / Compose 场景下，SSE 现在直接由 `backend` 进程承载，再通过前端代理暴露出来。
 
 Docker 一键部署时，直接使用：
 

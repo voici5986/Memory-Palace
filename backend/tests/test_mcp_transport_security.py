@@ -87,7 +87,7 @@ def test_run_sse_main_binds_loopback_by_default(monkeypatch) -> None:
     assert calls == [("127.0.0.1", 8000)]
 
 
-def test_loopback_port_probe_checks_ipv6_when_ipv4_is_free(monkeypatch) -> None:
+def test_loopback_port_probe_keeps_ipv6_default_port_when_ipv4_is_busy(monkeypatch) -> None:
     attempts: list[tuple[int, tuple[str, int]]] = []
 
     class _FakeSocket:
@@ -115,8 +115,48 @@ def test_loopback_port_probe_checks_ipv6_when_ipv4_is_free(monkeypatch) -> None:
 
     monkeypatch.setattr(run_sse.socket, "socket", _FakeSocket)
 
-    assert run_sse._is_loopback_port_available(8000) is False
-    assert attempts == [(run_sse.socket.AF_INET, ("127.0.0.1", 8000))]
+    assert run_sse._resolve_sse_port("::1") == 8000
+    assert attempts == [
+        (run_sse.socket.AF_INET, ("127.0.0.1", 8000)),
+        (run_sse.socket.AF_INET6, ("::1", 8000)),
+    ]
+
+
+def test_loopback_port_probe_keeps_localhost_default_port_when_ipv6_is_unsupported(
+    monkeypatch,
+) -> None:
+    attempts: list[tuple[int, tuple[str, int]]] = []
+
+    class _FakeSocket:
+        def __init__(self, family: int, socktype: int):
+            assert socktype == run_sse.socket.SOCK_STREAM
+            self.family = family
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            _ = exc_type, exc, tb
+            return False
+
+        def setsockopt(self, *_args, **_kwargs):
+            return None
+
+        def bind(self, address):
+            attempts.append((self.family, address))
+            if address[0] == "127.0.0.1":
+                return None
+            if address[0] == "::1":
+                raise OSError(run_sse.errno.EAFNOSUPPORT, "address family not supported")
+            raise AssertionError(address)
+
+    monkeypatch.setattr(run_sse.socket, "socket", _FakeSocket)
+
+    assert run_sse._resolve_sse_port("localhost") == 8000
+    assert attempts == [
+        (run_sse.socket.AF_INET, ("127.0.0.1", 8000)),
+        (run_sse.socket.AF_INET6, ("::1", 8000)),
+    ]
 
 
 def test_run_sse_main_falls_back_for_ipv6_loopback_host(
@@ -133,7 +173,11 @@ def test_run_sse_main_falls_back_for_ipv6_loopback_host(
         lambda **kwargs: "app",
     )
     monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
-    monkeypatch.setattr(run_sse, "_is_loopback_port_available", lambda port: False)
+    monkeypatch.setattr(
+        run_sse,
+        "_is_requested_loopback_port_available",
+        lambda host, port: port == 8010,
+    )
     monkeypatch.setattr(
         run_sse,
         "_run_uvicorn_sse_app",
@@ -147,6 +191,39 @@ def test_run_sse_main_falls_back_for_ipv6_loopback_host(
     assert "Update MCP client config to http://[::1]:8010/sse or set PORT explicitly." in captured.err
     assert "Starting SSE Server on http://[::1]:8010" in captured.out
     assert "SSE Endpoint: http://[::1]:8010/sse" in captured.out
+
+
+def test_run_sse_main_fails_closed_when_primary_and_fallback_ports_are_unavailable(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, int]] = []
+
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.setattr(
+        run_sse,
+        "create_sse_app",
+        lambda **kwargs: "app",
+    )
+    monkeypatch.setattr(run_sse, "_create_sse_transport", lambda: "transport")
+    monkeypatch.setattr(
+        run_sse,
+        "_is_requested_loopback_port_available",
+        lambda host, port: False,
+    )
+    monkeypatch.setattr(
+        run_sse,
+        "_run_uvicorn_sse_app",
+        lambda app, host, port, transport: calls.append((host, port)),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Loopback SSE ports 8000 and 8010 are unavailable; set PORT explicitly.",
+    ):
+        run_sse.main()
+
+    assert calls == []
 
 
 def test_sse_transport_security_rejects_invalid_host_without_traceback(tmp_path) -> None:

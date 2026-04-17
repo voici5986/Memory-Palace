@@ -38,7 +38,7 @@ In the top-right corner, you may see one of these states:
 - **Update API key / Clear key**: a local key is already stored in the browser
 - **Runtime key active**: the page received a runtime-injected key, so manual key entry is usually not needed; the page still keeps a `Setup` entry so you can inspect masked status or fill local `.env` fields
 
-If neither a runtime key nor a browser-stored key is available yet, the first-run setup assistant may open automatically on first load.
+If neither a runtime key nor a browser-stored key is available yet, and the server-side setup status still does not report Dashboard auth as configured, the first-run setup assistant may open automatically on first load. If you are already on a trusted proxy-held auth path and protected requests work, the page stays on the normal Dashboard flow instead of auto-opening the assistant just because the browser itself does not store the key.
 
 If the Dashboard shell opens but protected data does not load, the usual fix is:
 
@@ -46,13 +46,13 @@ If the Dashboard shell opens but protected data does not load, the usual fix is:
 
 > If you set `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` for local development, protected data can load automatically without entering a key, as long as the request is a direct loopback request.
 
-> **Save dashboard key only** stores the Dashboard key in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets follow the documented `router + reranker` path; if your local router is not ready yet, switch the retrieval fields manually to direct API mode.
+> **Save dashboard key only** stores the Dashboard key in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets follow the documented `router + reranker` path, but they are still only suggested starting points, not proof that the setup is already valid. `Profile C` is the local/private router starting point, so its `http://127.0.0.1:8001/v1` base is treated as a real local endpoint, not as a placeholder. `Profile D` keeps the remote template base and still expects you to replace it. Before you save local `.env` settings, the assistant expects the required remote fields to be real values; the documented placeholders that still block save are values such as `https://router.example.com/v1`, `router-embedding-model`, and `router-reranker-model`. On direct `api` / `openai` embedding paths, local `.env` save now also requires a real positive-integer embedding dimension. If your local router is not ready yet, switch the retrieval fields manually to direct `api` / `openai` mode for debugging. If reranker stays enabled on that direct path, you must also fill the direct reranker fields or turn reranker off first.
 
 > If you choose **Save local `.env` settings** and also fill a Dashboard key, remember that the `.env` write and the browser key save are two separate steps. If the browser blocks local storage, the assistant now shows a save failure instead of a false success. In practice that usually means the `.env` change may already be written, but the browser-side auth is still not ready yet.
 
 > Conversely, when both steps succeed, the assistant now keeps the success message and restart reminder visible inside the dialog, so you can confirm the whole save path finished cleanly before closing it.
 
-> The `.env` write path is only enabled when the app is running directly against a non-Docker local checkout. If the page is talking to Docker containers, the assistant stays in guidance mode instead of pretending it can persist container env / proxy changes.
+> The `.env` write path is only enabled when the app is running directly against a non-Docker local checkout **and** the current request is a direct loopback request. If the page is talking to Docker containers, or you are coming through an authenticated non-loopback path, the assistant can still show the current status but keeps the local `.env` save button disabled on purpose. That is a safety boundary, not a UI failure.
 
 > If you hit the assistant first and it opens in English, that is still fine on fresh first-run: the assistant has its own language toggle in the upper right corner.
 

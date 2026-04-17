@@ -128,16 +128,21 @@ const en = {
         none: 'None',
         hash: 'Hash (local baseline)',
         api: 'Direct API',
+        openai: 'OpenAI-compatible',
         router: 'Router',
       },
       embeddingApiBaseLabel: 'Embedding API base',
       embeddingApiBasePlaceholder: 'http://127.0.0.1:9000/v1',
       embeddingModelLabel: 'Embedding model',
       embeddingModelPlaceholder: 'text-embedding-model',
+      embeddingDimLabel: 'Embedding dimension',
+      embeddingDimHint:
+        'Required for remote embedding backends. Keep it aligned with the provider output dimension your runtime really serves.',
+      embeddingDimPlaceholder: '1024',
       embeddingApiKeyLabel: 'Embedding API key',
       embeddingApiKeyPlaceholder: 'Optional API key',
       optionalApiKeyHint:
-        'Leave blank if your local service does not require a key. Blank values keep the current server value untouched.',
+        'Leave blank if your local service does not require a key. Hidden fields are cleared when that feature is turned off or switched away.',
       routerApiBaseLabel: 'Router API base',
       routerApiBasePlaceholder: 'http://127.0.0.1:8001/v1',
       routerApiKeyLabel: 'Router API key',
@@ -216,6 +221,10 @@ const en = {
       statusUnavailable: 'Unable to load setup status.',
       browserOnlyRequiresKey: 'Enter an MCP API key before saving browser-only auth.',
       browserOnlySaved: 'Dashboard key saved in the current browser session until cleared or that session ends.',
+      remoteProfileIncomplete:
+        'Complete the required remote retrieval fields before saving local .env settings.',
+      remoteProfileUsesExamples:
+        'Replace the preset example router values with your real local or remote endpoints before saving.',
       serverSaved: 'Saved local setup to {{target}}.',
       saveFailed: 'Failed to save setup.',
     },

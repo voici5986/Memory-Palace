@@ -690,7 +690,7 @@ filesystem_type_is_network_risky() {
   local fs_type="${1:-}"
   fs_type="$(printf '%s' "${fs_type}" | tr '[:upper:]' '[:lower:]')"
   case "${fs_type}" in
-    nfs|nfs4|cifs|smbfs)
+    nfs|nfs4|cifs|smbfs|sshfs|fuse.sshfs|webdav|davfs|ceph|glusterfs)
       return 0
       ;;
     *)

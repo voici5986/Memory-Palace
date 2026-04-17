@@ -305,7 +305,7 @@ Note:
 - Whether you use the script or the manual fallback, the resulting config ends up in `~/.codex/config.toml`.
 - This is the current product behavior of `Codex CLI`, not a missing file in this repo.
 - This command also reuses the current repo `.env` for `DATABASE_URL`; if that `.env` still points to Docker `/app/data/...` or another `/data/...` container path, local `stdio` MCP will refuse to start.
-- If you rewrite the fallback command for another shell or client config, do not accidentally remove `source .venv/bin/activate`. Either activate the project's `.venv` first or use the Python directly inside `.venv`. Otherwise, the MCP process might fail to start with `No module named 'sqlalchemy'`.
+- If you are doing manual troubleshooting, keep the fallback command shape here as-is: use `python + backend/mcp_wrapper.py` on Windows, or `/bin/zsh -lc 'cd <repo-root> && bash scripts/run_memory_palace_mcp_stdio.sh'` on POSIX paths. Do not casually switch it to `python3`, and do not append extra `&& ...` fragments in the same shell command; the repository scripts no longer treat those rewrites as the same stable repo-local binding.
 
 ---
 

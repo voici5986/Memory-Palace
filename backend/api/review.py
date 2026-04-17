@@ -13,6 +13,7 @@ Design Philosophy:
 - The human can permanently delete deprecated memories after review
 """
 import difflib
+import inspect
 import os
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -305,6 +306,19 @@ async def _ensure_same_version_chain_or_409(
                 f"and current memory_id={current_memory_id} are not in the same version chain."
             ),
         )
+
+
+def _supports_expected_current_memory_id(client: Any) -> bool:
+    rollback_to_memory = getattr(client, "rollback_to_memory", None)
+    if not callable(rollback_to_memory):
+        return False
+    try:
+        return (
+            "expected_current_memory_id"
+            in inspect.signature(rollback_to_memory).parameters
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 # ========== Diff: PATH snapshots ==========
@@ -721,54 +735,13 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
                     parsed_memory_id = None
                 descendant_targets.append((child_domain, child_path, parsed_memory_id))
 
-        descendant_memory_ids = list(
-            dict.fromkeys(
-                memory_id
-                for _, _, memory_id in descendant_targets
-                if isinstance(memory_id, int) and memory_id > 0
-            )
-        )
-
         async def _write_task_delete_create_tree() -> Dict[str, Any]:
-            descendants_deleted = 0
-            orphan_memories_deleted = 0
-
-            for child_domain, child_path, _memory_id in descendant_targets:
-                try:
-                    await client.remove_path(child_path, child_domain)
-                    descendants_deleted += 1
-                except ValueError:
-                    continue
-
-            current = await client.get_memory_by_path(
-                path, domain, reinforce_access=False
+            return await client.delete_created_tree_atomically(
+                root_path=path,
+                root_domain=domain,
+                descendant_targets=descendant_targets,
+                expected_current_memory_id=snapshot_memory_id,
             )
-            parent_memory_id = current.get("id") if current else None
-            for memory_id in descendant_memory_ids:
-                if parent_memory_id is not None and memory_id == parent_memory_id:
-                    continue
-                try:
-                    await client.permanently_delete_memory(
-                        memory_id,
-                        require_orphan=True,
-                    )
-                    orphan_memories_deleted += 1
-                except (ValueError, PermissionError, RuntimeError):
-                    continue
-
-            if not current:
-                return {
-                    "deleted": True,
-                    "descendants_deleted": descendants_deleted,
-                    "orphan_memories_deleted": orphan_memories_deleted,
-                }
-
-            await client.permanently_delete_memory(current["id"])
-            return {
-                "deleted": True,
-                "descendants_deleted": descendants_deleted,
-                "orphan_memories_deleted": orphan_memories_deleted,
-            }
 
         try:
             return await _run_write_lane(
@@ -799,7 +772,27 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
                     ),
                 )
 
+            async def _before_delete_alias(current_deleted: Dict[str, Any]) -> None:
+                if (
+                    snapshot_memory_id is not None
+                    and current_deleted.get("id") != snapshot_memory_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Cannot rollback alias '{uri}': "
+                            "it now points to a different memory."
+                        ),
+                    )
+
             async def _write_task_remove_alias() -> Any:
+                delete_path_atomically = getattr(client, "delete_path_atomically", None)
+                if callable(delete_path_atomically):
+                    return await delete_path_atomically(
+                        path,
+                        domain,
+                        before_delete=_before_delete_alias,
+                    )
                 return await client.remove_path(path, domain)
 
             await _run_write_lane(
@@ -807,6 +800,8 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
                 _write_task_remove_alias,
                 session_id=lane_session_id,
             )
+        except HTTPException:
+            raise
         except ValueError as exc:
             existing_alias = await client.get_memory_by_path(
                 path, domain, reinforce_access=False
@@ -953,13 +948,27 @@ async def _rollback_memory_content(
         return {"no_change": True, "new_version": memory_id}
 
     async def _write_task_rollback_to_memory() -> Any:
-        return await client.rollback_to_memory(path, memory_id, domain)
+        kwargs: Dict[str, Any] = {}
+        if _supports_expected_current_memory_id(client):
+            kwargs["expected_current_memory_id"] = current_memory_id
+        return await client.rollback_to_memory(
+            path,
+            memory_id,
+            domain,
+            **kwargs,
+        )
 
-    result = await _run_write_lane(
-        "rollback.rollback_to_memory",
-        _write_task_rollback_to_memory,
-        session_id=lane_session_id,
-    )
+    try:
+        result = await _run_write_lane(
+            "rollback.rollback_to_memory",
+            _write_task_rollback_to_memory,
+            session_id=lane_session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot rollback '{uri}': {exc}",
+        ) from exc
     return {"new_version": result["restored_memory_id"]}
 
 
@@ -1026,6 +1035,9 @@ async def _rollback_legacy_modify(
     
     if has_version_change and has_meta_change:
         async def _write_task_restore_legacy_modify() -> Any:
+            kwargs: Dict[str, Any] = {}
+            if _supports_expected_current_memory_id(client):
+                kwargs["expected_current_memory_id"] = current_memory_id
             return await client.rollback_to_memory(
                 path,
                 snapshot_memory_id,
@@ -1033,23 +1045,44 @@ async def _rollback_legacy_modify(
                 restore_path_metadata=True,
                 restore_priority=snapshot_priority,
                 restore_disclosure=snapshot_disclosure,
+                **kwargs,
             )
 
-        result = await _run_write_lane(
-            "rollback.restore_legacy_modify",
-            _write_task_restore_legacy_modify,
-            session_id=lane_session_id,
-        )
+        try:
+            result = await _run_write_lane(
+                "rollback.restore_legacy_modify",
+                _write_task_restore_legacy_modify,
+                session_id=lane_session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot rollback '{uri}': {exc}",
+            ) from exc
         restored_id = result["restored_memory_id"]
     elif has_version_change:
         async def _write_task_rollback_to_memory() -> Any:
-            return await client.rollback_to_memory(path, snapshot_memory_id, domain)
+            kwargs: Dict[str, Any] = {}
+            if _supports_expected_current_memory_id(client):
+                kwargs["expected_current_memory_id"] = current_memory_id
+            return await client.rollback_to_memory(
+                path,
+                snapshot_memory_id,
+                domain,
+                **kwargs,
+            )
 
-        result = await _run_write_lane(
-            "rollback.rollback_to_memory",
-            _write_task_rollback_to_memory,
-            session_id=lane_session_id,
-        )
+        try:
+            result = await _run_write_lane(
+                "rollback.rollback_to_memory",
+                _write_task_rollback_to_memory,
+                session_id=lane_session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot rollback '{uri}': {exc}",
+            ) from exc
         restored_id = result["restored_memory_id"]
     
     if has_meta_change and not has_version_change:

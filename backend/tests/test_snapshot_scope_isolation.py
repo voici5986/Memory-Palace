@@ -91,6 +91,52 @@ def test_snapshot_manager_filters_sessions_by_current_database_scope(
     assert manager.get_snapshot("session-a", "notes://alpha") is None
 
 
+def test_snapshot_manager_resets_session_scope_when_same_session_id_is_reused_across_databases(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(str(tmp_path / "snapshots"))
+    db_a = tmp_path / "scope-a.db"
+    db_b = tmp_path / "scope-b.db"
+    session_id = "shared-session"
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(db_a))
+    assert manager.create_snapshot(
+        session_id,
+        "notes://alpha",
+        "path",
+        {
+            "uri": "notes://alpha",
+            "operation_type": "create",
+        },
+    ) is True
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(db_b))
+    assert manager.create_snapshot(
+        session_id,
+        "notes://beta",
+        "path",
+        {
+            "uri": "notes://beta",
+            "operation_type": "create",
+        },
+    ) is True
+
+    manifest = json.loads(
+        (tmp_path / "snapshots" / session_id / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    sessions = manager.list_sessions()
+    snapshots = manager.list_snapshots(session_id)
+
+    assert [item["session_id"] for item in sessions] == [session_id]
+    assert manifest["database_label"] == "scope-b.db"
+    assert set(manifest["resources"]) == {"notes://beta"}
+    assert [item["resource_id"] for item in snapshots] == ["notes://beta"]
+    assert manager.get_snapshot(session_id, "notes://alpha") is None
+
+
 def test_snapshot_manager_hides_legacy_unscoped_sessions_when_database_scope_is_set(
     caplog: pytest.LogCaptureFixture,
     monkeypatch,

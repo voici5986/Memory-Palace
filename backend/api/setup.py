@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
+from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from shared_utils import (
@@ -24,6 +25,46 @@ _DEFAULT_ENV_PATH = _PROJECT_ROOT / ".env"
 _ENV_EXAMPLE_PATH = _PROJECT_ROOT / ".env.example"
 _RESTART_TARGETS_LOCAL = ["backend", "sse"]
 _RESTART_TARGETS_DOCKER = ["backend", "sse", "frontend"]
+_REMOTE_EMBEDDING_BACKENDS = {"api", "router", "openai"}
+_SETUP_MANAGED_ENV_KEYS = {
+    "MCP_API_KEY",
+    "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
+    "RETRIEVAL_EMBEDDING_BACKEND",
+    "RETRIEVAL_EMBEDDING_API_BASE",
+    "RETRIEVAL_EMBEDDING_API_KEY",
+    "RETRIEVAL_EMBEDDING_MODEL",
+    "RETRIEVAL_EMBEDDING_DIM",
+    "OPENAI_EMBEDDING_MODEL",
+    "RETRIEVAL_RERANKER_ENABLED",
+    "RETRIEVAL_RERANKER_API_BASE",
+    "RETRIEVAL_RERANKER_API_KEY",
+    "RETRIEVAL_RERANKER_MODEL",
+    "WRITE_GUARD_LLM_ENABLED",
+    "WRITE_GUARD_LLM_API_BASE",
+    "WRITE_GUARD_LLM_API_KEY",
+    "WRITE_GUARD_LLM_MODEL",
+    "INTENT_LLM_ENABLED",
+    "INTENT_LLM_API_BASE",
+    "INTENT_LLM_API_KEY",
+    "INTENT_LLM_MODEL",
+    "ROUTER_API_BASE",
+    "ROUTER_API_KEY",
+    "ROUTER_CHAT_MODEL",
+    "ROUTER_EMBEDDING_MODEL",
+    "ROUTER_RERANKER_MODEL",
+}
+_PLACEHOLDER_FIELD_VALUES = {
+    "router_api_base": {
+        "https://router.example.com/v1",
+    },
+    "embedding_model": {"text-embedding-model"},
+    "router_embedding_model": {"router-embedding-model"},
+    "reranker_model": {"reranker-model"},
+    "router_reranker_model": {"router-reranker-model"},
+    "write_guard_llm_model": {"chat-model"},
+    "intent_llm_model": {"intent-model"},
+    "router_chat_model": {"router-chat-model"},
+}
 
 
 class SetupConfigRequest(BaseModel):
@@ -73,6 +114,20 @@ def _bool_to_env(value: bool) -> str:
 def _read_optional_env(name: str) -> Optional[str]:
     raw = str(os.getenv(name) or "").strip()
     return raw or None
+
+
+def _refresh_setup_managed_env_from_file(target_env_path: Path) -> None:
+    if not target_env_path.exists():
+        return
+    parsed = dotenv_values(target_env_path)
+    for key in _SETUP_MANAGED_ENV_KEYS:
+        if key not in parsed:
+            continue
+        value = parsed.get(key)
+        if value is None or value == "":
+            os.environ.pop(key, None)
+            continue
+        os.environ[key] = str(value)
 
 
 def _normalize_optional_value(value: Optional[str]) -> Optional[str]:
@@ -157,6 +212,9 @@ def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
     if payload.embedding_backend == "hash":
         return "64"
 
+    if payload.embedding_backend == "none":
+        return ""
+
     if (
         current_dim
         and current_backend in {"api", "router", "openai"}
@@ -174,6 +232,8 @@ def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
 
 def _build_summary() -> Dict[str, Any]:
     embedding_backend = (_read_optional_env("RETRIEVAL_EMBEDDING_BACKEND") or "hash").lower()
+    raw_embedding_dim = _read_optional_env("RETRIEVAL_EMBEDDING_DIM")
+    embedding_dim = int(raw_embedding_dim) if raw_embedding_dim and raw_embedding_dim.isdigit() else None
     reranker_enabled = _env_bool("RETRIEVAL_RERANKER_ENABLED", False)
     write_guard_enabled = _env_bool("WRITE_GUARD_LLM_ENABLED", False)
     intent_llm_enabled = _env_bool("INTENT_LLM_ENABLED", False)
@@ -181,6 +241,7 @@ def _build_summary() -> Dict[str, Any]:
         "dashboard_auth_configured": bool(_get_configured_mcp_api_key()),
         "allow_insecure_local": _env_bool("MCP_API_KEY_ALLOW_INSECURE_LOCAL", False),
         "embedding_backend": embedding_backend,
+        "embedding_dim": embedding_dim,
         "embedding_configured": (
             embedding_backend in {"none", "hash"}
             or (
@@ -294,6 +355,85 @@ def _write_env_file(target_env_path: Path, updates: Dict[str, str]) -> None:
     temp_path.replace(target_env_path)
 
 
+def _set_optional_update(
+    updates: Dict[str, str],
+    key: str,
+    raw_value: Optional[str],
+    *,
+    clear_when_blank: bool = False,
+) -> None:
+    normalized = _normalize_optional_value(raw_value)
+    if normalized is not None:
+        updates[key] = normalized
+    elif clear_when_blank:
+        updates[key] = ""
+
+
+def _is_placeholder_setup_value(field: str, raw_value: Optional[str]) -> bool:
+    if raw_value is None:
+        return False
+    normalized = raw_value.strip()
+    if not normalized:
+        return False
+    return normalized in _PLACEHOLDER_FIELD_VALUES.get(field, set())
+
+
+def _require_setup_text_field(
+    payload: SetupConfigRequest,
+    field: str,
+    missing_fields: List[str],
+    placeholder_fields: List[str],
+) -> None:
+    normalized = _normalize_optional_value(getattr(payload, field))
+    if normalized is None:
+        if field not in missing_fields:
+            missing_fields.append(field)
+        return
+    if _is_placeholder_setup_value(field, normalized) and field not in placeholder_fields:
+        placeholder_fields.append(field)
+
+
+def _validate_setup_payload(payload: SetupConfigRequest) -> None:
+    missing_fields: List[str] = []
+    placeholder_fields: List[str] = []
+
+    if payload.embedding_backend in {"api", "openai"}:
+        _require_setup_text_field(payload, "embedding_api_base", missing_fields, placeholder_fields)
+        _require_setup_text_field(payload, "embedding_model", missing_fields, placeholder_fields)
+    elif payload.embedding_backend == "router":
+        _require_setup_text_field(payload, "router_api_base", missing_fields, placeholder_fields)
+        _require_setup_text_field(payload, "router_embedding_model", missing_fields, placeholder_fields)
+        if payload.reranker_enabled:
+            _require_setup_text_field(
+                payload, "router_reranker_model", missing_fields, placeholder_fields
+            )
+
+    if payload.reranker_enabled and payload.embedding_backend != "router":
+        _require_setup_text_field(payload, "reranker_api_base", missing_fields, placeholder_fields)
+        _require_setup_text_field(payload, "reranker_model", missing_fields, placeholder_fields)
+
+    if payload.write_guard_llm_enabled:
+        _require_setup_text_field(
+            payload, "write_guard_llm_api_base", missing_fields, placeholder_fields
+        )
+        _require_setup_text_field(payload, "write_guard_llm_model", missing_fields, placeholder_fields)
+
+    if payload.intent_llm_enabled:
+        _require_setup_text_field(payload, "intent_llm_api_base", missing_fields, placeholder_fields)
+        _require_setup_text_field(payload, "intent_llm_model", missing_fields, placeholder_fields)
+
+    if missing_fields or placeholder_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "setup_validation_failed",
+                "missing_fields": missing_fields,
+                "placeholder_fields": placeholder_fields,
+                "message": "Complete the required setup fields before saving.",
+            },
+        )
+
+
 def _build_env_updates(payload: SetupConfigRequest) -> Dict[str, str]:
     updates: Dict[str, str] = {
         "MCP_API_KEY_ALLOW_INSECURE_LOCAL": _bool_to_env(payload.allow_insecure_local),
@@ -303,42 +443,79 @@ def _build_env_updates(payload: SetupConfigRequest) -> Dict[str, str]:
         "INTENT_LLM_ENABLED": _bool_to_env(payload.intent_llm_enabled),
     }
 
-    optional_mappings = {
-        "MCP_API_KEY": payload.dashboard_api_key,
-        "RETRIEVAL_EMBEDDING_API_BASE": payload.embedding_api_base,
-        "RETRIEVAL_EMBEDDING_API_KEY": payload.embedding_api_key,
-        "RETRIEVAL_EMBEDDING_MODEL": payload.embedding_model,
-        "RETRIEVAL_RERANKER_API_BASE": payload.reranker_api_base,
-        "RETRIEVAL_RERANKER_API_KEY": payload.reranker_api_key,
-        "RETRIEVAL_RERANKER_MODEL": payload.reranker_model,
-        "WRITE_GUARD_LLM_API_BASE": payload.write_guard_llm_api_base,
-        "WRITE_GUARD_LLM_API_KEY": payload.write_guard_llm_api_key,
-        "WRITE_GUARD_LLM_MODEL": payload.write_guard_llm_model,
-        "INTENT_LLM_API_BASE": payload.intent_llm_api_base,
-        "INTENT_LLM_API_KEY": payload.intent_llm_api_key,
-        "INTENT_LLM_MODEL": payload.intent_llm_model,
-        "ROUTER_API_BASE": payload.router_api_base,
-        "ROUTER_API_KEY": payload.router_api_key,
-        "ROUTER_CHAT_MODEL": payload.router_chat_model,
-        "ROUTER_EMBEDDING_MODEL": payload.router_embedding_model,
-        "ROUTER_RERANKER_MODEL": payload.router_reranker_model,
-    }
+    _set_optional_update(updates, "MCP_API_KEY", payload.dashboard_api_key)
 
-    for key, raw_value in optional_mappings.items():
-        normalized = _normalize_optional_value(raw_value)
-        if normalized is not None:
-            updates[key] = normalized
+    direct_embedding_backend = payload.embedding_backend in {"api", "openai"}
+    if direct_embedding_backend:
+        _set_optional_update(updates, "RETRIEVAL_EMBEDDING_API_BASE", payload.embedding_api_base)
+        _set_optional_update(updates, "RETRIEVAL_EMBEDDING_API_KEY", payload.embedding_api_key)
+        _set_optional_update(updates, "RETRIEVAL_EMBEDDING_MODEL", payload.embedding_model)
+    else:
+        updates["RETRIEVAL_EMBEDDING_API_BASE"] = ""
+        updates["RETRIEVAL_EMBEDDING_API_KEY"] = ""
+        updates["RETRIEVAL_EMBEDDING_MODEL"] = ""
+
+    if payload.embedding_backend == "openai":
+        _set_optional_update(updates, "OPENAI_EMBEDDING_MODEL", payload.embedding_model)
+    else:
+        updates["OPENAI_EMBEDDING_MODEL"] = ""
+
+    if payload.reranker_enabled and payload.embedding_backend != "router":
+        _set_optional_update(updates, "RETRIEVAL_RERANKER_API_BASE", payload.reranker_api_base)
+        _set_optional_update(updates, "RETRIEVAL_RERANKER_API_KEY", payload.reranker_api_key)
+        _set_optional_update(updates, "RETRIEVAL_RERANKER_MODEL", payload.reranker_model)
+    else:
+        updates["RETRIEVAL_RERANKER_API_BASE"] = ""
+        updates["RETRIEVAL_RERANKER_API_KEY"] = ""
+        updates["RETRIEVAL_RERANKER_MODEL"] = ""
+
+    if payload.write_guard_llm_enabled:
+        _set_optional_update(
+            updates, "WRITE_GUARD_LLM_API_BASE", payload.write_guard_llm_api_base
+        )
+        _set_optional_update(updates, "WRITE_GUARD_LLM_API_KEY", payload.write_guard_llm_api_key)
+        _set_optional_update(updates, "WRITE_GUARD_LLM_MODEL", payload.write_guard_llm_model)
+    else:
+        updates["WRITE_GUARD_LLM_API_BASE"] = ""
+        updates["WRITE_GUARD_LLM_API_KEY"] = ""
+        updates["WRITE_GUARD_LLM_MODEL"] = ""
+
+    if payload.intent_llm_enabled:
+        _set_optional_update(updates, "INTENT_LLM_API_BASE", payload.intent_llm_api_base)
+        _set_optional_update(updates, "INTENT_LLM_API_KEY", payload.intent_llm_api_key)
+        _set_optional_update(updates, "INTENT_LLM_MODEL", payload.intent_llm_model)
+    else:
+        updates["INTENT_LLM_API_BASE"] = ""
+        updates["INTENT_LLM_API_KEY"] = ""
+        updates["INTENT_LLM_MODEL"] = ""
+
+    if payload.embedding_backend == "router":
+        _set_optional_update(updates, "ROUTER_API_BASE", payload.router_api_base)
+        _set_optional_update(updates, "ROUTER_API_KEY", payload.router_api_key)
+        _set_optional_update(updates, "ROUTER_EMBEDDING_MODEL", payload.router_embedding_model)
+        if payload.reranker_enabled:
+            _set_optional_update(updates, "ROUTER_RERANKER_MODEL", payload.router_reranker_model)
+        else:
+            updates["ROUTER_RERANKER_MODEL"] = ""
+        if payload.intent_llm_enabled:
+            _set_optional_update(updates, "ROUTER_CHAT_MODEL", payload.router_chat_model)
+        else:
+            updates["ROUTER_CHAT_MODEL"] = ""
+    else:
+        updates["ROUTER_API_BASE"] = ""
+        updates["ROUTER_API_KEY"] = ""
+        updates["ROUTER_CHAT_MODEL"] = ""
+        updates["ROUTER_EMBEDDING_MODEL"] = ""
+        updates["ROUTER_RERANKER_MODEL"] = ""
 
     embedding_dim = _resolve_embedding_dim_update(payload)
     if embedding_dim is not None:
         updates["RETRIEVAL_EMBEDDING_DIM"] = embedding_dim
 
-    if payload.embedding_backend == "openai":
-        normalized_openai_model = _normalize_optional_value(payload.embedding_model)
-        if normalized_openai_model is not None:
-            updates["OPENAI_EMBEDDING_MODEL"] = normalized_openai_model
-
     return updates
+
+
+_refresh_setup_managed_env_from_file(_resolve_target_env_path())
 
 
 async def require_setup_access(
@@ -389,6 +566,7 @@ async def require_local_setup_write_access(request: Request) -> None:
 @router.get("/status", dependencies=[Depends(require_setup_access)])
 async def get_setup_status(request: Request) -> Dict[str, Any]:
     target_env_path = _resolve_target_env_path()
+    _refresh_setup_managed_env_from_file(target_env_path)
     apply_supported, apply_reason = _resolve_apply_support(target_env_path)
     write_supported = apply_supported and _is_direct_loopback_request(request)
     write_reason = apply_reason if not apply_supported else (
@@ -424,6 +602,7 @@ async def save_setup_config(payload: SetupConfigRequest) -> Dict[str, Any]:
             },
         )
 
+    _validate_setup_payload(payload)
     updates = _build_env_updates(payload)
     if not updates:
         raise HTTPException(
@@ -442,8 +621,7 @@ async def save_setup_config(payload: SetupConfigRequest) -> Dict[str, Any]:
             },
         ) from exc
 
-    for key, value in updates.items():
-        os.environ[key] = value
+    _refresh_setup_managed_env_from_file(target_env_path)
 
     return {
         "ok": True,

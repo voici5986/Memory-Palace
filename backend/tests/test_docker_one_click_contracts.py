@@ -206,7 +206,7 @@ def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> 
     assert 'assert_no_risky_wal_bind_mounts "${env_file}"' in shell_text
     assert "backend /app/data" in shell_text
     assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in shell_text
-    assert "nfs|nfs4|cifs|smbfs" in shell_text
+    assert "nfs|nfs4|cifs|smbfs|sshfs|fuse.sshfs|webdav|davfs|ceph|glusterfs" in shell_text
 
     assert "function Assert-BackendDataBindMountWalSafety" in ps1_text
     assert "function Get-BackendDataBindMountSourcesFromComposeConfig" in ps1_text
@@ -214,6 +214,27 @@ def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> 
     assert "Assert-BackendDataBindMountWalSafety -ComposeProjectName $composeProjectName -EnvFile $envFile" in ps1_text
     assert "backend /app/data bind mount" in ps1_text
     assert "MEMORY_PALACE_DOCKER_WAL_ENABLED=false and MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete" in ps1_text
+    assert "sshfs" in ps1_text
+    assert "glusterfs" in ps1_text
+
+
+def test_powershell_network_filesystem_signal_avoids_local_path_name_false_positives() -> None:
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Test-NetworkFilesystemSignal" in ps1_text
+    assert "if ($normalizedPath -match '^(\\\\\\\\|//)') {" in ps1_text
+    assert (
+        "$normalizedPath -match "
+        "'(^|[\\\\/])(nfs|cifs|smb|smbfs|sshfs|fuse\\.sshfs|webdav|davfs|ceph|glusterfs)([\\\\/]|$)'"
+        not in ps1_text
+    )
+    assert "$normalizedSignal -eq 'network'" in ps1_text
+    assert (
+        "(?<![a-z])(nfs|nfs4|cifs|smb|smbfs|sshfs|fuse\\.sshfs|webdav|davfs|ceph|glusterfs)(?![a-z])"
+        in ps1_text
+    )
 
 
 def test_shell_compose_bind_mount_parser_avoids_gnu_awk_only_capture_groups() -> None:

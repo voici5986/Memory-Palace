@@ -72,30 +72,66 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     return _shared_env_int(name, default, minimum=minimum, clamp_default=True)
 
 
-def _is_loopback_port_available(port: int) -> bool:
-    attempted_probe = False
-    for host, family in (("127.0.0.1", socket.AF_INET), ("::1", socket.AF_INET6)):
+def _loopback_probe_targets(
+    host: str | None = None,
+) -> tuple[tuple[str, int, bool], ...]:
+    normalized_host = str(host or "").strip().lower()
+    if normalized_host == "127.0.0.1":
+        return (
+            ("127.0.0.1", socket.AF_INET, True),
+            ("::1", socket.AF_INET6, False),
+        )
+    if normalized_host == "::1":
+        return (
+            ("127.0.0.1", socket.AF_INET, False),
+            ("::1", socket.AF_INET6, True),
+        )
+    if normalized_host == "localhost":
+        return (
+            ("127.0.0.1", socket.AF_INET, True),
+            ("::1", socket.AF_INET6, False),
+        )
+    return (
+        ("127.0.0.1", socket.AF_INET, True),
+        ("::1", socket.AF_INET6, True),
+    )
+
+
+def _is_loopback_port_available(port: int, host: str | None = None) -> bool:
+    attempted_required_probe = False
+    for probe_host, family, required in _loopback_probe_targets(host or os.getenv("HOST")):
         try:
             with socket.socket(family, socket.SOCK_STREAM) as probe:
-                attempted_probe = True
+                if required:
+                    attempted_required_probe = True
                 if family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):
                     try:
                         probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                     except OSError:
                         pass
-                probe.bind((host, port))
+                probe.bind((probe_host, port))
         except OSError as exc:
             if exc.errno in {
                 errno.EADDRNOTAVAIL,
                 errno.EAFNOSUPPORT,
                 errno.EPROTONOSUPPORT,
             }:
+                if required:
+                    return False
                 continue
-            return False
-    if not attempted_probe:
-        # If neither loopback family is available locally, do not block startup.
+            if required:
+                return False
+    if not attempted_required_probe:
         return True
     return True
+
+
+def _is_requested_loopback_port_available(host: str, port: int) -> bool:
+    checker = _is_loopback_port_available
+    try:
+        return checker(port, host)
+    except TypeError:
+        return checker(port)
 
 
 def _format_http_host_for_display(host: str) -> str:
@@ -113,9 +149,17 @@ def _resolve_sse_port(host: str) -> int:
     normalized_host = str(host or "").strip().lower()
     if (
         normalized_host in {"127.0.0.1", "localhost", "::1"}
-        and not _is_loopback_port_available(_DEFAULT_SSE_PORT)
+        and not _is_requested_loopback_port_available(normalized_host or host, _DEFAULT_SSE_PORT)
     ):
         display_host = _format_http_host_for_display(normalized_host or host)
+        if not _is_requested_loopback_port_available(
+            normalized_host or host, _LOOPBACK_FALLBACK_SSE_PORT
+        ):
+            raise RuntimeError(
+                "Loopback SSE ports "
+                f"{_DEFAULT_SSE_PORT} and {_LOOPBACK_FALLBACK_SSE_PORT} are unavailable; "
+                "set PORT explicitly."
+            )
         print(
             f"Loopback port {_DEFAULT_SSE_PORT} is already in use; "
             f"falling back to {_LOOPBACK_FALLBACK_SSE_PORT}. "

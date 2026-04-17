@@ -4700,6 +4700,7 @@ class SQLiteClient:
         restore_path_metadata: bool = False,
         restore_priority: Optional[int] = None,
         restore_disclosure: Optional[str] = None,
+        expected_current_memory_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Rollback a path to point to a specific memory version.
@@ -4725,6 +4726,14 @@ class SQLiteClient:
 
             if current_id is None or path_obj is None:
                 raise ValueError(f"Path '{domain}://{path}' not found")
+            if (
+                expected_current_memory_id is not None
+                and int(current_id) != int(expected_current_memory_id)
+            ):
+                raise ValueError(
+                    f"Path '{domain}://{path}' now points to memory_id={current_id} "
+                    f"instead of expected memory_id={expected_current_memory_id}"
+                )
 
             # 2. Verify target memory exists
             target = await session.execute(
@@ -4986,53 +4995,59 @@ class SQLiteClient:
             ValueError: If the path has children or does not exist
         """
         async with self.session() as session:
-            result = await session.execute(
-                select(Path).where(Path.domain == domain).where(Path.path == path)
-            )
-            path_obj = result.scalar_one_or_none()
+            return await self._remove_path_in_session(session, path, domain)
 
-            if not path_obj:
-                raise ValueError(f"Path '{domain}://{path}' not found")
+    async def _remove_path_in_session(
+        self,
+        session: AsyncSession,
+        path: str,
+        domain: str = "core",
+    ) -> Dict[str, Any]:
+        result = await session.execute(
+            select(Path).where(Path.domain == domain).where(Path.path == path)
+        )
+        path_obj = result.scalar_one_or_none()
 
-            # Block deletion if child paths exist
-            safe_path = (
-                path.replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
-            )
-            child_prefix = f"{safe_path}/"
-            child_result = await session.execute(
-                select(func.count())
-                .select_from(Path)
+        if not path_obj:
+            raise ValueError(f"Path '{domain}://{path}' not found")
+
+        safe_path = (
+            path.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        child_prefix = f"{safe_path}/"
+        child_result = await session.execute(
+            select(func.count())
+            .select_from(Path)
+            .where(Path.domain == domain)
+            .where(Path.path.like(f"{child_prefix}%", escape="\\"))
+        )
+        child_count = child_result.scalar()
+
+        if child_count > 0:
+            sample_result = await session.execute(
+                select(Path.path)
                 .where(Path.domain == domain)
                 .where(Path.path.like(f"{child_prefix}%", escape="\\"))
+                .order_by(Path.path)
+                .limit(5)
             )
-            child_count = child_result.scalar()
+            sample_paths = [
+                f"{domain}://{row[0]}" for row in sample_result.all()
+            ]
+            listing = ", ".join(sample_paths)
+            suffix = f" (and {child_count - 5} more)" if child_count > 5 else ""
+            raise ValueError(
+                f"Cannot delete '{domain}://{path}': "
+                f"it still has {child_count} child path(s). "
+                f"Delete children first: {listing}{suffix}"
+            )
 
-            if child_count > 0:
-                # Fetch up to 5 child URIs for a helpful error message
-                sample_result = await session.execute(
-                    select(Path.path)
-                    .where(Path.domain == domain)
-                    .where(Path.path.like(f"{child_prefix}%", escape="\\"))
-                    .order_by(Path.path)
-                    .limit(5)
-                )
-                sample_paths = [
-                    f"{domain}://{row[0]}" for row in sample_result.all()
-                ]
-                listing = ", ".join(sample_paths)
-                suffix = f" (and {child_count - 5} more)" if child_count > 5 else ""
-                raise ValueError(
-                    f"Cannot delete '{domain}://{path}': "
-                    f"it still has {child_count} child path(s). "
-                    f"Delete children first: {listing}{suffix}"
-                )
+        memory_id = path_obj.memory_id
+        await session.delete(path_obj)
 
-            memory_id = path_obj.memory_id
-            await session.delete(path_obj)
-
-            return {"removed_uri": f"{domain}://{path}", "memory_id": memory_id}
+        return {"removed_uri": f"{domain}://{path}", "memory_id": memory_id}
 
     async def delete_path_atomically(
         self,
@@ -7222,6 +7237,212 @@ class SQLiteClient:
 
             return detail
 
+    async def _permanently_delete_memory_in_session(
+        self,
+        session: AsyncSession,
+        memory_id: int,
+        *,
+        require_orphan: bool = False,
+        expected_state_hash: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        target_result = await session.execute(
+            select(
+                Memory.deprecated,
+                Memory.migrated_to,
+                Memory.vitality_score,
+                Memory.access_count,
+            ).where(Memory.id == memory_id)
+        )
+        target_row = target_result.first()
+        if not target_row:
+            raise ValueError(f"Memory ID {memory_id} not found")
+
+        deprecated, successor_id, vitality_score, access_count = target_row
+
+        expected_hash_value = (expected_state_hash or "").strip()
+        path_count: Optional[int] = None
+        if require_orphan or expected_hash_value:
+            path_count_result = await session.execute(
+                select(func.count())
+                .select_from(Path)
+                .where(Path.memory_id == memory_id)
+            )
+            path_count = int(path_count_result.scalar() or 0)
+
+        if expected_hash_value:
+            current_hash = self._build_vitality_state_hash(
+                memory_id=memory_id,
+                vitality_score=max(0.0, float(vitality_score or 0.0)),
+                access_count=max(0, int(access_count or 0)),
+                path_count=max(0, int(path_count or 0)),
+                deprecated=bool(deprecated),
+            )
+            if current_hash != expected_hash_value:
+                raise RuntimeError("stale_state")
+
+        if require_orphan and not deprecated:
+            if int(path_count or 0) > 0:
+                raise PermissionError(
+                    f"Memory {memory_id} is no longer an orphan "
+                    f"(has {int(path_count or 0)} active path(s)). Deletion aborted."
+                )
+
+        predecessor_count_result = await session.execute(
+            select(func.count())
+            .select_from(Memory)
+            .where(Memory.migrated_to == memory_id)
+        )
+        predecessor_count = int(predecessor_count_result.scalar() or 0)
+        if require_orphan and predecessor_count > 0 and successor_id is None:
+            raise PermissionError(
+                f"Memory {memory_id} is still the final target for "
+                f"{predecessor_count} predecessor version(s). "
+                "Delete older deprecated versions first."
+            )
+
+        await session.execute(
+            update(Memory)
+            .where(Memory.migrated_to == memory_id)
+            .values(migrated_to=successor_id)
+        )
+        await session.execute(delete(Path).where(Path.memory_id == memory_id))
+        result = await session.execute(delete(Memory).where(Memory.id == memory_id))
+
+        if result.rowcount == 0:
+            raise ValueError(f"Memory ID {memory_id} not found")
+
+        return {"deleted_memory_id": memory_id, "chain_repaired_to": successor_id}
+
+    async def delete_created_tree_atomically(
+        self,
+        *,
+        root_path: str,
+        root_domain: str = "core",
+        descendant_targets: Sequence[Tuple[str, str, Optional[int]]],
+        expected_current_memory_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        async with self.session() as session:
+            await session.execute(text("BEGIN IMMEDIATE"))
+            descendants_deleted = 0
+            orphan_memories_deleted = 0
+
+            current_result = await session.execute(
+                select(Path.memory_id)
+                .where(Path.domain == root_domain)
+                .where(Path.path == root_path)
+            )
+            current_row = current_result.first()
+            parent_memory_id = current_row[0] if current_row else None
+            if (
+                expected_current_memory_id is not None
+                and parent_memory_id is not None
+                and int(parent_memory_id) != int(expected_current_memory_id)
+            ):
+                raise ValueError(
+                    f"Path '{root_domain}://{root_path}' now points to "
+                    f"memory_id={parent_memory_id} instead of expected "
+                    f"memory_id={expected_current_memory_id}"
+                )
+
+            live_targets: Dict[str, Tuple[str, str, Optional[int]]] = {}
+            for child_domain, child_path, memory_id in descendant_targets:
+                live_targets[f"{child_domain}://{child_path}"] = (
+                    child_domain,
+                    child_path,
+                    memory_id,
+                )
+
+            if parent_memory_id is not None:
+                all_paths_result = await session.execute(
+                    select(Path.domain, Path.path, Path.memory_id)
+                )
+                all_paths = all_paths_result.all()
+                root_aliases: set[Tuple[str, str]] = set()
+                for item_domain, item_path, item_memory_id in all_paths:
+                    if int(item_memory_id) != int(parent_memory_id):
+                        continue
+                    alias_domain = str(item_domain or "").strip()
+                    alias_path = str(item_path or "").strip()
+                    if alias_domain and alias_path:
+                        root_aliases.add((alias_domain, alias_path))
+
+                if not root_aliases:
+                    root_aliases.add((str(root_domain or "core"), str(root_path)))
+
+                for alias_domain, alias_path in root_aliases:
+                    descendant_prefix = f"{alias_path}/"
+                    for item_domain, item_path, item_memory_id in all_paths:
+                        current_domain = str(item_domain or "").strip()
+                        current_path = str(item_path or "").strip()
+                        if current_domain != alias_domain:
+                            continue
+                        if not current_path.startswith(descendant_prefix):
+                            continue
+                        parsed_memory_id: Optional[int] = None
+                        try:
+                            candidate_memory_id = int(item_memory_id)
+                            if candidate_memory_id > 0:
+                                parsed_memory_id = candidate_memory_id
+                        except (TypeError, ValueError):
+                            parsed_memory_id = None
+                        live_targets[f"{current_domain}://{current_path}"] = (
+                            current_domain,
+                            current_path,
+                            parsed_memory_id,
+                        )
+
+            ordered_descendant_targets = list(live_targets.values())
+            ordered_descendant_targets.sort(
+                key=lambda item: (
+                    item[1].count("/"),
+                    item[0],
+                    item[1],
+                ),
+                reverse=True,
+            )
+
+            descendant_memory_ids = list(
+                dict.fromkeys(
+                    memory_id
+                    for _, _, memory_id in ordered_descendant_targets
+                    if isinstance(memory_id, int) and memory_id > 0
+                )
+            )
+
+            for child_domain, child_path, _memory_id in ordered_descendant_targets:
+                try:
+                    await self._remove_path_in_session(session, child_path, child_domain)
+                    descendants_deleted += 1
+                except ValueError:
+                    continue
+
+            for memory_id in descendant_memory_ids:
+                if parent_memory_id is not None and int(memory_id) == int(parent_memory_id):
+                    continue
+                try:
+                    await self._permanently_delete_memory_in_session(
+                        session,
+                        int(memory_id),
+                        require_orphan=True,
+                    )
+                    orphan_memories_deleted += 1
+                except (ValueError, PermissionError, RuntimeError):
+                    continue
+
+            if parent_memory_id is None:
+                return {
+                    "deleted": True,
+                    "descendants_deleted": descendants_deleted,
+                    "orphan_memories_deleted": orphan_memories_deleted,
+                }
+
+            await self._permanently_delete_memory_in_session(session, int(parent_memory_id))
+            return {
+                "deleted": True,
+                "descendants_deleted": descendants_deleted,
+                "orphan_memories_deleted": orphan_memories_deleted,
+            }
+
     async def permanently_delete_memory(
         self,
         memory_id: int,
@@ -7238,100 +7459,14 @@ class SQLiteClient:
 
         Example: A(migrated_to=B) → B(migrated_to=C) → C
                  Delete B → A(migrated_to=C) → C
-
-        Args:
-            memory_id: Memory ID to delete
-            require_orphan: If True, verify the memory is still an orphan
-                (deprecated or path-less) within the same transaction.
-                Raises PermissionError if the memory has active paths.
-            expected_state_hash: Optional stale-check hash generated from
-                get_vitality_cleanup_candidates. When provided, deletion only
-                proceeds if the current memory state hash matches.
-
-        Returns:
-            Deletion info
-
-        Raises:
-            ValueError: Memory ID not found
-            PermissionError: Memory has active paths (only when require_orphan=True)
-            RuntimeError: Candidate state hash changed (when expected_state_hash is provided)
         """
         async with self.session() as session:
-            # 1. Get the memory being deleted
-            target_result = await session.execute(
-                select(
-                    Memory.deprecated,
-                    Memory.migrated_to,
-                    Memory.vitality_score,
-                    Memory.access_count,
-                ).where(Memory.id == memory_id)
+            return await self._permanently_delete_memory_in_session(
+                session,
+                memory_id,
+                require_orphan=require_orphan,
+                expected_state_hash=expected_state_hash,
             )
-            target_row = target_result.first()
-            if not target_row:
-                raise ValueError(f"Memory ID {memory_id} not found")
-
-            deprecated, successor_id, vitality_score, access_count = target_row
-
-            expected_hash_value = (expected_state_hash or "").strip()
-            path_count: Optional[int] = None
-            if require_orphan or expected_hash_value:
-                path_count_result = await session.execute(
-                    select(func.count())
-                    .select_from(Path)
-                    .where(Path.memory_id == memory_id)
-                )
-                path_count = int(path_count_result.scalar() or 0)
-
-            if expected_hash_value:
-                current_hash = self._build_vitality_state_hash(
-                    memory_id=memory_id,
-                    vitality_score=max(0.0, float(vitality_score or 0.0)),
-                    access_count=max(0, int(access_count or 0)),
-                    path_count=max(0, int(path_count or 0)),
-                    deprecated=bool(deprecated),
-                )
-                if current_hash != expected_hash_value:
-                    raise RuntimeError("stale_state")
-
-            # 2. If caller requires orphan safety, verify within this transaction
-            if require_orphan and not deprecated:
-                if int(path_count or 0) > 0:
-                    raise PermissionError(
-                        f"Memory {memory_id} is no longer an orphan "
-                        f"(has {int(path_count or 0)} active path(s)). Deletion aborted."
-                    )
-
-            predecessor_count_result = await session.execute(
-                select(func.count())
-                .select_from(Memory)
-                .where(Memory.migrated_to == memory_id)
-            )
-            predecessor_count = int(predecessor_count_result.scalar() or 0)
-            if require_orphan and predecessor_count > 0 and successor_id is None:
-                raise PermissionError(
-                    f"Memory {memory_id} is still the final target for "
-                    f"{predecessor_count} predecessor version(s). "
-                    "Delete older deprecated versions first."
-                )
-
-            # 3. Repair the chain: any memory pointing to the deleted node
-            #    should now point to the deleted node's successor
-            await session.execute(
-                update(Memory)
-                .where(Memory.migrated_to == memory_id)
-                .values(migrated_to=successor_id)
-            )
-
-            # 4. Remove any paths pointing to this memory
-            await session.execute(delete(Path).where(Path.memory_id == memory_id))
-
-            # 5. Delete the memory
-            result = await session.execute(delete(Memory).where(Memory.id == memory_id))
-
-            if result.rowcount == 0:
-                raise ValueError(f"Memory ID {memory_id} not found")
-
-            return {"deleted_memory_id": memory_id, "chain_repaired_to": successor_id}
 
 
 # =============================================================================

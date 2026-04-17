@@ -374,6 +374,40 @@ def test_check_mcp_binding_codex_falls_back_without_tomllib(
     assert message == str(config_path)
 
 
+def test_check_mcp_binding_codex_user_scope_rejects_relative_python_wrapper_arg(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    home_dir = tmp_path / "home"
+    config_path = home_dir / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "\n".join(
+            [
+                "[mcp_servers.memory-palace]",
+                'command = "python"',
+                'args = ["backend/mcp_wrapper.py"]',
+                "startup_timeout_sec = 30.0",
+                "",
+                "[mcp_servers.memory-palace.env]",
+                'PYTHONIOENCODING = "utf-8"',
+                'PYTHONUTF8 = "1"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.Path, "home", lambda: home_dir)
+
+    ok, message = module.check_mcp_binding("codex", scope="user")
+
+    assert ok is False
+    assert message == str(config_path)
+
+
 def test_wrapper_binding_ok_accepts_python_wrapper_paths(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -392,6 +426,56 @@ def test_wrapper_binding_ok_accepts_python_wrapper_paths(
     assert module._wrapper_binding_ok(
         [str(venv_python), "backend/mcp_wrapper.py"],
         allow_relative=True,
+    )
+
+
+def test_wrapper_binding_ok_accepts_documented_manual_fallbacks(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    assert module._wrapper_binding_ok(
+        ["python", str(project_root / "backend" / "mcp_wrapper.py")],
+        allow_relative=False,
+    )
+    assert module._wrapper_binding_ok(
+        [
+            "/bin/zsh",
+            "-lc",
+            f"cd {project_root} && bash scripts/run_memory_palace_mcp_stdio.sh",
+        ],
+        allow_relative=False,
+    )
+
+
+def test_wrapper_binding_ok_rejects_loose_manual_fallbacks(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    assert not module._wrapper_binding_ok(
+        ["python3", str(project_root / "backend" / "mcp_wrapper.py")],
+        allow_relative=False,
+    )
+    assert not module._wrapper_binding_ok(
+        [
+            "/bin/zsh",
+            "-lc",
+            f"cd {project_root} && bash scripts/run_memory_palace_mcp_stdio.sh && echo leaked",
+        ],
+        allow_relative=False,
     )
 
 

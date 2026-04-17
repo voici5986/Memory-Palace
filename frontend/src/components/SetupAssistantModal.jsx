@@ -24,6 +24,43 @@ import {
 
 export const SETUP_ASSISTANT_DISMISSED_STORAGE_KEY = 'memory-palace.setupAssistantDismissed';
 
+const REMOTE_EMBEDDING_BACKENDS = new Set(['api', 'router', 'openai']);
+
+const ROUTER_PRESET_DEFAULTS = {
+  c: {
+    router_api_base: 'http://127.0.0.1:8001/v1',
+    router_embedding_model: '',
+    router_reranker_model: '',
+    embedding_dim: '1024',
+  },
+  d: {
+    router_api_base: 'https://router.example.com/v1',
+    router_embedding_model: '',
+    router_reranker_model: '',
+    embedding_dim: '1024',
+  },
+};
+
+const PLACEHOLDER_VALUES = {
+  router_api_base: new Set(['https://router.example.com/v1']),
+  embedding_model: new Set(['text-embedding-model']),
+  router_embedding_model: new Set(['router-embedding-model']),
+  router_reranker_model: new Set(['router-reranker-model']),
+  reranker_model: new Set(['reranker-model']),
+  write_guard_llm_model: new Set(['chat-model']),
+  intent_llm_model: new Set(['intent-model']),
+  router_chat_model: new Set(['router-chat-model']),
+};
+
+const normalizeFieldValue = (value) => String(value ?? '').trim();
+const isPositiveIntegerValue = (value) => /^[1-9]\d*$/.test(normalizeFieldValue(value));
+
+const isPlaceholderValue = (field, value) => {
+  const normalized = normalizeFieldValue(value);
+  if (!normalized) return false;
+  return PLACEHOLDER_VALUES[field]?.has(normalized) ?? false;
+};
+
 const defaultFormState = (authState) => ({
   dashboard_api_key: authState?.source === 'stored' ? authState.key : '',
   allow_insecure_local: false,
@@ -31,6 +68,7 @@ const defaultFormState = (authState) => ({
   embedding_api_base: '',
   embedding_api_key: '',
   embedding_model: '',
+  embedding_dim: '',
   reranker_enabled: false,
   reranker_api_base: '',
   reranker_api_key: '',
@@ -53,7 +91,11 @@ const defaultFormState = (authState) => ({
 const clearHiddenRetrievalFields = (nextForm) => {
   const cleaned = { ...nextForm };
 
-  if (cleaned.embedding_backend !== 'api') {
+  if (!REMOTE_EMBEDDING_BACKENDS.has(cleaned.embedding_backend)) {
+    cleaned.embedding_dim = '';
+  }
+
+  if (!['api', 'openai'].includes(cleaned.embedding_backend)) {
     cleaned.embedding_api_base = '';
     cleaned.embedding_api_key = '';
     cleaned.embedding_model = '';
@@ -71,6 +113,10 @@ const clearHiddenRetrievalFields = (nextForm) => {
     cleaned.reranker_api_base = '';
     cleaned.reranker_api_key = '';
     cleaned.reranker_model = '';
+  }
+
+  if (!(cleaned.reranker_enabled && cleaned.embedding_backend === 'router')) {
+    cleaned.router_reranker_model = '';
   }
 
   if (!cleaned.write_guard_llm_enabled) {
@@ -92,7 +138,65 @@ const clearHiddenRetrievalFields = (nextForm) => {
   return cleaned;
 };
 
-function SetupInput({ label, hint, value, onChange, placeholder, type = 'text' }) {
+const validatePersistableForm = (form) => {
+  const missingFields = [];
+  const placeholderFields = [];
+  const pushField = (bucket, field) => {
+    if (!bucket.includes(field)) {
+      bucket.push(field);
+    }
+  };
+  const requireTextField = (field) => {
+    const value = normalizeFieldValue(form[field]);
+    if (!value) {
+      pushField(missingFields, field);
+      return;
+    }
+    if (isPlaceholderValue(field, value)) {
+      pushField(placeholderFields, field);
+    }
+  };
+
+  if (['api', 'openai'].includes(form.embedding_backend)) {
+    requireTextField('embedding_api_base');
+    requireTextField('embedding_model');
+  } else if (form.embedding_backend === 'router') {
+    requireTextField('router_api_base');
+    requireTextField('router_embedding_model');
+    if (form.reranker_enabled) {
+      requireTextField('router_reranker_model');
+    }
+  }
+
+  if (REMOTE_EMBEDDING_BACKENDS.has(form.embedding_backend)) {
+    if (!isPositiveIntegerValue(form.embedding_dim)) {
+      pushField(missingFields, 'embedding_dim');
+    }
+  }
+
+  if (form.reranker_enabled && form.embedding_backend !== 'router') {
+    requireTextField('reranker_api_base');
+    requireTextField('reranker_model');
+  }
+
+  if (form.write_guard_llm_enabled) {
+    requireTextField('write_guard_llm_api_base');
+    requireTextField('write_guard_llm_model');
+  }
+
+  if (form.intent_llm_enabled) {
+    requireTextField('intent_llm_api_base');
+    requireTextField('intent_llm_model');
+  }
+
+  return {
+    missingFields,
+    placeholderFields,
+    isValid: missingFields.length === 0 && placeholderFields.length === 0,
+  };
+};
+
+function SetupInput({ label, hint, value, onChange, placeholder, type = 'text', min, step }) {
   return (
     <label className="block space-y-2">
       <div>
@@ -108,6 +212,9 @@ function SetupInput({ label, hint, value, onChange, placeholder, type = 'text' }
         value={value}
         onChange={onChange}
         placeholder={placeholder}
+        aria-label={label}
+        min={min}
+        step={step}
         className="palace-input"
       />
     </label>
@@ -125,7 +232,7 @@ function SetupSelect({ label, hint, value, onChange, options }) {
           </div>
         ) : null}
       </div>
-      <select value={value} onChange={onChange} className="palace-input">
+      <select value={value} onChange={onChange} aria-label={label} className="palace-input">
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -151,6 +258,7 @@ function SetupToggle({ label, hint, checked, onChange }) {
         type="checkbox"
         checked={checked}
         onChange={onChange}
+        aria-label={label}
         className="mt-1 h-4 w-4 accent-[color:var(--palace-accent)]"
       />
     </label>
@@ -191,29 +299,53 @@ export default function SetupAssistantModal({
   const [saveSuccess, setSaveSuccess] = React.useState(null);
   const [savingMode, setSavingMode] = React.useState(null);
   const initializedOpenRef = React.useRef(false);
+  const touchedFieldsRef = React.useRef(new Set());
+
+  const markFieldsTouched = React.useCallback((keys) => {
+    keys.forEach((key) => touchedFieldsRef.current.add(key));
+  }, []);
 
   const applySetupStatus = React.useCallback((payload) => {
     setSetupStatus(payload);
-    setForm((current) => ({
-      ...current,
-      allow_insecure_local: payload?.summary?.allow_insecure_local ?? current.allow_insecure_local,
-      embedding_backend: payload?.summary?.embedding_backend ?? current.embedding_backend,
-      reranker_enabled: payload?.summary?.reranker_enabled ?? current.reranker_enabled,
-      write_guard_llm_enabled:
-        payload?.summary?.write_guard_enabled ?? current.write_guard_llm_enabled,
-      intent_llm_enabled: payload?.summary?.intent_llm_enabled ?? current.intent_llm_enabled,
-    }));
+    setForm((current) => {
+      const next = { ...current };
+      const summary = payload?.summary ?? {};
+
+      if (!touchedFieldsRef.current.has('allow_insecure_local')) {
+        next.allow_insecure_local = summary.allow_insecure_local ?? current.allow_insecure_local;
+      }
+      if (!touchedFieldsRef.current.has('embedding_backend')) {
+        next.embedding_backend = summary.embedding_backend ?? current.embedding_backend;
+      }
+      if (!touchedFieldsRef.current.has('embedding_dim') && summary.embedding_dim != null) {
+        next.embedding_dim = String(summary.embedding_dim);
+      }
+      if (!touchedFieldsRef.current.has('reranker_enabled')) {
+        next.reranker_enabled = summary.reranker_enabled ?? current.reranker_enabled;
+      }
+      if (!touchedFieldsRef.current.has('write_guard_llm_enabled')) {
+        next.write_guard_llm_enabled =
+          summary.write_guard_enabled ?? current.write_guard_llm_enabled;
+      }
+      if (!touchedFieldsRef.current.has('intent_llm_enabled')) {
+        next.intent_llm_enabled = summary.intent_llm_enabled ?? current.intent_llm_enabled;
+      }
+
+      return clearHiddenRetrievalFields(next);
+    });
   }, []);
 
   React.useEffect(() => {
     if (!open) {
       initializedOpenRef.current = false;
+      touchedFieldsRef.current = new Set();
       return undefined;
     }
     if (initializedOpenRef.current) return undefined;
     initializedOpenRef.current = true;
 
     let cancelled = false;
+    touchedFieldsRef.current = new Set();
     setForm(defaultFormState(authState));
     setSetupStatus(null);
     setStatusErrorState(null);
@@ -264,8 +396,18 @@ export default function SetupAssistantModal({
   }, [applySetupStatus, authState, initialStatusProbe, open]);
 
   const updateField = React.useCallback((key, value) => {
-    setForm((current) => clearHiddenRetrievalFields({ ...current, [key]: value }));
-  }, []);
+    markFieldsTouched([key]);
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === 'embedding_backend' && REMOTE_EMBEDDING_BACKENDS.has(value)) {
+        const currentDim = normalizeFieldValue(next.embedding_dim);
+        if (!currentDim || currentDim === '64') {
+          next.embedding_dim = '1024';
+        }
+      }
+      return clearHiddenRetrievalFields(next);
+    });
+  }, [markFieldsTouched]);
 
   const statusError = React.useMemo(() => {
     if (!statusErrorState) return null;
@@ -291,6 +433,23 @@ export default function SetupAssistantModal({
   }, [saveSuccess, t]);
 
   const applyPreset = React.useCallback((preset) => {
+    if (preset === 'b') {
+      markFieldsTouched([
+        'embedding_backend',
+        'reranker_enabled',
+        'write_guard_llm_enabled',
+        'intent_llm_enabled',
+      ]);
+    } else {
+      markFieldsTouched([
+        'embedding_backend',
+        'reranker_enabled',
+        'router_api_base',
+        'router_embedding_model',
+        'router_reranker_model',
+        'embedding_dim',
+      ]);
+    }
     setForm((current) => {
       if (preset === 'b') {
         return clearHiddenRetrievalFields({
@@ -306,22 +465,28 @@ export default function SetupAssistantModal({
           ...current,
           embedding_backend: 'router',
           reranker_enabled: true,
+          ...ROUTER_PRESET_DEFAULTS.c,
         });
       }
       return clearHiddenRetrievalFields({
         ...current,
         embedding_backend: 'router',
         reranker_enabled: true,
+        ...ROUTER_PRESET_DEFAULTS.d,
       });
     });
-  }, []);
+  }, [markFieldsTouched]);
 
   const saveBrowserOnlyDisabled = !String(form.dashboard_api_key || '').trim();
-  const showEmbeddingApiFields = form.embedding_backend === 'api';
+  const persistValidation = React.useMemo(() => validatePersistableForm(form), [form]);
+  const showEmbeddingApiFields = ['api', 'openai'].includes(form.embedding_backend);
   const showRouterFields = form.embedding_backend === 'router';
+  const showEmbeddingDimField = REMOTE_EMBEDDING_BACKENDS.has(form.embedding_backend);
   const showRerankerApiFields = form.reranker_enabled && form.embedding_backend !== 'router';
   const canPersistServer =
     setupStatus?.apply_supported === true && setupStatus?.write_supported === true;
+  const saveEnvDisabled =
+    !canPersistServer || savingMode === 'server' || !persistValidation.isValid;
   const restartTargets = setupStatus?.restart_targets || saveSuccess?.restart_targets || [];
   const summary = setupStatus?.summary || {};
   const rerankerStatus =
@@ -366,8 +531,18 @@ export default function SetupAssistantModal({
     setSaveErrorState(null);
     setSaveSuccess(null);
     try {
+      if (!persistValidation.isValid) {
+        setSaveErrorState({
+          error: null,
+          fallbackKey: 'setup.messages.remoteProfileIncomplete',
+        });
+        return;
+      }
       const payload = {
         ...form,
+        embedding_dim: normalizeFieldValue(form.embedding_dim)
+          ? Number.parseInt(normalizeFieldValue(form.embedding_dim), 10)
+          : null,
       };
       const response = await saveSetupConfig(payload);
       let authSaveFailed = false;
@@ -407,7 +582,15 @@ export default function SetupAssistantModal({
     } finally {
       setSavingMode(null);
     }
-  }, [authState?.mode, form, onAuthUpdated]);
+  }, [authState?.mode, form, onAuthUpdated, persistValidation.isValid]);
+
+  const validationMessage = React.useMemo(() => {
+    if (persistValidation.isValid) return null;
+    if (persistValidation.missingFields.length > 0) {
+      return t('setup.messages.remoteProfileIncomplete');
+    }
+    return t('setup.messages.remoteProfileUsesExamples');
+  }, [persistValidation, t]);
 
   const currentLocale = i18n.resolvedLanguage || 'en';
   const nextLocale = currentLocale === 'en' ? 'zh-CN' : 'en';
@@ -558,6 +741,7 @@ export default function SetupAssistantModal({
                       { value: 'none', label: t('setup.retrieval.backends.none') },
                       { value: 'hash', label: t('setup.retrieval.backends.hash') },
                       { value: 'api', label: t('setup.retrieval.backends.api') },
+                      { value: 'openai', label: t('setup.retrieval.backends.openai') },
                       { value: 'router', label: t('setup.retrieval.backends.router') },
                     ]}
                   />
@@ -583,6 +767,21 @@ export default function SetupAssistantModal({
                         onChange={(event) => updateField('embedding_api_key', event.target.value)}
                         placeholder={t('setup.retrieval.embeddingApiKeyPlaceholder')}
                         type="password"
+                      />
+                    </div>
+                  ) : null}
+
+                  {showEmbeddingDimField ? (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <SetupInput
+                        label={t('setup.retrieval.embeddingDimLabel')}
+                        hint={t('setup.retrieval.embeddingDimHint')}
+                        value={form.embedding_dim}
+                        onChange={(event) => updateField('embedding_dim', event.target.value)}
+                        placeholder={t('setup.retrieval.embeddingDimPlaceholder')}
+                        type="number"
+                        min="1"
+                        step="1"
                       />
                     </div>
                   ) : null}
@@ -840,6 +1039,12 @@ export default function SetupAssistantModal({
                       : t('setup.summary.browserOnlyHint')}
                   </div>
 
+                  {validationMessage ? (
+                    <div className="rounded-2xl border border-[color:var(--palace-line)] bg-white/45 p-4 text-sm leading-relaxed text-[color:var(--palace-muted)]">
+                      {validationMessage}
+                    </div>
+                  ) : null}
+
                   {saveSuccess ? (
                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-800">
                       <div className="mb-1 flex items-center gap-2 font-medium">
@@ -866,7 +1071,7 @@ export default function SetupAssistantModal({
                     <button
                       type="button"
                       onClick={handlePersistConfig}
-                      disabled={!canPersistServer || savingMode === 'server'}
+                      disabled={saveEnvDisabled}
                       className="palace-btn-primary w-full justify-center disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingMode === 'server'

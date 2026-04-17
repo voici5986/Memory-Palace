@@ -645,6 +645,12 @@ class SnapshotManager:
         """
         with self._session_write_lock(session_id):
             manifest = self._load_manifest(session_id)
+            if manifest.get("resources") and not self._manifest_matches_current_database(manifest):
+                self._clear_session_unlocked(session_id, manifest)
+                manifest = self._build_manifest_payload(
+                    session_id,
+                    scope=_resolve_current_database_scope(),
+                )
             snapshot_path = self._get_snapshot_path(session_id, resource_id)
             if not force and (
                 resource_id in manifest.get("resources", {}) or os.path.exists(snapshot_path)

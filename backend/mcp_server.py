@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from filelock import AsyncFileLock, Timeout as FileLockTimeout
 from shared_utils import (
     env_bool as _env_bool,
@@ -50,9 +50,53 @@ from runtime_bootstrap import initialize_backend_runtime
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 dotenv_path = os.path.join(root_dir, ".env")
+_SETUP_MANAGED_ENV_KEYS = {
+    "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
+    "RETRIEVAL_EMBEDDING_BACKEND",
+    "RETRIEVAL_EMBEDDING_API_BASE",
+    "RETRIEVAL_EMBEDDING_API_KEY",
+    "RETRIEVAL_EMBEDDING_MODEL",
+    "RETRIEVAL_EMBEDDING_DIM",
+    "OPENAI_EMBEDDING_MODEL",
+    "RETRIEVAL_RERANKER_ENABLED",
+    "RETRIEVAL_RERANKER_API_BASE",
+    "RETRIEVAL_RERANKER_API_KEY",
+    "RETRIEVAL_RERANKER_MODEL",
+    "WRITE_GUARD_LLM_ENABLED",
+    "WRITE_GUARD_LLM_API_BASE",
+    "WRITE_GUARD_LLM_API_KEY",
+    "WRITE_GUARD_LLM_MODEL",
+    "INTENT_LLM_ENABLED",
+    "INTENT_LLM_API_BASE",
+    "INTENT_LLM_API_KEY",
+    "INTENT_LLM_MODEL",
+    "ROUTER_API_BASE",
+    "ROUTER_API_KEY",
+    "ROUTER_CHAT_MODEL",
+    "ROUTER_EMBEDDING_MODEL",
+    "ROUTER_RERANKER_MODEL",
+}
+_PROCESS_ENV_SETUP_OVERRIDES = frozenset(
+    key for key in _SETUP_MANAGED_ENV_KEYS if key in os.environ
+)
+
+
+def _refresh_setup_managed_env_from_dotenv(path: str) -> None:
+    parsed = dotenv_values(path)
+    for key in _SETUP_MANAGED_ENV_KEYS:
+        if key in _PROCESS_ENV_SETUP_OVERRIDES:
+            continue
+        if key not in parsed:
+            continue
+        value = parsed.get(key)
+        if value is None or value == "":
+            os.environ.pop(key, None)
+            continue
+        os.environ[key] = str(value)
 
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
+    _refresh_setup_managed_env_from_dotenv(dotenv_path)
 
 
 def _read_mcp_host() -> str:
@@ -1419,16 +1463,22 @@ async def _resolve_reflection_workflow_content(
         candidate_session_ids.append("dashboard")
 
     normalized_summary = ""
+    summary_attempted = False
+    saw_summary_error = False
     for candidate_session_id in candidate_session_ids:
         try:
             summary = await summary_builder(session_id=candidate_session_id, limit=12)
         except Exception:
-            return None, "session_summary_unavailable"
+            saw_summary_error = True
+            continue
+        summary_attempted = True
         normalized_summary = str(summary or "").strip()
         if normalized_summary:
             break
 
     if not normalized_summary:
+        if saw_summary_error and not summary_attempted:
+            return None, "session_summary_unavailable"
         return None, "session_summary_empty"
     return normalized_summary, None
 
@@ -1477,7 +1527,11 @@ async def run_reflection_workflow_service(
         )
 
     if normalized_mode == "execute":
-        result = await _run_write_lane("reflection_workflow.execute", _run_reflection_task)
+        result = await _run_write_lane(
+            "reflection_workflow.execute",
+            _run_reflection_task,
+            session_id=normalized_session_id,
+        )
     else:
         result = await _run_reflection_task()
 
@@ -2280,12 +2334,18 @@ async def drain_pending_flush_summaries(
     }
 
 
-async def _run_write_lane(operation: str, fn):
+async def _run_write_lane(
+    operation: str,
+    fn,
+    *,
+    session_id: Optional[str] = None,
+):
     await runtime_state.ensure_started(get_sqlite_client)
     if not ENABLE_WRITE_LANE_QUEUE:
         return await fn()
+    resolved_session_id = str(session_id or "").strip() or get_session_id()
     return await runtime_state.write_lanes.run_write(
-        session_id=get_session_id(),
+        session_id=resolved_session_id,
         operation=operation,
         task=fn,
     )

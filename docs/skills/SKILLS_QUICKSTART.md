@@ -305,7 +305,7 @@ codex mcp add memory-palace \
 - 无论走脚本还是手工 fallback，最终都会写到 `~/.codex/config.toml`
 - 这是 `Codex CLI` 当前的产品行为，不是本仓库少了文件
 - 这条命令最终也会复用当前仓库 `.env` 里的 `DATABASE_URL`；如果那份 `.env` 还是 Docker 用的 `/app/data/...`，或者其他 `/data/...` 这类容器路径，本机 `stdio` MCP 会直接拒绝启动
-- 如果你把 fallback 命令改写成别的 shell / 客户端配置，别把 `source .venv/bin/activate` 随手删掉；要么先激活项目自己的 `.venv`，要么直接改成 `.venv` 里的 Python。否则 MCP 进程可能会在启动前就因为解释器不对而报 `No module named 'sqlalchemy'`
+- 如果你是手工排障，尽量保持这里的 fallback 命令形状原样：Windows 直接用 `python + backend/mcp_wrapper.py`，POSIX 路径直接用 `/bin/zsh -lc 'cd <repo-root> && bash scripts/run_memory_palace_mcp_stdio.sh'`。不要顺手改成 `python3`，也不要在同一条 shell 命令后面再拼别的 `&& ...`；这类改写当前不会被仓库脚本当成同一条稳定的 repo-local 绑定。
 
 ---
 

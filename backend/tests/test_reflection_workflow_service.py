@@ -17,6 +17,16 @@ class _FakeFlushTracker:
         return self.summary
 
 
+class _FallbackFlushTracker:
+    async def build_summary(self, *, session_id: str | None, limit: int = 12) -> str:
+        _ = limit
+        if session_id == "dashboard-broken":
+            raise RuntimeError("tracker unavailable")
+        if session_id == "dashboard":
+            return "Session compaction notes:\n- fallback dashboard summary"
+        return ""
+
+
 class _ReflectionClient:
     def __init__(self) -> None:
         self._next_id = 1
@@ -160,6 +170,43 @@ async def test_reflection_execute_can_be_rolled_back(
 
 
 @pytest.mark.asyncio
+async def test_reflection_execute_routes_write_lane_through_explicit_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane_calls: list[tuple[str | None, str]] = []
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "ensure_started",
+        lambda *_args, **_kwargs: asyncio.sleep(0),
+    )
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker("Session compaction notes:\n- keep explicit session lane"),
+    )
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    async def _run_write(*, session_id, operation, task):
+        lane_calls.append((session_id, operation))
+        return await task()
+
+    monkeypatch.setattr(mcp_server.runtime_state.write_lanes, "run_write", _run_write)
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="execute",
+        source="session_summary",
+        reason="keep explicit session lane",
+        session_id="explicit-session",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is True
+    assert payload["executed"] is True
+    assert lane_calls == [("explicit-session", "reflection_workflow.execute")]
+
+
+@pytest.mark.asyncio
 async def test_same_session_concurrent_reflection_and_explicit_learn_do_not_fail_on_namespace_uniqueness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -247,3 +294,29 @@ async def test_browse_write_seeds_dashboard_reflection_summary_instead_of_sessio
     assert reflection_payload["ok"] is True
     assert reflection_payload["prepared"] is True
     assert reflection_payload["result"]["reason"] == "prepared"
+
+
+@pytest.mark.asyncio
+async def test_reflection_prepare_falls_back_to_dashboard_session_after_tracker_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = ImportLearnAuditTracker()
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(mcp_server.runtime_state, "import_learn_tracker", tracker)
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FallbackFlushTracker(),
+    )
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="use dashboard fallback summary",
+        session_id="dashboard-broken",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is True
+    assert payload["prepared"] is True
+    assert payload["result"]["reason"] == "prepared"

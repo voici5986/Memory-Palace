@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -391,6 +392,69 @@ def _same_path(a: object, b: object) -> bool:
     return _normalized(a).lower() == _normalized(b).lower()
 
 
+def _command_name(command: object) -> str:
+    return Path(str(command or "")).name.lower()
+
+
+def _looks_like_python_command(command: object) -> bool:
+    normalized = str(command or "").strip().lower()
+    return normalized in {"py", "python"}
+
+
+def _strip_matching_quotes(value: object) -> str:
+    normalized = str(value or "").strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {'"', "'"}:
+        return normalized[1:-1]
+    return normalized
+
+
+def _shell_fallback_binding_ok(
+    command: str,
+    args: list[str],
+    *,
+    shell_candidates: set[str],
+) -> bool:
+    if _command_name(command) not in {"bash", "sh", "zsh"}:
+        return False
+    if len(args) < 2 or args[0] not in {"-lc", "-c"}:
+        return False
+
+    inline_script = str(args[1] or "").strip()
+    if not inline_script:
+        return False
+
+    segments = [segment.strip() for segment in inline_script.split("&&") if segment.strip()]
+    if len(segments) != 2:
+        return False
+
+    try:
+        cd_tokens = shlex.split(segments[0])
+    except ValueError:
+        return False
+    if len(cd_tokens) != 2 or cd_tokens[0] != "cd" or not _same_path(cd_tokens[1], project_root()):
+        return False
+
+    launch_segment = segments[1]
+    if launch_segment.startswith("exec "):
+        launch_segment = launch_segment[5:].strip()
+    try:
+        launch_tokens = shlex.split(launch_segment)
+    except ValueError:
+        return False
+    if len(launch_tokens) != 2 or _command_name(launch_tokens[0]) not in {"bash", "sh", "zsh"}:
+        return False
+
+    wrapper = _normalized(_strip_matching_quotes(launch_tokens[1]))
+    if wrapper in shell_candidates:
+        return True
+
+    if not Path(wrapper).is_absolute():
+        resolved_wrapper = project_root() / wrapper
+        if _same_path(resolved_wrapper.resolve(), shell_wrapper_absolute().resolve()):
+            return True
+    return False
+
+
 def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bool:
     normalized_parts = [_normalized(part) for part in command_parts if str(part).strip()]
     if not normalized_parts:
@@ -407,8 +471,14 @@ def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bo
         shell_candidates.add(_normalized(shell_wrapper_relative()))
         python_wrapper_candidates.add(_normalized(python_wrapper_relative()))
 
-    shell_command = Path(command).name.lower()
+    shell_command = _command_name(command)
     if shell_command in {"bash", "sh"} and args[0] in shell_candidates:
+        return True
+    if _shell_fallback_binding_ok(
+        command,
+        args,
+        shell_candidates=shell_candidates | {_normalized(shell_wrapper_relative())},
+    ):
         return True
 
     try:
@@ -416,6 +486,8 @@ def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bo
     except SystemExit:
         expected_python = ""
     if expected_python and _same_path(command, expected_python) and args[0] in python_wrapper_candidates:
+        return True
+    if _looks_like_python_command(command) and args[0] in python_wrapper_candidates:
         return True
     return False
 

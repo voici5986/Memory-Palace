@@ -37,6 +37,7 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "demo.db"
 WINDOWS_VENV_PYTHON = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
 POSIX_VENV_PYTHON = BACKEND_DIR / ".venv" / "bin" / "python"
 DOCKER_INTERNAL_SQLITE_PREFIXES = ("/app/", "/data/")
+_LOCAL_NO_PROXY_HOSTS = ("localhost", "127.0.0.1", "::1", "host.docker.internal")
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -108,6 +109,39 @@ def is_docker_internal_database_url(value: str | None) -> bool:
 def sqlite_database_url(path: Path) -> str:
     normalized = path.resolve().as_posix()
     return f"sqlite+aiosqlite:///{normalized}"
+
+
+def _csv_list_contains_case_insensitive(csv: str, item: str) -> bool:
+    normalized_item = _normalize_env_string_value(item)
+    if not normalized_item:
+        return True
+    target = normalized_item.lower()
+    for entry in csv.split(","):
+        if _normalize_env_string_value(entry).lower() == target:
+            return True
+    return False
+
+
+def _append_csv_item_if_missing(csv: str, item: str) -> str:
+    normalized_item = _normalize_env_string_value(item)
+    if not normalized_item or _csv_list_contains_case_insensitive(csv, normalized_item):
+        return csv
+    if csv:
+        return f"{csv},{normalized_item}"
+    return normalized_item
+
+
+def _merge_local_no_proxy_defaults(*values: str | None) -> str:
+    merged = ""
+    for value in values:
+        normalized_value = _normalize_env_string_value(value)
+        if not normalized_value:
+            continue
+        for entry in normalized_value.split(","):
+            merged = _append_csv_item_if_missing(merged, entry)
+    for host in _LOCAL_NO_PROXY_HOSTS:
+        merged = _append_csv_item_if_missing(merged, host)
+    return merged
 
 
 def _prefer_windows_venv_layout() -> bool:
@@ -216,6 +250,12 @@ def build_runtime_env() -> dict[str, str]:
     runtime_env["RETRIEVAL_REMOTE_TIMEOUT_SEC"] = (
         runtime_remote_timeout or "8"
     )
+    merged_no_proxy = _merge_local_no_proxy_defaults(
+        runtime_env.get("NO_PROXY", ""),
+        runtime_env.get("no_proxy", ""),
+    )
+    runtime_env["NO_PROXY"] = merged_no_proxy
+    runtime_env["no_proxy"] = merged_no_proxy
     runtime_env.setdefault("PYTHONIOENCODING", "utf-8")
     runtime_env.setdefault("PYTHONUTF8", "1")
     return runtime_env

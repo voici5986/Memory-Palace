@@ -49,9 +49,11 @@ This document helps you choose the appropriate Memory Palace configuration profi
 *   **B → C/D**: Once connected to real embedding + reranker models, you may get much better semantic retrieval; if the existing index was written with a different embedding backend / model / dimension, the runtime degrades first and asks for reindex instead of pretending the switch already succeeded.
 *   **C vs D**: Identical algorithm paths; the main difference in the default template is the model service address (local vs remote) and the default `RETRIEVAL_RERANKER_WEIGHT` (C=`0.30`, D=`0.35`).
 
-> **Terminology Note (to avoid confusion with evaluation docs)**: In the deployment templates, C has the reranker enabled by default. In the "Real A/B/C/D Runs" section of `docs/EVALUATION_EN.md`, `profile_c` acts as a control group with the reranker disabled (`profile_d` enables it) to observe the gain. That is the current helper / smoke boundary, not a product promise that the same old vectors can be "smart-switched" across profiles.
+> **Terminology Note (to avoid confusion with evaluation docs)**: The deployment templates describe the actual profile defaults you apply locally, while `docs/EVALUATION_EN.md` summarizes what the public A/B/C/D reruns looked like on that verification round. Use the deployment templates to decide what gets written into `.env`; use the evaluation page to understand how those profiles behaved in the published checks. Neither page is promising a seamless hot-switch on top of old vectors.
 >
 > **Additional Note**: C/D templates follow the `router` path by default. If your deployment doesn't use a unified router, you can also directly configure `RETRIEVAL_EMBEDDING_*`, `RETRIEVAL_RERANKER_*`, and `WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` to connect to OpenAI-compatible services.
+>
+> **The first-run assistant follows the same wording**: `Profile C` / `Profile D` in the assistant only prefill a more local/private-style router starting point versus a more remote-style router starting point. They do not mean the setup is already valid. Before save, you still need to replace the required router base/model fields with your real values; if you are not using a router, you can switch directly to the `api` / `openai` embedding backend instead. `openai` is an embedding-backend option, not a brand-new extra profile tier.
 >
 > **One local-template note**: the repository's local `profile c/d` templates now also keep `RUNTIME_AUTO_FLUSH_ENABLED=true` explicitly, so `.env` files generated through `apply_profile.sh/.ps1` keep the same auto-flush default as A/B unless you override it yourself.
 >
@@ -177,6 +179,7 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # Remote recommended slightly
 >
 > **Model ID Reminder**: The `your-embedding-model-id` / `your-reranker-model-id` values above are shell-safe placeholder examples. The project is not bound to any specific model family; please fill in your own provider's actual model ID.
 > If you use `profile c/d`, whether you stop at `apply_profile.sh/.ps1` or continue into `docker_one_click.sh/.ps1`, those placeholder model IDs / endpoints / keys are all treated as unresolved configuration. The script stops early instead of waiting for the container startup path to fail later.
+> A real local/private router endpoint such as `http://127.0.0.1:8001/v1` is **not** treated as a placeholder. The values that still block save/startup are the documented examples such as `https://router.example.com/v1`, `router-embedding-model`, `router-reranker-model`, `your-embedding-model-id`, and `your-reranker-model-id`.
 
 If you adopt the direct connection method, note one boundary first:
 
@@ -187,6 +190,8 @@ If you adopt the direct connection method, note one boundary first:
 > As rechecked in the current `v3.7.0` validation, the local `profile c/d + --allow-runtime-env-injection` path now follows the intended order: generate the Docker env from the template first, defer template placeholder validation for that run, write the injected runtime values, and then still fail closed if the required external settings remain unresolved. In plain language: template placeholders no longer block local debugging before your real values land, but missing injected values are still treated as a hard stop.
 >
 > On the native Windows PowerShell path, later env rewrites in `docker_one_click.ps1` now also keep that generated Docker env file in UTF-8 without BOM, so the same file can continue to be handed to Docker Compose without a PowerShell 5.1 encoding mismatch.
+>
+> One more boundary to keep explicit: runtime env injection copies the values from your current shell **as-is**. It does not rewrite `127.0.0.1` into a container-reachable address for you. If the container needs to call a model service running on your host machine, pass `host.docker.internal:<port>` (or another address the container can really reach), not `127.0.0.1:<port>`.
 
 The minimum verification path should therefore be split into two cases:
 
@@ -377,7 +382,7 @@ cd <project-root>
 >
 > When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it prioritizes `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as the fallback source for embedding / reranker API base+key. When `RETRIEVAL_RERANKER_MODEL` is not explicitly provided, it also falls back to `ROUTER_RERANKER_MODEL`.
 >
-> Current validation snapshot: local A/B/C/D startup + retrieval smoke were rechecked, and the one-click Docker path was rechecked for B/C/D. For Docker `profile d`, treat reranker reachability as a target-environment check: the stack can start successfully and still degrade at query time with `reranker_request_failed` if the container cannot reach your reranker endpoint.
+> Current validation snapshot: local A/B/C/D startup + retrieval smoke were rechecked, and the one-click Docker path was rechecked for A/B/C/D. The A path stayed a baseline startup/`/health`/`/sse` smoke, while B/C/D also rechecked setup status, protected browse routes, and proxied SSE reachability. For Docker `profile d`, treat reranker reachability as a target-environment check: the stack can start successfully and still degrade at query time with `reranker_request_failed` if the container cannot reach your reranker endpoint.
 >
 > The local build path now also uses checkout-scoped stable image names. The practical effect is simple: once this checkout has completed one successful build, `--no-build` can keep reusing those local images even if you change `COMPOSE_PROJECT_NAME`; you only need to build again on the first run or after deleting the local images.
 
@@ -583,7 +588,7 @@ When using **Docker one-click deployment**, you don't need to write the key into
 HOST=127.0.0.1 PORT=8010 python run_sse.py
 ```
 
-> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. When that fallback happens, the startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection. If your remote hostname / origin should also pass MCP transport-security host/origin checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
+> `python run_sse.py` prefers loopback (`HOST=127.0.0.1`, `PORT=8000`) and automatically falls back to `127.0.0.1:8010` when local `8000` is already occupied by the main backend, so `HOST=127.0.0.1` here is still the normal local debugging shape. If you bind `HOST=localhost`, the probe now treats `127.0.0.1` as the required loopback candidate and `::1` as best-effort, so a host without IPv6 loopback support no longer gets pushed to `8010` just because `::1` is unavailable. When fallback really does happen, the startup log also prints the final `/sse` URL and tells you to update the client config or set `PORT` explicitly. To allow other machines to access it, change it to `0.0.0.0` (or your actual listening address) and supplement with your own `MCP_API_KEY`, network isolation, reverse proxy, and TLS protection. If your remote hostname / origin should also pass MCP transport-security host/origin checks, add it explicitly through `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
 >
 > In Docker / Compose, SSE is now served directly by the `backend` process and then reached through the frontend proxy; there is no separate `sse` container in the default topology anymore.
 

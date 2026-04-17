@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import App, { buildRoutesKey, resolveAppBasename } from './App';
 import i18n, { LOCALE_STORAGE_KEY } from './i18n';
@@ -43,6 +43,16 @@ vi.mock('./features/maintenance/MaintenancePage', () => ({
 vi.mock('./features/observability/ObservabilityPage', () => ({
   default: () => <div>observability-page</div>,
 }));
+
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+};
 
 describe('App routing', () => {
   beforeEach(async () => {
@@ -563,14 +573,281 @@ describe('App routing', () => {
     await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
     expect(embeddingBackend).toHaveValue('router');
     expect(rerankerToggle).toBeChecked();
-    expect(within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).toBeInTheDocument();
+    expect(
+      within(dialog).getByDisplayValue('http://127.0.0.1:8001/v1')
+    ).toBeInTheDocument();
     expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.embeddingApiBasePlaceholder'))).not.toBeInTheDocument();
     expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.rerankerApiBasePlaceholder'))).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel'))
+    ).toHaveValue(1024);
 
     await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.d') }));
     expect(embeddingBackend).toHaveValue('router');
     expect(rerankerToggle).toBeChecked();
-    expect(within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).toBeInTheDocument();
+    expect(
+      within(dialog).getByDisplayValue('https://router.example.com/v1')
+    ).toBeInTheDocument();
+  });
+
+  it('blocks saving preset C until required remote retrieval fields are real values', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+    expect(saveButton).toBeDisabled();
+
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')),
+      'router-embed-model'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
+      'router-reranker-live'
+    );
+
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+  });
+
+  it('requires an embedding dimension before api backend config can be saved', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
+
+    await user.selectOptions(within(dialog).getByRole('combobox'), 'api');
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingApiBaseLabel')),
+      'https://emb.example/v1'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingModelLabel')),
+      'text-embedding-live'
+    );
+    await user.clear(within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')));
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    expect(setupApi.saveSetupConfig).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['api', '0'],
+    ['api', 'NaN'],
+    ['router', '-1'],
+    ['openai', '1.5'],
+  ])('rejects invalid embedding dimensions for %s backends: %s', async (backend, invalidDim) => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
+
+    if (backend === 'router') {
+      await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+      await user.type(
+        within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')),
+        'router-embed-live'
+      );
+      await user.type(
+        within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
+        'router-rerank-live'
+      );
+    } else {
+      await user.selectOptions(within(dialog).getByRole('combobox'), backend);
+      await user.type(
+        within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingApiBaseLabel')),
+        backend === 'openai' ? 'https://api.openai.com/v1' : 'https://emb.example/v1'
+      );
+      await user.type(
+        within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingModelLabel')),
+        backend === 'openai' ? 'text-embedding-3-large' : 'text-embedding-live'
+      );
+    }
+
+    fireEvent.change(within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')), {
+      target: { value: invalidDim },
+    });
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    expect(setupApi.saveSetupConfig).not.toHaveBeenCalled();
+  });
+
+  it('supports the openai embedding backend and sends a provider-specific embedding dimension', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.selectOptions(
+      within(dialog).getByRole('combobox'),
+      'openai'
+    );
+
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingApiBaseLabel')),
+      'https://api.openai.com/v1'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingModelLabel')),
+      'text-embedding-3-large'
+    );
+    await user.clear(within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')));
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')),
+      '3072'
+    );
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embedding_backend: 'openai',
+        embedding_api_base: 'https://api.openai.com/v1',
+        embedding_model: 'text-embedding-3-large',
+        embedding_dim: 3072,
+      })
+    );
+  });
+
+  it('hydrates untouched retrieval status fields even if the user types a dashboard key before setup status resolves', async () => {
+    const user = userEvent.setup();
+    const setupStatusDeferred = createDeferred();
+    window.history.pushState({}, '', '/memory');
+    setupApi.getSetupStatus.mockReset();
+    setupApi.getSetupStatus.mockReturnValueOnce(setupStatusDeferred.promise);
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'typed-before-status'
+    );
+
+    setupStatusDeferred.resolve({
+      ok: true,
+      apply_supported: true,
+      apply_reason: 'local_env_file',
+      write_supported: true,
+      write_reason: 'local_env_file',
+      target_label: '.env',
+      restart_required: true,
+      restart_targets: ['backend', 'sse'],
+      summary: {
+        dashboard_auth_configured: false,
+        allow_insecure_local: false,
+        embedding_backend: 'router',
+        embedding_dim: 1024,
+        embedding_configured: true,
+        reranker_enabled: true,
+        reranker_configured: true,
+        write_guard_enabled: false,
+        write_guard_configured: false,
+        intent_llm_enabled: false,
+        intent_llm_configured: false,
+      },
+    });
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole('combobox')).toHaveValue('router');
+    });
+    expect(
+      within(dialog).getByRole('checkbox', {
+        name: new RegExp(`^${i18n.t('setup.retrieval.rerankerEnabledLabel')}`),
+      })
+    ).toBeChecked();
+    expect(within(dialog).getByDisplayValue('typed-before-status')).toBeInTheDocument();
+
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerApiBaseLabel')),
+      'http://127.0.0.1:8001/v1'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')),
+      'local-router-embed'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
+      'local-router-rerank'
+    );
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dashboard_api_key: 'typed-before-status',
+        embedding_backend: 'router',
+        embedding_dim: 1024,
+        reranker_enabled: true,
+        router_api_base: 'http://127.0.0.1:8001/v1',
+        router_embedding_model: 'local-router-embed',
+        router_reranker_model: 'local-router-rerank',
+      })
+    );
+  });
+
+  it('allows the real local router endpoint but still blocks example router model ids', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+    expect(saveButton).toBeDisabled();
+
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')),
+      'router-embedding-model'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
+      'router-reranker-model'
+    );
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+
+    await user.clear(within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')));
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerEmbeddingModelLabel')),
+      'local-router-embed'
+    );
+    await user.clear(within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')));
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
+      'local-router-rerank'
+    );
+
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
   });
 
   it('clears hidden router fallback fields when switching back to preset B before saving', async () => {

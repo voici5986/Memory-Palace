@@ -273,6 +273,142 @@ async def test_rollback_path_create_uses_single_write_lane_for_tree_delete(
 
 
 @pytest.mark.asyncio
+async def test_rollback_path_create_tree_deletes_descendants_added_before_write_lane_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-create-late-descendants.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    root = await client.create_memory(
+        parent_path="",
+        content="root content",
+        priority=1,
+        title="parent",
+        domain="core",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        late_child = await client.create_memory(
+            parent_path="parent",
+            content="late child",
+            priority=1,
+            title="late-child",
+            domain="core",
+        )
+        late_grandchild = await client.create_memory(
+            parent_path="parent/late-child",
+            content="late grandchild",
+            priority=1,
+            title="late-grandchild",
+            domain="core",
+        )
+        payload = await task()
+        payload["_late_ids"] = (
+            late_child["id"],
+            late_grandchild["id"],
+        )
+        return payload
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    payload = await review_api._rollback_path(
+        {
+            "operation_type": "create",
+            "domain": "core",
+            "path": "parent",
+            "uri": "core://parent",
+            "memory_id": root["id"],
+        },
+        lane_session_id="review.rollback:late-descendants",
+    )
+
+    late_child_id, late_grandchild_id = payload.pop("_late_ids")
+
+    assert payload["deleted"] is True
+    assert payload["descendants_deleted"] == 2
+    assert payload["orphan_memories_deleted"] >= 2
+    assert await client.get_memory_by_path("parent", "core", reinforce_access=False) is None
+    assert (
+        await client.get_memory_by_path(
+            "parent/late-child", "core", reinforce_access=False
+        )
+        is None
+    )
+    assert (
+        await client.get_memory_by_path(
+            "parent/late-child/late-grandchild",
+            "core",
+            reinforce_access=False,
+        )
+        is None
+    )
+    assert await client.get_memory_by_id(root["id"]) is None
+    assert await client.get_memory_by_id(late_child_id) is None
+    assert await client.get_memory_by_id(late_grandchild_id) is None
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_rollback_path_create_tree_rechecks_current_target_inside_atomic_delete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-create-stale-target.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    original = await client.create_memory(
+        parent_path="",
+        content="original content",
+        priority=1,
+        title="parent",
+        domain="core",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        updated = await client.update_memory(
+            path="parent",
+            domain="core",
+            content="newer content",
+        )
+        try:
+            return await task()
+        finally:
+            _run_write_lane_stub.updated_memory_id = updated["new_memory_id"]
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "create",
+                "domain": "core",
+                "path": "parent",
+                "uri": "core://parent",
+                "memory_id": original["id"],
+            },
+            lane_session_id="review.rollback:stale-target",
+        )
+
+    current = await client.get_memory_by_path("parent", "core", reinforce_access=False)
+
+    assert exc_info.value.status_code == 409
+    assert "expected memory_id" in str(exc_info.value.detail)
+    assert current is not None
+    assert current["id"] == _run_write_lane_stub.updated_memory_id
+    assert current["content"] == "newer content"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_rollback_path_create_cascades_descendants_under_alias_roots(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -807,6 +943,7 @@ async def test_rollback_path_create_alias_routes_writes_through_write_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lane_calls = []
+    before_delete_payloads = []
 
     class _AliasClient:
         async def get_memory_by_path(
@@ -818,7 +955,17 @@ async def test_rollback_path_create_alias_routes_writes_through_write_lane(
             _ = path, domain, reinforce_access
             return None
 
-        async def remove_path(self, path: str, domain: str):
+        async def delete_path_atomically(
+            self,
+            path: str,
+            domain: str,
+            *,
+            before_delete=None,
+        ):
+            if before_delete is not None:
+                payload = {"id": 42, "path": path, "domain": domain}
+                before_delete_payloads.append(payload)
+                await before_delete(dict(payload))
             return {"removed_uri": f"{domain}://{path}"}
 
     async def _run_write_lane_stub(operation: str, task, *, session_id=None):
@@ -845,6 +992,54 @@ async def test_rollback_path_create_alias_routes_writes_through_write_lane(
             "session_id": "review.rollback:lane-path",
         }
     ]
+    assert before_delete_payloads == [{"id": 42, "path": "alias-node", "domain": "core"}]
+
+
+@pytest.mark.asyncio
+async def test_rollback_path_create_alias_rechecks_current_target_inside_atomic_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _AliasRaceClient:
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return {"id": 42}
+
+        async def delete_path_atomically(
+            self,
+            path: str,
+            domain: str,
+            *,
+            before_delete=None,
+        ):
+            _ = path, domain
+            await before_delete({"id": 99, "path": path, "domain": domain})
+            raise AssertionError("delete_path_atomically should stop before delete")
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: _AliasRaceClient())
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "create_alias",
+                "domain": "core",
+                "path": "alias-node",
+                "uri": "core://alias-node",
+                "memory_id": 42,
+            }
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "points to a different memory" in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio
@@ -871,8 +1066,16 @@ async def test_rollback_memory_content_routes_writes_through_write_lane(
             _ = path, domain, reinforce_access
             return {"id": 999, "content": "current"}
 
-        async def rollback_to_memory(self, path: str, memory_id: int, domain: str):
+        async def rollback_to_memory(
+            self,
+            path: str,
+            memory_id: int,
+            domain: str,
+            *,
+            expected_current_memory_id: int | None = None,
+        ):
             _ = path, domain
+            assert expected_current_memory_id == 999
             return {"restored_memory_id": int(memory_id)}
 
     async def _run_write_lane_stub(operation: str, task, *, session_id=None):
@@ -900,6 +1103,85 @@ async def test_rollback_memory_content_routes_writes_through_write_lane(
             "session_id": "review.rollback:lane-memory",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_rollback_path_create_tree_is_atomic_when_root_delete_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-tree-atomic.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    root = await client.create_memory(
+        parent_path="",
+        content="root content",
+        priority=1,
+        title="parent",
+        domain="core",
+    )
+    child = await client.create_memory(
+        parent_path="parent",
+        content="child content",
+        priority=1,
+        title="child",
+        domain="core",
+    )
+    grandchild = await client.create_memory(
+        parent_path="parent/child",
+        content="grandchild content",
+        priority=1,
+        title="grand",
+        domain="core",
+    )
+
+    original_delete = getattr(client, "_permanently_delete_memory_in_session", None)
+
+    async def _fail_on_root(session, memory_id: int, *, require_orphan: bool = False, expected_state_hash: str | None = None):
+        if int(memory_id) == root["id"]:
+            raise RuntimeError("root delete failed")
+        if original_delete is not None:
+            return await original_delete(
+                session,
+                memory_id,
+                require_orphan=require_orphan,
+                expected_state_hash=expected_state_hash,
+            )
+        return await client.permanently_delete_memory(
+            memory_id,
+            require_orphan=require_orphan,
+            expected_state_hash=expected_state_hash,
+        )
+
+    monkeypatch.setattr(
+        client,
+        "_permanently_delete_memory_in_session",
+        _fail_on_root,
+        raising=False,
+    )
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "create",
+                "domain": "core",
+                "path": "parent",
+                "uri": "core://parent",
+                "memory_id": root["id"],
+            }
+        )
+
+    assert exc_info.value.status_code == 409
+    assert await client.get_memory_by_path("parent", "core", reinforce_access=False) is not None
+    assert await client.get_memory_by_path("parent/child", "core", reinforce_access=False) is not None
+    assert await client.get_memory_by_path("parent/child/grand", "core", reinforce_access=False) is not None
+    assert await client.get_memory_by_id(root["id"]) is not None
+    assert await client.get_memory_by_id(child["id"]) is not None
+    assert await client.get_memory_by_id(grandchild["id"]) is not None
+
+    await client.close()
 
 
 @pytest.mark.asyncio
@@ -971,6 +1253,130 @@ async def test_rollback_legacy_modify_routes_combined_restore_through_single_wri
             "session_id": "review.rollback:legacy-combined",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_rollback_legacy_modify_returns_409_when_combined_restore_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _LegacyConflictClient:
+        async def get_memory_version(self, memory_id: int):
+            memory_id = int(memory_id)
+            if memory_id == 123:
+                return {"id": 123, "migrated_to": 999}
+            if memory_id == 999:
+                return {"id": 999, "migrated_to": None}
+            return None
+
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return {"id": 999, "priority": 5, "disclosure": "new"}
+
+        async def rollback_to_memory(
+            self,
+            path: str,
+            memory_id: int,
+            domain: str,
+            *,
+            expected_current_memory_id: int | None = None,
+            restore_path_metadata: bool = False,
+            restore_priority: int | None = None,
+            restore_disclosure: str | None = None,
+        ):
+            _ = path, memory_id, domain
+            assert expected_current_memory_id == 999
+            assert restore_path_metadata is True
+            assert restore_priority == 1
+            assert restore_disclosure == "old"
+            raise ValueError("expected_current_memory_id mismatch")
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: _LegacyConflictClient())
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_legacy_modify(
+            {
+                "memory_id": 123,
+                "path": "agent/node",
+                "domain": "core",
+                "uri": "core://agent/node",
+                "priority": 1,
+                "disclosure": "old",
+            },
+            lane_session_id="review.rollback:legacy-combined-conflict",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "expected_current_memory_id mismatch" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_rollback_legacy_modify_returns_409_when_version_only_restore_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _LegacyVersionOnlyConflictClient:
+        async def get_memory_version(self, memory_id: int):
+            memory_id = int(memory_id)
+            if memory_id == 123:
+                return {"id": 123, "migrated_to": 999}
+            if memory_id == 999:
+                return {"id": 999, "migrated_to": None}
+            return None
+
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return {"id": 999, "priority": 1, "disclosure": "old"}
+
+        async def rollback_to_memory(
+            self,
+            path: str,
+            memory_id: int,
+            domain: str,
+            *,
+            expected_current_memory_id: int | None = None,
+        ):
+            _ = path, memory_id, domain
+            assert expected_current_memory_id == 999
+            raise ValueError("current memory changed")
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        return await task()
+
+    monkeypatch.setattr(
+        review_api, "get_sqlite_client", lambda: _LegacyVersionOnlyConflictClient()
+    )
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_legacy_modify(
+            {
+                "memory_id": 123,
+                "path": "agent/node",
+                "domain": "core",
+                "uri": "core://agent/node",
+                "priority": 1,
+                "disclosure": "old",
+            },
+            lane_session_id="review.rollback:legacy-version-conflict",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "current memory changed" in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio
