@@ -149,7 +149,7 @@ The following are the most commonly used configuration items in `.env` (for more
 | `SEARCH_DEFAULT_MODE` | Search mode: `keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | Embedding backend: `none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding model name | `your-embedding-model-id` |
-| `RETRIEVAL_EMBEDDING_DIM` | Embedding vector dimension (must match the provider's real output) | `64` (default template value; switch it to the provider's real dimension when using API/router) |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding vector dimension (must match the provider's real output) | `64` (default template value; switch it to the provider's real dimension when using `api` / `router` / `openai`) |
 | `RETRIEVAL_RERANKER_ENABLED` | Whether to enable Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API address | Empty |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API key | Empty |
@@ -169,11 +169,13 @@ The following are the most commonly used configuration items in `.env` (for more
 >
 > One important boundary: this is not a seamless hot-switch. B uses local hash vectors by default, while C/D depend on the real embedding dimension you configure. Once you change embedding backend / model / dimension, the old index may no longer be reusable as-is. The safer path is: back up first, check with `index_status()`, and if the runtime reports a dimension mismatch, run `rebuild_index(wait=true)` or validate against a fresh database.
 >
-> The table above shows template example values from `.env.example`. In particular, `RETRIEVAL_EMBEDDING_DIM` is still `64` in the default template; only change it to the provider's real dimension after you switch to a real API / router embedding path. If certain retrieval environment variables are completely missing at runtime, the backend will use its own fallback values (e.g., `hash` / `hash-v1` / `64`).
+> The table above shows template example values from `.env.example`. In particular, `RETRIEVAL_EMBEDDING_DIM` is still `64` in the default template; only change it to the provider's real dimension after you switch to a real remote embedding path (`api` / `router` / `openai`). If certain retrieval environment variables are completely missing at runtime, the backend will use its own fallback values (e.g., `hash` / `hash-v1` / `64`).
 >
 > Configuration semantics: `RETRIEVAL_EMBEDDING_BACKEND` only affects Embedding. Reranker does not have a `RETRIEVAL_RERANKER_BACKEND` toggle; it prioritizes reading `RETRIEVAL_RERANKER_*`, falling back to `ROUTER_*` (and finally to `OPENAI_*` base/key) if missing.
 >
 > For repo-local `stdio` / `python-wrapper`, `RETRIEVAL_REMOTE_TIMEOUT_SEC` is now also reused from the current repository `.env`; if you leave it unset, the repo-local default remains `8` seconds.
+>
+> The current Setup Assistant follows the same contract now: `Profile B/C/D` preset switches and related retrieval toggles clear hidden stale fields before save, the assistant supports the `openai` embedding backend, and switching from local hash to a remote embedding backend writes the matching `RETRIEVAL_EMBEDDING_DIM` instead of leaving the old `64` behind.
 >
 > More advanced options (such as `INTENT_LLM_*`, `RETRIEVAL_MMR_*`, `RETRIEVAL_SQLITE_VEC_*`, `CORS_ALLOW_*`, runtime observability/sleep consolidation toggles) are documented in `.env.example` and default to conservative values, not affecting the minimal startup path.
 >
@@ -251,22 +253,26 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 
 - `docs/DASHBOARD_GUIDE_EN.md`
 
-> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Clicking this button now opens the **first-run setup assistant**, which can either save the Dashboard key in the current browser session or, when you are running against a non-Docker local checkout, write the common runtime fields into `.env`. The assistant also has its own language toggle in the upper right corner, so you do not need to close it first just to switch to Chinese. On authenticated non-loopback paths, the assistant can still show the current setup summary, but the local `.env` save path stays disabled with an explicit reason because writes remain direct-loopback-only. Section 5 will explain local validation.
+> If you see `Set API key` in the top right corner when starting manually, this is normal: the page is open, but protected interfaces like `/browse/*`, `/review/*`, and `/maintenance/*` are not yet authorized. Clicking this button now opens the **first-run setup assistant**, which can either save the Dashboard key in the current browser session or, when you are running against a non-Docker local checkout, write the common runtime fields into `.env`. The assistant also has its own language toggle in the upper right corner, so you do not need to close it first just to switch to Chinese. On authenticated non-loopback paths, the assistant can still show the current setup summary, but the local `.env` save path stays disabled with an explicit reason because writes remain direct-loopback-only. On the trusted Docker / GHCR proxy path, the assistant also no longer auto-opens just because the browser itself does not hold the key; if protected requests already work through the proxy, the page stays on the normal Dashboard flow. Section 5 will explain local validation.
 >
 > Small UI detail rechecked against the current code path: if the assistant shows interpolated labels that contain characters like `&` or `<...>`, they now render as normal text instead of showing HTML entities literally.
 
 > If you configured `MCP_API_KEY`, click `Set API key` in the top right and enter the same key in the assistant. If you only want the Dashboard to authenticate first, prefer the browser-only save path.
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
 
-> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile C/D` presets only fill a suggested group of fields. They do not prove that your router is reachable, that the embedding dimension is correct, or that any old index has already been migrated. If your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging; if you just changed embedding backend / model / dimension, remember to restart the backend and reindex when needed.
+> If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile B/C/D` presets and related retrieval toggles now clear hidden stale fields before save. The assistant also supports the `openai` embedding backend, and when you switch from local hash to a remote embedding backend it writes the matching `RETRIEVAL_EMBEDDING_DIM` instead of silently leaving the old `64`. These presets still do not prove that your router is reachable, that the embedding dimension is correct, or that any old index has already been migrated. If your local router is not ready yet, switch the retrieval fields manually to direct API mode for debugging; if you just changed embedding backend / model / dimension, remember to restart the backend and reindex when needed.
 >
 > If you are opening the page through an authenticated non-loopback path, the setup assistant can still show the current status, but **Save local `.env` settings** stays disabled on purpose. That path is still reserved for direct loopback requests only.
+
+> Dashboard tree writes and reflection are now connected on the same user-facing path. In plain terms: if you create or update memory through the Memory page, `/maintenance/learn/reflection` can now use that Dashboard-side write summary directly instead of stopping at `session_summary_empty` just because the change came from `/browse`.
 
 > The assistant does not pretend that Docker env / proxy changes are hot-reloaded. If you change embedding / reranker / write-guard / intent settings, you still need to restart the affected `backend` / `sse` services afterwards. For Docker, continue using the profile scripts and container restart path.
 
 > The frontend restores the stored language first. If there is no stored choice yet, common Chinese browser locales (`zh`, `zh-TW`, `zh-HK`, and similar `zh-*`) are normalized to `zh-CN`; other first-visit cases fall back to English. If you want to switch manually, use the language button in the top right, and the browser will remember your choice.
 
 > If you open the Dashboard in Microsoft Edge, the current frontend now switches to a lighter visual mode automatically. In plain terms: the functions, auth flow, and setup assistant stay the same, but the page uses a static background, less blur, and less card motion to reduce local lag. Other browsers keep the normal visual treatment.
+
+> One more small safety detail: if the current host cannot provide `confirm()`, the Memory page now fails closed for destructive confirmation flows instead of continuing as if the user had already agreed.
 
 > The frontend dev server proxies `/api` to `MEMORY_PALACE_API_PROXY_TARGET` (default: `http://127.0.0.1:8000`) via `vite.config.js`.
 >
