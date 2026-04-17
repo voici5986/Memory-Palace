@@ -1,6 +1,9 @@
+import asyncio
+
 import pytest
 
 import mcp_server
+from api import browse as browse_api
 from runtime_state import ImportLearnAuditTracker
 
 
@@ -57,6 +60,41 @@ class _ReflectionClient:
             "path": path,
             "uri": f"{domain}://{path}",
         }
+
+
+class _ConcurrentNamespaceRaceClient(_ReflectionClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self._namespace_probe_count = 0
+        self._namespace_probe_ready = asyncio.Event()
+
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = False,
+    ):
+        if str(domain or "notes") == "notes" and str(path or "") == "corrections":
+            self._namespace_probe_count += 1
+            if self._namespace_probe_count >= 2:
+                self._namespace_probe_ready.set()
+            await self._namespace_probe_ready.wait()
+        return await super().get_memory_by_path(
+            path,
+            domain,
+            reinforce_access=reinforce_access,
+        )
+
+    async def create_memory(self, **kwargs):
+        domain = str(kwargs.get("domain") or "notes")
+        parent_path = str(kwargs.get("parent_path") or "").strip().strip("/")
+        title = str(kwargs.get("title") or "").strip()
+        path = f"{parent_path}/{title}" if parent_path else title
+        path = path.strip("/")
+        await asyncio.sleep(0)
+        if (domain, path) in self._paths:
+            raise ValueError(f"Path '{domain}://{path}' already exists")
+        return await super().create_memory(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -119,3 +157,93 @@ async def test_reflection_execute_can_be_rolled_back(
     assert payload["executed"] is True
     assert payload["snapshot_id"] > 0
     assert summary["operation_decision_breakdown"]["reflection_workflow|executed"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_same_session_concurrent_reflection_and_explicit_learn_do_not_fail_on_namespace_uniqueness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = ImportLearnAuditTracker()
+    client = _ConcurrentNamespaceRaceClient()
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setenv("AUTO_LEARN_ALLOWED_DOMAINS", "notes")
+    monkeypatch.setenv("AUTO_LEARN_REQUIRE_REASON", "true")
+    monkeypatch.setattr(mcp_server.runtime_state, "import_learn_tracker", tracker)
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker(
+            "Session compaction notes:\n- browse write created a dashboard correction"
+        ),
+    )
+
+    reflection_payload, explicit_payload = await asyncio.gather(
+        mcp_server.run_reflection_workflow_service(
+            mode="execute",
+            source="session_summary",
+            reason="promote concurrent dashboard corrections",
+            session_id="s-concurrent",
+            client=client,
+        ),
+        mcp_server.run_explicit_learn_service(
+            content="dashboard explicit correction",
+            source="manual_review",
+            reason="promote concurrent dashboard corrections",
+            session_id="s-concurrent",
+            execute=True,
+            client=client,
+        ),
+    )
+
+    assert reflection_payload["ok"] is True
+    assert reflection_payload["executed"] is True
+    assert reflection_payload["result"]["reason"] == "executed"
+    assert explicit_payload["ok"] is True
+    assert explicit_payload["accepted"] is True
+    assert explicit_payload["executed"] is True
+    assert explicit_payload["reason"] == "executed"
+
+
+@pytest.mark.asyncio
+async def test_browse_write_seeds_dashboard_reflection_summary_instead_of_session_summary_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = ImportLearnAuditTracker()
+    browse_client = _ReflectionClient()
+    lane_calls: list[tuple[str | None, str]] = []
+
+    async def _run_write(*, session_id, operation, task):
+        lane_calls.append((session_id, operation))
+        return await task()
+
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setenv("AUTO_LEARN_ALLOWED_DOMAINS", "notes")
+    monkeypatch.setenv("AUTO_LEARN_REQUIRE_REASON", "true")
+    monkeypatch.setattr(mcp_server.runtime_state, "import_learn_tracker", tracker)
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", mcp_server.runtime_state.flush_tracker.__class__())
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: browse_client)
+    monkeypatch.setattr(browse_api.runtime_state.write_lanes, "run_write", _run_write)
+    monkeypatch.setattr(browse_api, "ENABLE_WRITE_LANE_QUEUE", True)
+
+    browse_result = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="",
+            title="dashboard_note",
+            content="dashboard browse write that should be reflectable",
+            priority=1,
+            domain="notes",
+        )
+    )
+    reflection_payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="review dashboard browse writes",
+        session_id="dashboard",
+        client=browse_client,
+    )
+
+    assert browse_result["success"] is True
+    assert lane_calls == [("dashboard", "browse.create_node")]
+    assert reflection_payload["ok"] is True
+    assert reflection_payload["prepared"] is True
+    assert reflection_payload["result"]["reason"] == "prepared"

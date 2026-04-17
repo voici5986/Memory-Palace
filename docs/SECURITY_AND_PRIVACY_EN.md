@@ -158,11 +158,15 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
 - only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend still only migrates it forward once, but now only removes the old copy when it can confirm that `localStorage` still holds that same old value. This avoids one tab deleting a newer value that was just written by another tab.
+- when you switch profiles or turn optional providers back off, the assistant now clears hidden stale router / API fields before saving. In plain language: once a field is no longer active on screen, the browser no longer quietly keeps the old secret around for the next save.
+- for remote embedding backends, the assistant now persists the actual `RETRIEVAL_EMBEDDING_DIM` together with the backend selection, and `openai` is part of the supported embedding backend list.
+- if a host cannot provide a native confirm dialog, the Memory page now fails closed and keeps the current state instead of silently deleting data or navigating away.
 
 **New validation anchors:**
 
-- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, and Docker fail-closed behavior
-- `frontend/src/App.test.jsx` — Verifies first-run auto-open and the browser-only Dashboard-key flow
+- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, remote embedding dimension persistence, and Docker fail-closed behavior
+- `frontend/src/App.test.jsx` — Verifies first-run auto-open behavior, including the browser-only Dashboard-key flow on the proxy-backed path
+- `frontend/src/features/memory/MemoryBrowser.test.jsx` — Verifies the Memory page blocks destructive actions when confirm is unavailable
 - `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path
 
 **Default approach for Docker one-click deployment is different:**
@@ -170,6 +174,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - `apply_profile.*` will automatically generate a local key if `MCP_API_KEY` is found to be empty under the `docker` platform.
 - The frontend container will not write this key into the page; instead, Nginx proxy will forward the `X-MCP-API-Key` at the server side only to the protected Dashboard API routes, plus `/sse` and `/messages`.
 - This way the browser can use the Dashboard directly without exposing the real key in the page source.
+- On that trusted proxy path, the first-run assistant should not auto-open just because the browser itself does not hold a stored key. If protected requests already work, the safer proxy-held path is already acting as the configured auth path.
 - This convenience path assumes the frontend port itself is trusted. Anyone who can directly reach the Docker Dashboard port can also use those proxied protected routes, so `MCP_API_KEY` is **not** acting as end-user auth at that layer. Put your own VPN, reverse-proxy auth, or network ACL in front of `3000` before exposing it beyond a trusted environment.
 
 **Frontend Test Coverage:**

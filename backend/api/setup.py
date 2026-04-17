@@ -32,10 +32,11 @@ class SetupConfigRequest(BaseModel):
     dashboard_api_key: Optional[str] = None
     allow_insecure_local: bool = False
 
-    embedding_backend: Literal["none", "hash", "api", "router"] = "hash"
+    embedding_backend: Literal["none", "hash", "api", "router", "openai"] = "hash"
     embedding_api_base: Optional[str] = None
     embedding_api_key: Optional[str] = None
     embedding_model: Optional[str] = None
+    embedding_dim: Optional[int] = Field(default=None, ge=1)
 
     reranker_enabled: bool = False
     reranker_api_base: Optional[str] = None
@@ -145,6 +146,32 @@ def _is_env_value_configured(*names: str) -> bool:
     return any(_read_optional_env(name) for name in names)
 
 
+def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
+    if payload.embedding_dim is not None:
+        return str(int(payload.embedding_dim))
+
+    current_backend = (
+        _read_optional_env("RETRIEVAL_EMBEDDING_BACKEND") or "hash"
+    ).strip().lower()
+    current_dim = _read_optional_env("RETRIEVAL_EMBEDDING_DIM")
+    if payload.embedding_backend == "hash":
+        return "64"
+
+    if (
+        current_dim
+        and current_backend in {"api", "router", "openai"}
+        and payload.embedding_backend in {"api", "router", "openai"}
+    ):
+        return current_dim
+
+    if payload.embedding_backend in {"api", "router", "openai"}:
+        # Profile C/D default to 1024 unless the caller provides a provider-specific
+        # dimension. This avoids silently keeping hash-mode 64-d vectors after
+        # switching the setup flow to a remote embedding backend.
+        return "1024"
+    return None
+
+
 def _build_summary() -> Dict[str, Any]:
     embedding_backend = (_read_optional_env("RETRIEVAL_EMBEDDING_BACKEND") or "hash").lower()
     reranker_enabled = _env_bool("RETRIEVAL_RERANKER_ENABLED", False)
@@ -161,6 +188,8 @@ def _build_summary() -> Dict[str, Any]:
                     "RETRIEVAL_EMBEDDING_API_BASE",
                     "RETRIEVAL_EMBEDDING_BASE",
                     "ROUTER_API_BASE",
+                    "OPENAI_BASE_URL",
+                    "OPENAI_API_BASE",
                 )
                 and _is_env_value_configured(
                     "RETRIEVAL_EMBEDDING_MODEL",
@@ -299,6 +328,15 @@ def _build_env_updates(payload: SetupConfigRequest) -> Dict[str, str]:
         normalized = _normalize_optional_value(raw_value)
         if normalized is not None:
             updates[key] = normalized
+
+    embedding_dim = _resolve_embedding_dim_update(payload)
+    if embedding_dim is not None:
+        updates["RETRIEVAL_EMBEDDING_DIM"] = embedding_dim
+
+    if payload.embedding_backend == "openai":
+        normalized_openai_model = _normalize_optional_value(payload.embedding_model)
+        if normalized_openai_model is not None:
+            updates["OPENAI_EMBEDDING_MODEL"] = normalized_openai_model
 
     return updates
 

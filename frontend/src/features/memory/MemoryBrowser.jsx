@@ -28,6 +28,7 @@ import {
   updateMemoryNode,
 } from '../../lib/api';
 import GlassCard from '../../components/GlassCard';
+import { confirmWithFallback } from '../../lib/dialogs';
 
 const isAbortError = (error) =>
   Boolean(
@@ -200,13 +201,15 @@ export default function MemoryBrowser() {
 
   const navigateTo = (nextPath, nextDomain = domain, { force = false } = {}) => {
     const sameTarget = nextDomain === domain && nextPath === path;
-    if (
-      !force
-      && !sameTarget
-      && hasUnsavedNodeEdit
-      && !window.confirm(t('memory.prompts.discardNodeChanges'))
-    ) {
-      return false;
+    if (!force && !sameTarget && hasUnsavedNodeEdit) {
+      const confirmResult = confirmWithFallback(t('memory.prompts.discardNodeChanges'));
+      if (!confirmResult.available) {
+        setFeedback({ type: 'error', text: t('review.errors.confirmUnavailable') });
+        return false;
+      }
+      if (!confirmResult.confirmed) {
+        return false;
+      }
     }
     const params = new URLSearchParams();
     params.set('domain', nextDomain);
@@ -338,7 +341,14 @@ export default function MemoryBrowser() {
 
   const onDeletePath = async () => {
     if (isRoot) return;
-    if (!window.confirm(t('memory.prompts.deletePath', { target: `${domain}://${path}` }))) return;
+    const confirmResult = confirmWithFallback(
+      t('memory.prompts.deletePath', { target: `${domain}://${path}` })
+    );
+    if (!confirmResult.available) {
+      setFeedback({ type: 'error', text: t('maintenance.errors.confirmUnavailable') });
+      return;
+    }
+    if (!confirmResult.confirmed) return;
     setDeleting(true);
     setFeedback(null);
     try {

@@ -15,6 +15,7 @@ import SetupAssistantModal, {
 } from './components/SetupAssistantModal';
 import {
   clearStoredMaintenanceAuth,
+  getSetupStatus,
   getMaintenanceAuthState,
 } from './lib/api';
 import {
@@ -245,6 +246,7 @@ function App() {
   const [authState, setAuthState] = React.useState(() => getMaintenanceAuthState());
   const [authRevision, setAuthRevision] = React.useState(0);
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const [setupStatusProbe, setSetupStatusProbe] = React.useState(null);
   const routerBasename = resolveAppBasename();
 
   const readDismissedState = React.useCallback(() => {
@@ -287,16 +289,39 @@ function App() {
   }, []);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (authState?.source === 'runtime') return;
-    if (authState?.source === 'stored') return;
+    if (typeof window === 'undefined') return undefined;
+    if (authState?.source === 'runtime') return undefined;
+    if (authState?.source === 'stored') return undefined;
     const dismissed = readDismissedState();
-    if (dismissed === '1') return;
-    setSetupOpen(true);
+    if (dismissed === '1') return undefined;
+
+    let cancelled = false;
+
+    void getSetupStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setSetupStatusProbe({ kind: 'success', payload: status });
+        if (status?.summary?.dashboard_auth_configured === true) {
+          return;
+        }
+        if (readDismissedState() === '1') return;
+        setSetupOpen(true);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSetupStatusProbe({ kind: 'error', error });
+        if (readDismissedState() === '1') return;
+        setSetupOpen(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [authState?.source, readDismissedState]);
 
   const handleOpenSetup = React.useCallback(() => {
     clearDismissedState();
+    setSetupStatusProbe(null);
     setSetupOpen(true);
   }, [clearDismissedState]);
 
@@ -331,6 +356,7 @@ function App() {
       <SetupAssistantModal
         open={setupOpen}
         authState={authState}
+        initialStatusProbe={setupStatusProbe}
         onAuthUpdated={handleAuthUpdated}
         onClose={handleCloseSetup}
       />

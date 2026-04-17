@@ -215,6 +215,88 @@ def test_setup_config_preserves_existing_secret_when_blank(monkeypatch, tmp_path
     assert written.count("MCP_API_KEY=") == 1
 
 
+def test_setup_config_accepts_openai_backend_and_persists_embedding_dim(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "MCP_API_KEY_ALLOW_INSECURE_LOCAL=false",
+                "RETRIEVAL_EMBEDDING_BACKEND=hash",
+                "RETRIEVAL_EMBEDDING_DIM=64",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "WRITE_GUARD_LLM_ENABLED=false",
+                "INTENT_LLM_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    payload = {
+        "dashboard_api_key": "openai-secret",
+        "allow_insecure_local": False,
+        "embedding_backend": "openai",
+        "embedding_api_base": "https://api.openai.com/v1",
+        "embedding_api_key": "sk-test",
+        "embedding_model": "text-embedding-3-large",
+        "embedding_dim": 3072,
+    }
+
+    with _build_client() as client:
+        response = client.post("/setup/config", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["summary"]["embedding_backend"] == "openai"
+    written = target_env.read_text(encoding="utf-8")
+    assert "RETRIEVAL_EMBEDDING_BACKEND=openai" in written
+    assert "RETRIEVAL_EMBEDDING_DIM=3072" in written
+
+
+def test_setup_config_rejects_invalid_openai_embedding_dim_without_backend_literal_errors(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "openai-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "openai",
+                "embedding_api_base": "https://api.openai.com/v1",
+                "embedding_model": "text-embedding-3-large",
+                "embedding_dim": 0,
+            },
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert [tuple(item["loc"]) for item in detail] == [("body", "embedding_dim")]
+
+
 def test_setup_config_rejects_when_running_in_docker(monkeypatch, tmp_path: Path) -> None:
     env_example = tmp_path / ".env.example"
     env_example.write_text("MCP_API_KEY=\n", encoding="utf-8")

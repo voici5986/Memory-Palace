@@ -273,6 +273,7 @@ class ReflectionWorkflowRequest(BaseModel):
 
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
 _IMPORT_LEARN_META_PERSIST_LOCK = asyncio.Lock()
+_IMPORT_LEARN_AUDIT_RUNTIME_ID = f"maintenance-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 _IMPORT_JOB_MAX_PENDING = 64
 _IMPORT_JOBS: Dict[str, Dict[str, Any]] = {}
 _IMPORT_JOBS_GUARD = asyncio.Lock()
@@ -491,6 +492,169 @@ def _build_reflection_workflow_summary(import_learn_summary: Dict[str, Any]) -> 
         "prepared": _safe_non_negative_int(breakdown.get("reflection_workflow|accepted")),
         "executed": _safe_non_negative_int(breakdown.get("reflection_workflow|executed")),
         "rolled_back": _safe_non_negative_int(breakdown.get("reflection_workflow|rolled_back")),
+    }
+
+
+def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "window_size": _safe_non_negative_int(payload.get("window_size")),
+        "total_events": _safe_non_negative_int(payload.get("total_events")),
+        "event_type_breakdown": payload.get("event_type_breakdown")
+        if isinstance(payload.get("event_type_breakdown"), dict)
+        else {},
+        "operation_breakdown": payload.get("operation_breakdown")
+        if isinstance(payload.get("operation_breakdown"), dict)
+        else {},
+        "decision_breakdown": payload.get("decision_breakdown")
+        if isinstance(payload.get("decision_breakdown"), dict)
+        else {},
+        "operation_decision_breakdown": payload.get("operation_decision_breakdown")
+        if isinstance(payload.get("operation_decision_breakdown"), dict)
+        else {},
+        "rejected_events": _safe_non_negative_int(payload.get("rejected_events")),
+        "rollback_events": _safe_non_negative_int(payload.get("rollback_events")),
+        "top_reasons": payload.get("top_reasons")
+        if isinstance(payload.get("top_reasons"), list)
+        else [],
+        "last_event_at": payload.get("last_event_at"),
+        "recent_events": payload.get("recent_events")
+        if isinstance(payload.get("recent_events"), list)
+        else [],
+        "persistence_runtime_id": str(payload.get("persistence_runtime_id") or "").strip()
+        or None,
+    }
+
+
+async def _load_persisted_import_learn_summary(client: Any) -> Optional[Dict[str, Any]]:
+    getter = getattr(client, "get_runtime_meta", None)
+    if not callable(getter):
+        return None
+    try:
+        raw_value = await getter(IMPORT_LEARN_AUDIT_META_KEY)
+    except Exception:
+        return None
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    return _sanitize_import_learn_summary(parsed)
+
+
+def _merge_counter_payloads(*payloads: Any) -> Dict[str, int]:
+    merged: Dict[str, int] = {}
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key, value in payload.items():
+            normalized_key = str(key or "").strip()
+            if not normalized_key:
+                continue
+            merged[normalized_key] = merged.get(normalized_key, 0) + _safe_non_negative_int(
+                value
+            )
+    return merged
+
+
+def _merge_reason_payloads(*payloads: Any) -> List[Dict[str, Any]]:
+    merged: Dict[str, int] = {}
+    for payload in payloads:
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            reason = str(item.get("reason") or "").strip()
+            if not reason:
+                continue
+            merged[reason] = merged.get(reason, 0) + _safe_non_negative_int(
+                item.get("count")
+            )
+    ranked = sorted(merged.items(), key=lambda entry: (-entry[1], entry[0]))
+    return [{"reason": reason, "count": count} for reason, count in ranked[:5]]
+
+
+def _merge_recent_events(*payloads: Any) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    for payload in payloads:
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            if isinstance(item, dict):
+                events.append(dict(item))
+    if not events:
+        return []
+    events.sort(key=lambda item: str(item.get("timestamp") or ""))
+    return events[-5:]
+
+
+def _prepare_persisted_import_learn_summary(
+    *,
+    runtime_summary: Dict[str, Any],
+    persisted_summary: Optional[Dict[str, Any]],
+    runtime_id: str,
+) -> Dict[str, Any]:
+    if not isinstance(persisted_summary, dict):
+        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+
+    if str(persisted_summary.get("persistence_runtime_id") or "").strip() == runtime_id:
+        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+
+    last_event_at = max(
+        [
+            candidate
+            for candidate in [
+                str(persisted_summary.get("last_event_at") or "").strip(),
+                str(runtime_summary.get("last_event_at") or "").strip(),
+            ]
+            if candidate
+        ],
+        default=None,
+    )
+    return {
+        "window_size": max(
+            _safe_non_negative_int(persisted_summary.get("window_size")),
+            _safe_non_negative_int(runtime_summary.get("window_size")),
+        ),
+        "total_events": _safe_non_negative_int(persisted_summary.get("total_events"))
+        + _safe_non_negative_int(runtime_summary.get("total_events")),
+        "event_type_breakdown": _merge_counter_payloads(
+            persisted_summary.get("event_type_breakdown"),
+            runtime_summary.get("event_type_breakdown"),
+        ),
+        "operation_breakdown": _merge_counter_payloads(
+            persisted_summary.get("operation_breakdown"),
+            runtime_summary.get("operation_breakdown"),
+        ),
+        "decision_breakdown": _merge_counter_payloads(
+            persisted_summary.get("decision_breakdown"),
+            runtime_summary.get("decision_breakdown"),
+        ),
+        "operation_decision_breakdown": _merge_counter_payloads(
+            persisted_summary.get("operation_decision_breakdown"),
+            runtime_summary.get("operation_decision_breakdown"),
+        ),
+        "rejected_events": _safe_non_negative_int(
+            persisted_summary.get("rejected_events")
+        )
+        + _safe_non_negative_int(runtime_summary.get("rejected_events")),
+        "rollback_events": _safe_non_negative_int(
+            persisted_summary.get("rollback_events")
+        )
+        + _safe_non_negative_int(runtime_summary.get("rollback_events")),
+        "top_reasons": _merge_reason_payloads(
+            persisted_summary.get("top_reasons"),
+            runtime_summary.get("top_reasons"),
+        ),
+        "last_event_at": last_event_at,
+        "recent_events": _merge_recent_events(
+            persisted_summary.get("recent_events"),
+            runtime_summary.get("recent_events"),
+        ),
+        "persistence_runtime_id": runtime_id,
     }
 
 
@@ -1147,6 +1311,12 @@ async def _record_import_learn_event(
         if callable(set_runtime_meta):
             async with _IMPORT_LEARN_META_PERSIST_LOCK:
                 summary_payload = await runtime_state.import_learn_tracker.summary()
+                persisted_summary = await _load_persisted_import_learn_summary(client)
+                summary_payload = _prepare_persisted_import_learn_summary(
+                    runtime_summary=summary_payload,
+                    persisted_summary=persisted_summary,
+                    runtime_id=_IMPORT_LEARN_AUDIT_RUNTIME_ID,
+                )
                 await set_runtime_meta(
                     IMPORT_LEARN_AUDIT_META_KEY,
                     json.dumps(summary_payload, ensure_ascii=False, separators=(",", ":")),
@@ -4230,6 +4400,21 @@ async def get_observability_summary():
     cleanup_query_summary = _build_cleanup_query_summary(cleanup_query_events)
     guard_summary = await runtime_state.guard_tracker.summary()
     import_learn_summary = await runtime_state.import_learn_tracker.summary()
+    persisted_import_learn_summary = await _load_persisted_import_learn_summary(client)
+    if isinstance(import_learn_summary, dict) and isinstance(
+        persisted_import_learn_summary, dict
+    ):
+        runtime_total = _safe_non_negative_int(import_learn_summary.get("total_events"))
+        persisted_total = _safe_non_negative_int(
+            persisted_import_learn_summary.get("total_events")
+        )
+        if persisted_total < runtime_total:
+            persisted_import_learn_summary = None
+    if isinstance(persisted_import_learn_summary, dict):
+        import_learn_summary = {
+            **persisted_import_learn_summary,
+            "persisted_snapshot": persisted_import_learn_summary,
+        }
     reflection_workflow_summary = _build_reflection_workflow_summary(import_learn_summary)
     index_latency = _build_index_latency_summary(worker_status)
 

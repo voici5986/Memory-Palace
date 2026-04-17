@@ -268,6 +268,44 @@ describe('MemoryBrowser', () => {
     expect(screen.getAllByText('path-a').length).toBeGreaterThan(0);
   });
 
+  it('fails closed when confirm is unavailable during path deletion', async () => {
+    const user = userEvent.setup();
+    const originalConfirm = window.confirm;
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unhandledRejectionSpy = vi.fn((event) => {
+      event.preventDefault();
+    });
+    api.getMemoryNode.mockResolvedValueOnce(makeNodePayload('path-a', 'delete candidate'));
+    window.addEventListener('unhandledrejection', unhandledRejectionSpy);
+
+    Object.defineProperty(window, 'confirm', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+
+    try {
+      renderMemoryBrowser('/memory?domain=core&path=path-a');
+
+      await screen.findByText('delete candidate');
+      await user.click(await screen.findByTestId('memory-delete-path'));
+
+      expect(api.deleteMemoryNode).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+      expect(unhandledRejectionSpy).not.toHaveBeenCalled();
+      expect(screen.getByTestId('memory-delete-path')).toBeInTheDocument();
+      expect(screen.getAllByText('path-a').length).toBeGreaterThan(0);
+    } finally {
+      window.removeEventListener('unhandledrejection', unhandledRejectionSpy);
+      consoleErrorSpy.mockRestore();
+      Object.defineProperty(window, 'confirm', {
+        configurable: true,
+        writable: true,
+        value: originalConfirm,
+      });
+    }
+  });
+
   it('shows child memories in batches and loads more on demand', async () => {
     const user = userEvent.setup();
     api.getMemoryNode.mockResolvedValue({

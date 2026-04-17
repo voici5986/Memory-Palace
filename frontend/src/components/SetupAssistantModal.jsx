@@ -50,6 +50,48 @@ const defaultFormState = (authState) => ({
   router_reranker_model: '',
 });
 
+const clearHiddenRetrievalFields = (nextForm) => {
+  const cleaned = { ...nextForm };
+
+  if (cleaned.embedding_backend !== 'api') {
+    cleaned.embedding_api_base = '';
+    cleaned.embedding_api_key = '';
+    cleaned.embedding_model = '';
+  }
+
+  if (cleaned.embedding_backend !== 'router') {
+    cleaned.router_api_base = '';
+    cleaned.router_api_key = '';
+    cleaned.router_chat_model = '';
+    cleaned.router_embedding_model = '';
+    cleaned.router_reranker_model = '';
+  }
+
+  if (!(cleaned.reranker_enabled && cleaned.embedding_backend !== 'router')) {
+    cleaned.reranker_api_base = '';
+    cleaned.reranker_api_key = '';
+    cleaned.reranker_model = '';
+  }
+
+  if (!cleaned.write_guard_llm_enabled) {
+    cleaned.write_guard_llm_api_base = '';
+    cleaned.write_guard_llm_api_key = '';
+    cleaned.write_guard_llm_model = '';
+  }
+
+  if (!cleaned.intent_llm_enabled) {
+    cleaned.intent_llm_api_base = '';
+    cleaned.intent_llm_api_key = '';
+    cleaned.intent_llm_model = '';
+  }
+
+  if (!(cleaned.intent_llm_enabled && cleaned.embedding_backend === 'router')) {
+    cleaned.router_chat_model = '';
+  }
+
+  return cleaned;
+};
+
 function SetupInput({ label, hint, value, onChange, placeholder, type = 'text' }) {
   return (
     <label className="block space-y-2">
@@ -136,6 +178,7 @@ function SummaryItem({ label, value, configuredText, missingText }) {
 export default function SetupAssistantModal({
   open,
   authState,
+  initialStatusProbe,
   onClose,
   onAuthUpdated,
 }) {
@@ -149,6 +192,19 @@ export default function SetupAssistantModal({
   const [savingMode, setSavingMode] = React.useState(null);
   const initializedOpenRef = React.useRef(false);
 
+  const applySetupStatus = React.useCallback((payload) => {
+    setSetupStatus(payload);
+    setForm((current) => ({
+      ...current,
+      allow_insecure_local: payload?.summary?.allow_insecure_local ?? current.allow_insecure_local,
+      embedding_backend: payload?.summary?.embedding_backend ?? current.embedding_backend,
+      reranker_enabled: payload?.summary?.reranker_enabled ?? current.reranker_enabled,
+      write_guard_llm_enabled:
+        payload?.summary?.write_guard_enabled ?? current.write_guard_llm_enabled,
+      intent_llm_enabled: payload?.summary?.intent_llm_enabled ?? current.intent_llm_enabled,
+    }));
+  }, []);
+
   React.useEffect(() => {
     if (!open) {
       initializedOpenRef.current = false;
@@ -159,25 +215,36 @@ export default function SetupAssistantModal({
 
     let cancelled = false;
     setForm(defaultFormState(authState));
-    setStatusLoading(true);
     setSetupStatus(null);
     setStatusErrorState(null);
     setSaveErrorState(null);
     setSaveSuccess(null);
 
+    if (initialStatusProbe?.kind === 'success' && initialStatusProbe.payload) {
+      applySetupStatus(initialStatusProbe.payload);
+      setStatusLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (initialStatusProbe?.kind === 'error') {
+      setStatusLoading(false);
+      setStatusErrorState({
+        error: initialStatusProbe.error,
+        fallbackKey: 'setup.messages.statusUnavailable',
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setStatusLoading(true);
+
     getSetupStatus()
       .then((payload) => {
         if (cancelled) return;
-        setSetupStatus(payload);
-        setForm((current) => ({
-          ...current,
-          allow_insecure_local: payload?.summary?.allow_insecure_local ?? current.allow_insecure_local,
-          embedding_backend: payload?.summary?.embedding_backend ?? current.embedding_backend,
-          reranker_enabled: payload?.summary?.reranker_enabled ?? current.reranker_enabled,
-          write_guard_llm_enabled:
-            payload?.summary?.write_guard_enabled ?? current.write_guard_llm_enabled,
-          intent_llm_enabled: payload?.summary?.intent_llm_enabled ?? current.intent_llm_enabled,
-        }));
+        applySetupStatus(payload);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -194,10 +261,10 @@ export default function SetupAssistantModal({
     return () => {
       cancelled = true;
     };
-  }, [authState, open]);
+  }, [applySetupStatus, authState, initialStatusProbe, open]);
 
   const updateField = React.useCallback((key, value) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => clearHiddenRetrievalFields({ ...current, [key]: value }));
   }, []);
 
   const statusError = React.useMemo(() => {
@@ -226,26 +293,26 @@ export default function SetupAssistantModal({
   const applyPreset = React.useCallback((preset) => {
     setForm((current) => {
       if (preset === 'b') {
-        return {
+        return clearHiddenRetrievalFields({
           ...current,
           embedding_backend: 'hash',
           reranker_enabled: false,
           write_guard_llm_enabled: false,
           intent_llm_enabled: false,
-        };
+        });
       }
       if (preset === 'c') {
-        return {
+        return clearHiddenRetrievalFields({
           ...current,
           embedding_backend: 'router',
           reranker_enabled: true,
-        };
+        });
       }
-      return {
+      return clearHiddenRetrievalFields({
         ...current,
         embedding_backend: 'router',
         reranker_enabled: true,
-      };
+      });
     });
   }, []);
 

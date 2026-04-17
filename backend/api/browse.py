@@ -53,6 +53,24 @@ ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 _DASHBOARD_WRITE_SESSION_ID = "dashboard"
 
 
+def _event_preview(text: str, max_chars: int = 220) -> str:
+    compact = " ".join(str(text or "").strip().split())
+    if len(compact) <= max_chars:
+        return compact
+    return compact[:max_chars] + "..."
+
+
+async def _record_dashboard_flush_event(message: str) -> None:
+    try:
+        await runtime_state.flush_tracker.record_event(
+            session_id=_DASHBOARD_WRITE_SESSION_ID,
+            message=_event_preview(message),
+        )
+    except Exception:
+        # Dashboard observability must never block browse writes.
+        return
+
+
 def _normalize_domain_or_422(domain: str) -> str:
     normalized = str(domain or "").strip().lower()
     if not normalized:
@@ -488,6 +506,11 @@ async def create_node(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    if bool(result.get("success")) and bool(result.get("created")):
+        created_uri = str(result.get("uri") or _make_uri(domain, result.get("path") or ""))
+        await _record_dashboard_flush_event(
+            f"Dashboard created {created_uri}: {body.content}"
+        )
     return result
 
 
@@ -596,6 +619,18 @@ async def update_node(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    if bool(result.get("success")) and bool(result.get("updated")):
+        change_parts = []
+        if body.content is not None:
+            change_parts.append(f"content={body.content}")
+        if body.priority is not None:
+            change_parts.append(f"priority={body.priority}")
+        if body.disclosure is not None:
+            change_parts.append(f"disclosure={body.disclosure}")
+        change_text = "; ".join(change_parts) if change_parts else "metadata updated"
+        await _record_dashboard_flush_event(
+            f"Dashboard updated {_make_uri(domain, path)}: {change_text}"
+        )
     return result
 
 
@@ -630,4 +665,5 @@ async def delete_node(
             raise HTTPException(status_code=404, detail=message)
         raise HTTPException(status_code=409, detail=message)
 
+    await _record_dashboard_flush_event(f"Dashboard deleted {full_uri}")
     return {"success": True, **result}

@@ -449,6 +449,40 @@ describe('App routing', () => {
     });
   });
 
+  it('does not auto-open setup assistant when proxy-held auth is already effective', async () => {
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+    setupApi.getSetupStatus.mockResolvedValueOnce({
+      ok: true,
+      apply_supported: true,
+      apply_reason: 'local_env_file',
+      write_supported: false,
+      write_reason: 'local_loopback_required_for_write',
+      target_label: '.env',
+      restart_required: true,
+      restart_targets: ['backend', 'sse'],
+      summary: {
+        dashboard_auth_configured: true,
+        allow_insecure_local: false,
+        embedding_backend: 'hash',
+        embedding_configured: true,
+        reranker_enabled: false,
+        reranker_configured: false,
+        write_guard_enabled: false,
+        write_guard_configured: false,
+        intent_llm_enabled: false,
+        intent_llm_configured: false,
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('memory-page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: i18n.t('setup.title') })).not.toBeInTheDocument();
+    });
+  });
+
   it('allows switching language from inside the setup assistant on first load', async () => {
     const user = userEvent.setup();
     window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
@@ -537,6 +571,108 @@ describe('App routing', () => {
     expect(embeddingBackend).toHaveValue('router');
     expect(rerankerToggle).toBeChecked();
     expect(within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))).toBeInTheDocument();
+  });
+
+  it('clears hidden router fallback fields when switching back to preset B before saving', async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    window.history.pushState({}, '', '/memory');
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder')),
+      'https://router.example/v1'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerApiKeyPlaceholder')),
+      'router-secret'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerEmbeddingModelPlaceholder')),
+      'router-embed-model'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.retrieval.routerRerankerModelPlaceholder')),
+      'router-reranker-model'
+    );
+    await user.click(
+      within(dialog).getByRole('checkbox', {
+        name: new RegExp(`^${i18n.t('setup.llm.writeGuardEnabledLabel')}`),
+      })
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.writeGuardApiBasePlaceholder')),
+      'https://llm.example/write-guard'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.writeGuardModelPlaceholder')),
+      'write-guard-model'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.writeGuardApiKeyPlaceholder')),
+      'write-guard-key'
+    );
+    await user.click(
+      within(dialog).getByRole('checkbox', {
+        name: new RegExp(`^${i18n.t('setup.llm.intentEnabledLabel')}`),
+      })
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.intentApiBasePlaceholder')),
+      'https://llm.example/intent'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.intentModelPlaceholder')),
+      'intent-model'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.intentApiKeyPlaceholder')),
+      'intent-key'
+    );
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.llm.routerChatModelPlaceholder')),
+      'router-chat-model'
+    );
+
+    expect(within(dialog).getByDisplayValue('router-chat-model')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.b') }));
+
+    expect(
+      within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.routerApiBasePlaceholder'))
+    ).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embedding_backend: 'hash',
+        reranker_enabled: false,
+        router_api_base: '',
+        router_api_key: '',
+        router_embedding_model: '',
+        router_reranker_model: '',
+        write_guard_llm_enabled: false,
+        write_guard_llm_api_base: '',
+        write_guard_llm_api_key: '',
+        write_guard_llm_model: '',
+        intent_llm_enabled: false,
+        intent_llm_api_base: '',
+        intent_llm_api_key: '',
+        intent_llm_model: '',
+        router_chat_model: '',
+      })
+    );
   });
 
   it('does not embed the raw api key in the routes key', () => {

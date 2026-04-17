@@ -843,6 +843,12 @@ async def _record_import_learn_event(
             # Serialize summary persistence to avoid stale snapshots overwriting newer values.
             async with _get_import_learn_meta_persist_lock():
                 summary_payload = await runtime_state.import_learn_tracker.summary()
+                persisted_summary = await _load_persisted_import_learn_summary(client)
+                summary_payload = _prepare_persisted_import_learn_summary(
+                    runtime_summary=summary_payload,
+                    persisted_summary=persisted_summary,
+                    runtime_id=_SESSION_ID,
+                )
                 await set_runtime_meta(
                     IMPORT_LEARN_AUDIT_META_KEY,
                     _to_json(summary_payload),
@@ -874,6 +880,9 @@ def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
         "decision_breakdown": payload.get("decision_breakdown")
         if isinstance(payload.get("decision_breakdown"), dict)
         else {},
+        "operation_decision_breakdown": payload.get("operation_decision_breakdown")
+        if isinstance(payload.get("operation_decision_breakdown"), dict)
+        else {},
         "rejected_events": _safe_non_negative_int(payload.get("rejected_events")),
         "rollback_events": _safe_non_negative_int(payload.get("rollback_events")),
         "top_reasons": payload.get("top_reasons")
@@ -883,6 +892,8 @@ def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
         "recent_events": payload.get("recent_events")
         if isinstance(payload.get("recent_events"), list)
         else [],
+        "persistence_runtime_id": str(payload.get("persistence_runtime_id") or "").strip()
+        or None,
     }
 
 
@@ -901,6 +912,120 @@ async def _load_persisted_import_learn_summary(client: Any) -> Optional[Dict[str
     except json.JSONDecodeError:
         return None
     return _sanitize_import_learn_summary(parsed)
+
+
+def _merge_counter_payloads(*payloads: Any) -> Dict[str, int]:
+    merged: Dict[str, int] = {}
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key, value in payload.items():
+            normalized_key = str(key or "").strip()
+            if not normalized_key:
+                continue
+            merged[normalized_key] = merged.get(normalized_key, 0) + _safe_non_negative_int(
+                value
+            )
+    return merged
+
+
+def _merge_reason_payloads(*payloads: Any) -> List[Dict[str, Any]]:
+    merged: Dict[str, int] = {}
+    for payload in payloads:
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            reason = str(item.get("reason") or "").strip()
+            if not reason:
+                continue
+            merged[reason] = merged.get(reason, 0) + _safe_non_negative_int(
+                item.get("count")
+            )
+    ranked = sorted(merged.items(), key=lambda entry: (-entry[1], entry[0]))
+    return [{"reason": reason, "count": count} for reason, count in ranked[:5]]
+
+
+def _merge_recent_events(*payloads: Any) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    for payload in payloads:
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            if isinstance(item, dict):
+                events.append(dict(item))
+    if not events:
+        return []
+    events.sort(key=lambda item: str(item.get("timestamp") or ""))
+    return events[-5:]
+
+
+def _prepare_persisted_import_learn_summary(
+    *,
+    runtime_summary: Dict[str, Any],
+    persisted_summary: Optional[Dict[str, Any]],
+    runtime_id: str,
+) -> Dict[str, Any]:
+    if not isinstance(persisted_summary, dict):
+        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+
+    if str(persisted_summary.get("persistence_runtime_id") or "").strip() == runtime_id:
+        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+
+    last_event_at = max(
+        [
+            candidate
+            for candidate in [
+                str(persisted_summary.get("last_event_at") or "").strip(),
+                str(runtime_summary.get("last_event_at") or "").strip(),
+            ]
+            if candidate
+        ],
+        default=None,
+    )
+    return {
+        "window_size": max(
+            _safe_non_negative_int(persisted_summary.get("window_size")),
+            _safe_non_negative_int(runtime_summary.get("window_size")),
+        ),
+        "total_events": _safe_non_negative_int(persisted_summary.get("total_events"))
+        + _safe_non_negative_int(runtime_summary.get("total_events")),
+        "event_type_breakdown": _merge_counter_payloads(
+            persisted_summary.get("event_type_breakdown"),
+            runtime_summary.get("event_type_breakdown"),
+        ),
+        "operation_breakdown": _merge_counter_payloads(
+            persisted_summary.get("operation_breakdown"),
+            runtime_summary.get("operation_breakdown"),
+        ),
+        "decision_breakdown": _merge_counter_payloads(
+            persisted_summary.get("decision_breakdown"),
+            runtime_summary.get("decision_breakdown"),
+        ),
+        "operation_decision_breakdown": _merge_counter_payloads(
+            persisted_summary.get("operation_decision_breakdown"),
+            runtime_summary.get("operation_decision_breakdown"),
+        ),
+        "rejected_events": _safe_non_negative_int(
+            persisted_summary.get("rejected_events")
+        )
+        + _safe_non_negative_int(runtime_summary.get("rejected_events")),
+        "rollback_events": _safe_non_negative_int(
+            persisted_summary.get("rollback_events")
+        )
+        + _safe_non_negative_int(runtime_summary.get("rollback_events")),
+        "top_reasons": _merge_reason_payloads(
+            persisted_summary.get("top_reasons"),
+            runtime_summary.get("top_reasons"),
+        ),
+        "last_event_at": last_event_at,
+        "recent_events": _merge_recent_events(
+            persisted_summary.get("recent_events"),
+            runtime_summary.get("recent_events"),
+        ),
+        "persistence_runtime_id": runtime_id,
+    }
 
 
 def _merge_import_learn_summaries(
@@ -924,6 +1049,24 @@ def _merge_import_learn_summaries(
     ):
         merged["event_type_breakdown"] = dict(
             persisted_summary.get("event_type_breakdown") or {}
+        )
+    if not isinstance(merged.get("operation_breakdown"), dict) or not merged.get(
+        "operation_breakdown"
+    ):
+        merged["operation_breakdown"] = dict(
+            persisted_summary.get("operation_breakdown") or {}
+        )
+    if not isinstance(merged.get("decision_breakdown"), dict) or not merged.get(
+        "decision_breakdown"
+    ):
+        merged["decision_breakdown"] = dict(
+            persisted_summary.get("decision_breakdown") or {}
+        )
+    if not isinstance(
+        merged.get("operation_decision_breakdown"), dict
+    ) or not merged.get("operation_decision_breakdown"):
+        merged["operation_decision_breakdown"] = dict(
+            persisted_summary.get("operation_decision_breakdown") or {}
         )
     if not merged.get("last_event_at"):
         merged["last_event_at"] = persisted_summary.get("last_event_at")
@@ -1271,12 +1414,20 @@ async def _resolve_reflection_workflow_content(
     if not callable(summary_builder):
         return None, "session_summary_unavailable"
 
-    try:
-        summary = await summary_builder(session_id=session_id, limit=12)
-    except Exception:
-        return None, "session_summary_unavailable"
+    candidate_session_ids = [session_id]
+    if session_id.startswith("dashboard-") and "dashboard" not in candidate_session_ids:
+        candidate_session_ids.append("dashboard")
 
-    normalized_summary = str(summary or "").strip()
+    normalized_summary = ""
+    for candidate_session_id in candidate_session_ids:
+        try:
+            summary = await summary_builder(session_id=candidate_session_id, limit=12)
+        except Exception:
+            return None, "session_summary_unavailable"
+        normalized_summary = str(summary or "").strip()
+        if normalized_summary:
+            break
+
     if not normalized_summary:
         return None, "session_summary_empty"
     return normalized_summary, None
@@ -1314,15 +1465,21 @@ async def run_reflection_workflow_service(
             "session_id": normalized_session_id,
         }
 
-    result = await run_explicit_learn_service(
-        content=str(content or ""),
-        source=normalized_source,
-        reason=normalized_reason,
-        session_id=normalized_session_id,
-        actor_id=actor_id,
-        execute=normalized_mode == "execute",
-        client=client,
-    )
+    async def _run_reflection_task() -> Dict[str, Any]:
+        return await run_explicit_learn_service(
+            content=str(content or ""),
+            source=normalized_source,
+            reason=normalized_reason,
+            session_id=normalized_session_id,
+            actor_id=actor_id,
+            execute=normalized_mode == "execute",
+            client=client,
+        )
+
+    if normalized_mode == "execute":
+        result = await _run_write_lane("reflection_workflow.execute", _run_reflection_task)
+    else:
+        result = await _run_reflection_task()
 
     review_id = str(result.get("batch_id") or "").strip()
     created_memory = (
@@ -1333,7 +1490,7 @@ async def run_reflection_workflow_service(
     executed = normalized_mode == "execute" and bool(result.get("executed"))
 
     if prepared or executed:
-        await runtime_state.import_learn_tracker.record_event(
+        await _record_import_learn_event(
             event_type="learn",
             operation="reflection_workflow",
             decision="executed" if executed else "accepted",
@@ -1577,22 +1734,32 @@ async def _ensure_parent_path_exists(
         next_path = f"{current_path}/{segment}" if current_path else segment
         exists = await client.get_memory_by_path(next_path, domain)
         if not exists:
-            created = await client.create_memory(
-                parent_path=current_path,
-                content=f"[runtime] auto-created flush namespace: {make_uri(domain, next_path)}",
-                priority=max(1, AUTO_FLUSH_PRIORITY),
-                title=segment,
-                disclosure="Runtime flush namespace",
-                domain=domain,
-            )
-            created_nodes.append(
-                {
-                    "memory_id": _safe_int(created.get("id"), default=0),
-                    "domain": domain,
-                    "path": next_path,
-                    "uri": make_uri(domain, next_path),
-                }
-            )
+            try:
+                created = await client.create_memory(
+                    parent_path=current_path,
+                    content=f"[runtime] auto-created flush namespace: {make_uri(domain, next_path)}",
+                    priority=max(1, AUTO_FLUSH_PRIORITY),
+                    title=segment,
+                    disclosure="Runtime flush namespace",
+                    domain=domain,
+                )
+            except ValueError as exc:
+                # Another concurrent writer may have created the namespace after the
+                # preflight existence check but before create_memory committed.
+                if "already exists" not in str(exc).lower():
+                    raise
+                exists = await client.get_memory_by_path(next_path, domain)
+                if not exists:
+                    raise
+            else:
+                created_nodes.append(
+                    {
+                        "memory_id": _safe_int(created.get("id"), default=0),
+                        "domain": domain,
+                        "path": next_path,
+                        "uri": make_uri(domain, next_path),
+                    }
+                )
         current_path = next_path
     return domain, parent_path, created_nodes
 
@@ -3166,11 +3333,14 @@ async def _generate_audit_memory_view() -> str:
         persisted_import_learn_stats, dict
     ):
         runtime_total = _safe_non_negative_int(import_learn_stats.get("total_events"))
-        if runtime_total <= 0:
-            import_learn_stats = _merge_import_learn_summaries(
-                runtime_summary=import_learn_stats,
-                persisted_summary=persisted_import_learn_stats,
-            )
+        persisted_total = _safe_non_negative_int(
+            persisted_import_learn_stats.get("total_events")
+        )
+        if persisted_total >= runtime_total:
+            import_learn_stats = {
+                **persisted_import_learn_stats,
+                "persisted_snapshot": persisted_import_learn_stats,
+            }
 
     gist_stats_getter = getattr(client, "get_gist_stats", None)
     if callable(gist_stats_getter):
