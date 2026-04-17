@@ -85,6 +85,7 @@ backend/
 - 新建 / 更新 / 删除记忆
 - 返回结果里会带上当前节点、子节点、面包屑、gist 等前端直接要用的数据
 - 当前这组写接口也会先写 Review snapshot；在 Review 里看到的 session 名会带当前数据库作用域（例如 `dashboard-<scope>`），避免不同 SQLite 目标混到一起
+- 当前 Dashboard 通过 `/browse/node` 成功写入后，也会补记 reflection workflow 需要的 session summary 输入；所以后续再走 `/maintenance/learn/reflection`，不会再因为“写入来自 Dashboard”本身卡在 `session_summary_empty`
 - `POST / PUT /browse/node` 默认还会对单次 `content` 做长度校验（`BROWSE_CONTENT_MAX_CHARS`，默认 1 MiB），防止把超大正文直接塞进 Dashboard 写接口
 - `POST /browse/node` 还会对生成后的路径长度做前置校验（`BROWSE_PATH_MAX_CHARS`，默认 512），如果 `parent_path + title` 太长，会在真正写入前直接返回 `422`
 - 如果 write lane 长时间拿不到写槽位，`browse` / `review` / `maintenance` 这几组写接口现在都会直接返回结构化 `503`（`write_lane_timeout`），而不是只冒一个通用 `500`；MCP 写工具遇到同样情况时，也会返回可重试的结构化错误结果
@@ -163,6 +164,11 @@ backend/
 4. **索引任务**：`index/*`
 5. **运行态观测**：`observability/*`
 
+和这轮 reflection 修复直接相关的边界也补一句：
+
+- `POST /maintenance/learn/reflection` 的 `prepare` 仍然只是准备态；真正会落库的 `execute` 现在会进入同一条 write lane，和其他写操作保持一致的串行化语义
+- `/maintenance/observability/summary` 里的 `reflection_workflow` 统计现在会合并持久化 summary，重启后 summary 计数口径稳定；这里说的是 summary 稳定，不是把所有明细事件都永久保留下来
+
 完整 API 文档可启动后端后访问 `http://127.0.0.1:8000/docs`（Swagger UI）。
 
 ---
@@ -232,7 +238,10 @@ frontend/src/
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
 - 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
+- 如果服务端 Dashboard 鉴权已经生效，尤其是标准 Docker proxy-held key 路径，首启配置向导现在不会只因为浏览器本地还没保存 key 就自己误弹
 - 浏览器里保存的 Dashboard 鉴权现在走当前浏览器会话的 `sessionStorage`；若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但只会在确认 `localStorage` 里还是那份旧值时才删除它，避免多标签页同时迁移时误删新值
+- Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，保存还会一起写正确的 `RETRIEVAL_EMBEDDING_DIM`，并且 `/setup/config` 已支持 `openai` embedding backend
+- Memory 页的“离开未保存编辑”和“删除路径”现在都走 fail-closed 确认逻辑；如果宿主环境不支持原生 `confirm()`，动作会被直接拦下，并给出页内错误提示，而不是静默继续
 
 ---
 
@@ -259,6 +268,8 @@ frontend/src/
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >
+> 如果这把鉴权已经在服务端代理层生效，前端现在也不会只因为浏览器本地没有保存 Dashboard key 就自己弹出首启向导。
+>
 > 再补一个当前代码已经对齐的小边界：如果你给前端显式配置了 `VITE_API_BASE_URL`，无论它是同源下的带前缀路径，还是你自己的跨源 API 地址，前端现在都会按这个 API base 去识别 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求，并继续附加浏览器里保存的 Dashboard key；但它仍然不会把这把 key 发到无关第三方绝对 URL。
 >
 > `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它也会继续复用这个值；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起；如果 `.env` 或显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它也会直接拒绝启动。对 shell wrapper 这条路径，它还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，减少非 UTF-8 locale 下的本地 stdio 编码问题；同时也会合并已有的 `NO_PROXY` / `no_proxy` 并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`，让 repo-local stdio 更不容易被宿主机代理误伤本机模型调用。
@@ -275,6 +286,7 @@ frontend/src/
 2. 写前执行 **write_guard** 判定（核心决策：`ADD` / `UPDATE` / `NOOP` / `DELETE`；`BYPASS` 为上层 metadata-only 更新时的流程标记）。
    - write_guard 支持三级判定链：语义匹配 → 关键词匹配 → LLM 决策（可选）。
 3. 生成 **snapshot** 与版本变更（按 `path` 和 `memory` 两维度分别记录；MCP 工具写入和 Dashboard `/browse/node` 写入都遵循这套语义；同一 session 的快照写入现在通过文件锁串行化）。
+   - 对 Dashboard `/browse/node` 来说，成功写入后现在还会补上 reflection workflow 可复用的 session summary 输入。
 4. 入队 **索引任务**（队列满会返回 `index_dropped` / `queue_full`；真正写库的索引任务也会经过同一条 write lane，而不是直接和前台写入抢同一个 SQLite 文件）。
 
 ### 检索路径

@@ -15,7 +15,7 @@
 >
 > 这通常不是前端挂了，而是**你还没给受保护接口授权**。
 >
-> 如果你用的是 **Docker 一键部署**，按推荐路径启动时，受保护请求通常已经能直接使用；但页面右上角**仍可能继续显示** `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器并不知道代理层自动转发的那把 key。优先先看受保护数据是不是也一起 `401` 或空态；只有这些请求也失败时，才需要继续检查 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件、代理配置或手工改动。
+> 如果你用的是 **Docker 一键部署**，按推荐路径启动时，受保护请求通常已经能直接使用；但页面右上角**仍可能继续显示** `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器并不知道代理层自动转发的那把 key。现在如果 proxy-held auth 已经生效，首启配置向导也不该再自己误弹出来。优先先看受保护数据是不是能正常打开；只有这些请求也失败时，才需要继续检查 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件、代理配置或手工改动。
 
 **排查步骤**：
 
@@ -161,6 +161,27 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
 ---
 
+## 1.3 Memory 页面点删除或切节点没反应
+
+**现象**：
+
+- 某些受限 WebView / IDE 宿主里没有原生确认框
+- 在 Memory 页面点“删除路径”或切到别的节点，看起来像点了没反应
+
+**现在的实际行为**：
+
+- 当前 Memory 页已经改成 fail-closed
+- 说人话就是：确认框不可用时，它不会偷偷删除，也不会偷偷跳走
+- 动作会直接被拦下，页面里会给出错误提示
+
+**处理方式**：
+
+1. 先换标准浏览器复现一次
+2. 再确认当前宿主是否禁用了原生对话框
+3. 如果标准浏览器正常、只有特定宿主不正常，就优先按宿主能力边界排，不要先怀疑 Memory 写入逻辑本身坏了
+
+---
+
 ## 2. `/maintenance/*`、`/review/*` 或 `/browse/*` 返回 401
 
 **常见原因**：请求没带鉴权头。注意 `/browse/node` 的读操作也受保护，而且这些接口默认就是 fail-closed；只有显式开启 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` 且请求来自 loopback 时才会放行。
@@ -222,6 +243,21 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 > - `maintenance_auth_failed | api_key_not_configured`
 >
 > 优先先配 key，再判断是不是别的问题。
+
+## 2.1 Dashboard 刚写完，reflection 还提示 `session_summary_empty`
+
+**先说结论**：
+
+- 按当前代码，Dashboard 通过 `/browse` 的写入已经会喂给 reflection workflow
+- 所以现在再看到这个报错，不应该先把原因归到“这次写入来自 Dashboard”
+
+**排查顺序**：
+
+1. 先确认这次 `/browse` 写入本身已经成功
+2. 确认前后端不是旧页面、旧进程，或还停在修复前版本
+3. 再去看是不是别的 session/source 选择问题，而不是默认把锅甩给 Dashboard 写路径
+
+说人话就是：`session_summary_empty` 这条老结论现在已经过时了。先排当前运行版本和当前这次写入本身，不要再把 Dashboard 写路径当成默认根因。
 
 ---
 
@@ -705,6 +741,12 @@ pytest tests -k "test_search" -q
    | Profile A | `none` | 纯关键字搜索，不使用 Embedding |
    | Profile B | `hash` | 本地 hash Embedding（默认值） |
    | Profile C/D | `api` 或 `router` | 本地开发优先用 `api` 直配排障；发布验证默认回到 `router` 主链路 |
+
+   再补几个当前 setup 流程已经对齐的小边界：
+
+   - 现在从 `Profile B` 切到远端 backend 时，保存会同步写入 `RETRIEVAL_EMBEDDING_DIM`，不再默认把旧的 `64` 维残留过去
+   - 如果你在向导里来回切 `Profile B/C/D` 或 `hash / api / router`，当前会把已经隐藏的旧字段一起清掉；如果结果看起来还像旧配置，更该优先怀疑后端没重启，或者读的不是你以为的 `.env`
+   - `openai` 也是当前支持的 embedding backend，但它不是单独的新 Profile；排障思路还是按远端 backend 的 `base / model / dim` 是否对齐来查
 
 3. **确认有记忆内容**：
 

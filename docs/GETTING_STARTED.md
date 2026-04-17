@@ -148,7 +148,7 @@ bash scripts/apply_profile.sh macos b
 | `SEARCH_DEFAULT_MODE` | 检索模式：`keyword` / `semantic` / `hybrid` | `keyword` |
 | `RETRIEVAL_EMBEDDING_BACKEND` | 嵌入后端：`none` / `hash` / `router` / `api` / `openai` | `none` |
 | `RETRIEVAL_EMBEDDING_MODEL` | Embedding 模型名 | `your-embedding-model-id` |
-| `RETRIEVAL_EMBEDDING_DIM` | Embedding 向量维度（必须和 provider 实际返回一致） | `64`（默认模板值；切到 API/router 时改成 provider 实际维度） |
+| `RETRIEVAL_EMBEDDING_DIM` | Embedding 向量维度（必须和 provider 实际返回一致） | `64`（默认模板值；切到远端 backend 时会一起写入，未额外指定时当前默认按 `1024` 处理） |
 | `RETRIEVAL_RERANKER_ENABLED` | 是否启用 Reranker | `false` |
 | `RETRIEVAL_RERANKER_API_BASE` | Reranker API 地址 | 空 |
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
@@ -166,9 +166,13 @@ bash scripts/apply_profile.sh macos b
 >
 > 如果你已经准备好模型服务，并且明确要更高质量的深检索，再考虑升级到 `Profile C/D`：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
+> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。
+>
 > 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
-> 上表展示的是 `.env.example` 里的模板示例值；其中 `RETRIEVAL_EMBEDDING_DIM` 在默认模板里仍是 `64`，只有当你切到真实 API / router provider 时，才应该把它改成 provider 实际返回的维度。如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
+> 上表展示的是 `.env.example` 里的模板示例值；其中 `RETRIEVAL_EMBEDDING_DIM` 在默认模板里仍是 `64`。现在如果你通过 setup 流程切到真实远端 embedding backend，保存时也会一起写入 `RETRIEVAL_EMBEDDING_DIM`，不再继续沿用 hash 档位的旧 `64`。当前未额外指定时，远端默认按 `1024` 写入；`hash` 仍是 `64`；最终仍要以 provider 实际返回的维度为准。如果某些检索环境变量在运行时完全缺失，后端内部还会使用自己的回退值（例如 `hash` / `hash-v1` / `64`）。
+>
+> 另外，当前代码已经支持 `openai` 作为 embedding backend；这里只是配置能力补齐，不代表前端多出一个单独的新档位。Profile B/C/D 的口径还是保持原来的分层语义。
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 只作用于 Embedding。Reranker 不存在 `RETRIEVAL_RERANKER_BACKEND` 开关，优先读取 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
@@ -252,12 +256,16 @@ VITE v7.x.x  ready in xxx ms
 
 > 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
 >
+> 如果你走的是标准 Docker 代理这类 proxy-held auth 路径，服务端鉴权已经生效时，首启配置向导现在不会只因为浏览器本地没保存 key 就一上来自动弹出；右上角按钮还可能在，但这时只有你手动点进去才会进入向导。
+>
 > 再补一个这轮按代码实际行为复核过的小细节：如果向导里显示的占位文本本身带 `&` 或 `<...>` 这类字符，现在会按普通文本正常显示，不会再把 HTML 实体原样露给用户。
 
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
 > 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障；如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
+>
+> 现在向导在 `hash / api / router` 之间来回切时，也会把已经隐藏掉的旧字段一起清掉；如果你切到远端 embedding backend，保存时还会一起写入 `RETRIEVAL_EMBEDDING_DIM`。这能减少“看起来已经切档，实际还带着上一档残留字段”的情况，但它不等于自动替你验证 provider 一定可达。
 >
 > 如果你当前是通过带鉴权的非 loopback 路径看这个页面，首启向导仍然能显示当前状态，但“保存到本地 `.env`”会继续保持禁用。这不是 UI 异常，而是现在明确保留的安全边界。
 
@@ -375,6 +383,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 当前本地 build 路径还会使用按 checkout 固定的本地镜像名。所以只要这个 checkout 里已经成功 build 过一次，即使你换了 `COMPOSE_PROJECT_NAME`，后续再跑 `--no-build` 也能继续复用这些镜像；只有第一次启动或你手动删掉本地镜像时，才需要重新 `--build`。
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
+>
+> 如果代理层鉴权已经生效，首启配置向导现在也不会再自己误弹出来。更稳的判断方法还是先看受保护数据能不能直接打开，而不是只盯着右上角按钮在不在。
 >
 > 当前 Docker Compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，才把 frontend 视为真正 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
@@ -542,6 +552,8 @@ curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path=" \
 >
 > - 如果你配置了 `MCP_API_KEY`，请像上面这样带 `X-MCP-API-Key`
 > - 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，并且请求来自本机回环地址（且没有 forwarded headers），也可以直接省略鉴权头
+>
+> 当前 Dashboard 里通过 `/browse` 成功写入的新内容，后续也已经能直接喂给 reflection workflow。说人话就是：你在 Dashboard 里新建或改完内容后，再走 `/maintenance/learn/reflection`，不应该再因为“这次写入来自 Dashboard”卡在 `session_summary_empty`。
 
 ### 5.3 查看 API 文档
 
