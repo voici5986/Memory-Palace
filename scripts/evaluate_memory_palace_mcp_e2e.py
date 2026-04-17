@@ -100,7 +100,9 @@ def _result(status: str, name: str, summary: str, details: str = "") -> StepResu
     return StepResult(name=name, status=status, summary=summary, details=details)
 
 
-async def run_suite() -> tuple[list[StepResult], str]:
+async def run_suite(
+    repo_local_command: tuple[str, list[str]] | None = None,
+) -> tuple[list[StepResult], str]:
     temp_root = Path(tempfile.mkdtemp(prefix="memory-palace-live-mcp-"))
     db_path = temp_root / "memory_palace_live.db"
     env = os.environ.copy()
@@ -118,7 +120,10 @@ async def run_suite() -> tuple[list[StepResult], str]:
         }
     )
 
-    command, args = _repo_local_stdio_command()
+    if repo_local_command is None:
+        command, args = _repo_local_stdio_command()
+    else:
+        command, args = repo_local_command
     server = StdioServerParameters(
         command=command,
         args=args,
@@ -324,8 +329,10 @@ def build_markdown(results: list[StepResult], stderr_output: str) -> str:
     return "\n".join(lines)
 
 
-def run_suite_sync() -> tuple[list[StepResult], str]:
-    return asyncio.run(run_suite())
+def run_suite_sync(
+    repo_local_command: tuple[str, list[str]] | None = None,
+) -> tuple[list[StepResult], str]:
+    return asyncio.run(run_suite(repo_local_command=repo_local_command))
 
 
 def main() -> int:

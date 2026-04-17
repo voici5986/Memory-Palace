@@ -21,6 +21,15 @@
 2. MCP config snippet
 3. 宿主特化的可选兼容层
 
+## 检索档位推荐（2026-04 公开复核）
+
+- IDE hosts 的默认交互档仍然是 `Profile B`，因为它更适合编辑器内的低延迟 recall。
+- `Profile C` / `Profile D` 只作为显式深检索档提供，不应被文档描述成默认档位。
+- 这轮复核没有改变 IDE hosts 的接入路径：仍然是 `AGENTS.md + MCP snippet`，不是 hidden mirror 直连。
+- 三端 launcher 选择也没有变化：
+  - 原生 Windows：`backend/mcp_wrapper.py`
+  - macOS / Linux：`scripts/run_memory_palace_mcp_stdio.sh`
+
 ---
 
 ## 核心口径
@@ -152,6 +161,14 @@ IDE hosts 不再承诺仓内“一键 live smoke”。
    - `read_memory("system://boot")`
    - 创建一条 `notes://ide_smoke_*`
    - 再试一次重复创建，确认 guard 阻断
+
+### 当前这轮实测边界
+
+- 当前公开仓口径只承诺：`AGENTS.md + MCP snippet + launcher` 这条静态接入链是对齐的。
+- `Cursor / Windsurf / VSCode-host / Antigravity` 仍然要在目标宿主里各做一次手工 smoke，才能把结论升级成“该宿主 live 可用”。
+- 如果某个宿主当前只拿到了 `PARTIAL`，优先把它理解成：
+  - 宿主内登录 / 鉴权 / runtime 前提还没补齐，或
+  - 当前机器只做了静态契约检查，还没做宿主内 live 复核。
 
 ---
 

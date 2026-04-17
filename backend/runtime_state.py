@@ -109,6 +109,14 @@ class SessionSearchHit:
     source: str
 
 
+@dataclass
+class SessionRecentReadEntry:
+    uri: str
+    state_token: str
+    payload: str
+    stored_at: float
+
+
 class WriteLaneCoordinator:
     """
     Two-layer write coordination:
@@ -377,6 +385,162 @@ class WriteLaneCoordinator:
             }
 
 
+class ReflectionLaneCoordinator:
+    """
+    Bounded concurrency gate for optional LLM reflection tasks.
+
+    This keeps write-guard / compact-gist / intent LLM calls from stampeding the
+    local chat backend during CLI or IDE bursts, while still failing closed
+    through normal degrade paths when the lane is saturated.
+    """
+
+    def __init__(self) -> None:
+        self._enabled = _env_bool("RUNTIME_REFLECTION_LANE_ENABLED", True)
+        self._global_concurrency = _env_int(
+            "RUNTIME_REFLECTION_GLOBAL_CONCURRENCY", 2, minimum=1
+        )
+        self._acquire_timeout_seconds = _env_float(
+            "RUNTIME_REFLECTION_ACQUIRE_TIMEOUT_SECONDS", 20.0, minimum=0.1
+        )
+        self._wait_warn_ms = _env_int(
+            "RUNTIME_REFLECTION_WAIT_WARN_MS", 1500, minimum=1
+        )
+        self._global_sem = asyncio.Semaphore(self._global_concurrency)
+        self._guard = asyncio.Lock()
+        self._waiting = 0
+        self._active = 0
+        self._tasks_total = 0
+        self._tasks_failed = 0
+        self._tasks_success = 0
+        self._last_error: Optional[str] = None
+        self._wait_samples: Deque[int] = deque(maxlen=200)
+        self._duration_samples: Deque[int] = deque(maxlen=200)
+        self._operations_total: Counter[str] = Counter()
+        self._operations_failed: Counter[str] = Counter()
+
+    async def _record_metrics(
+        self,
+        *,
+        operation: str,
+        success: bool,
+        wait_ms: int,
+        duration_ms: int,
+        error: Optional[str] = None,
+    ) -> None:
+        op_key = str(operation or "unknown")
+        async with self._guard:
+            self._tasks_total += 1
+            self._operations_total[op_key] += 1
+            if success:
+                self._tasks_success += 1
+            else:
+                self._tasks_failed += 1
+                self._operations_failed[op_key] += 1
+                self._last_error = error or "unknown_error"
+            self._wait_samples.append(max(0, int(wait_ms)))
+            self._duration_samples.append(max(0, int(duration_ms)))
+
+    async def run_reflection(
+        self,
+        *,
+        operation: str,
+        task: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        if not self._enabled:
+            return await task()
+
+        started_at = time.monotonic()
+        wait_started_at = time.monotonic()
+        waited_ms = 0
+        waiting_counted = True
+        acquired = False
+        active_counted = False
+
+        async with self._guard:
+            self._waiting += 1
+
+        try:
+            try:
+                await asyncio.wait_for(
+                    self._global_sem.acquire(),
+                    timeout=self._acquire_timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                waited_ms = int((time.monotonic() - wait_started_at) * 1000)
+                raise RuntimeError("reflection_lane_timeout") from exc
+
+            acquired = True
+            waited_ms = int((time.monotonic() - wait_started_at) * 1000)
+            async with self._guard:
+                if waiting_counted:
+                    self._waiting = max(0, self._waiting - 1)
+                    waiting_counted = False
+                self._active += 1
+                active_counted = True
+
+            result = await task()
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            await asyncio.shield(
+                self._record_metrics(
+                    operation=operation,
+                    success=True,
+                    wait_ms=waited_ms,
+                    duration_ms=duration_ms,
+                )
+            )
+            return result
+        except Exception as exc:
+            if waited_ms <= 0:
+                waited_ms = int((time.monotonic() - wait_started_at) * 1000)
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            await asyncio.shield(
+                self._record_metrics(
+                    operation=operation,
+                    success=False,
+                    wait_ms=waited_ms,
+                    duration_ms=duration_ms,
+                    error=str(exc),
+                )
+            )
+            raise
+        finally:
+            if waiting_counted:
+                async with self._guard:
+                    self._waiting = max(0, self._waiting - 1)
+
+            if active_counted:
+                async with self._guard:
+                    self._active = max(0, self._active - 1)
+
+            if acquired:
+                self._global_sem.release()
+
+    async def status(self) -> Dict[str, Any]:
+        async with self._guard:
+            tasks_total = max(0, self._tasks_total)
+            tasks_failed = max(0, self._tasks_failed)
+            return {
+                "enabled": self._enabled,
+                "global_concurrency": self._global_concurrency,
+                "global_active": self._active,
+                "global_waiting": self._waiting,
+                "wait_warn_ms": self._wait_warn_ms,
+                "tasks_total": tasks_total,
+                "tasks_failed": tasks_failed,
+                "tasks_success": max(0, self._tasks_success),
+                "failure_rate": (
+                    round(tasks_failed / tasks_total, 6) if tasks_total > 0 else 0.0
+                ),
+                "wait_ms_p95": WriteLaneCoordinator._p95(self._wait_samples),
+                "duration_ms_p95": WriteLaneCoordinator._p95(
+                    self._duration_samples
+                ),
+                "last_error": self._last_error,
+                "operations_total": dict(sorted(self._operations_total.items())),
+                "operations_failed": dict(sorted(self._operations_failed.items())),
+            }
+
+
 class SessionSearchCache:
     """Ephemeral per-session retrieval cache used by session-first search."""
 
@@ -564,6 +728,129 @@ class SessionSearchCache:
         )
         self._hits.pop(oldest_sid, None)
         self._session_last_seen.pop(oldest_sid, None)
+
+
+class SessionRecentReadCache:
+    """Ephemeral per-session cache for repeated exact-URI full reads."""
+
+    def __init__(self) -> None:
+        self._max_entries_per_session = _env_int(
+            "RUNTIME_RECENT_READ_CACHE_MAX_ENTRIES", 64, minimum=4
+        )
+        self._max_sessions = _env_int(
+            "RUNTIME_RECENT_READ_CACHE_MAX_SESSIONS", 128, minimum=1
+        )
+        self._ttl_seconds = float(
+            _env_int("RUNTIME_RECENT_READ_CACHE_TTL_SECONDS", 15 * 60, minimum=30)
+        )
+        self._values: Dict[str, Dict[str, SessionRecentReadEntry]] = {}
+        self._session_last_seen: Dict[str, tuple[float, int]] = {}
+        self._touch_sequence = 0
+        self._guard = asyncio.Lock()
+
+    def _mark_session_seen(self, sid: str) -> None:
+        self._touch_sequence += 1
+        self._session_last_seen[sid] = (time.monotonic(), self._touch_sequence)
+
+    def _prune_session_unlocked(self, sid: str, *, now: Optional[float] = None) -> None:
+        entries = self._values.get(sid)
+        if not entries:
+            self._values.pop(sid, None)
+            self._session_last_seen.pop(sid, None)
+            return
+
+        current = now or time.monotonic()
+        stale_keys = [
+            uri
+            for uri, entry in entries.items()
+            if (current - float(entry.stored_at)) > self._ttl_seconds
+        ]
+        for uri in stale_keys:
+            entries.pop(uri, None)
+
+        if not entries:
+            self._values.pop(sid, None)
+            self._session_last_seen.pop(sid, None)
+
+    def _prune_stale_sessions_unlocked(self, *, now: Optional[float] = None) -> None:
+        current = now or time.monotonic()
+        for sid in list(self._values.keys()):
+            self._prune_session_unlocked(sid, now=current)
+
+    def _evict_oldest_session_if_needed(self) -> None:
+        if len(self._values) < self._max_sessions:
+            return
+        oldest_sid = min(
+            self._values.keys(),
+            key=lambda sid: self._session_last_seen.get(sid, (float("-inf"), -1)),
+        )
+        self._values.pop(oldest_sid, None)
+        self._session_last_seen.pop(oldest_sid, None)
+
+    async def remember(
+        self,
+        *,
+        session_id: Optional[str],
+        uri: str,
+        state_token: str,
+        payload: str,
+    ) -> None:
+        sid = _normalize_session_id(session_id)
+        clean_uri = str(uri or "").strip()
+        clean_state_token = str(state_token or "").strip()
+        clean_payload = str(payload or "")
+        if not clean_uri or not clean_state_token or not clean_payload:
+            return
+
+        async with self._guard:
+            self._prune_stale_sessions_unlocked()
+            entries = self._values.get(sid)
+            if entries is None:
+                self._evict_oldest_session_if_needed()
+                entries = {}
+                self._values[sid] = entries
+            elif clean_uri not in entries and len(entries) >= self._max_entries_per_session:
+                oldest_uri = next(iter(entries.keys()))
+                entries.pop(oldest_uri, None)
+
+            entries[clean_uri] = SessionRecentReadEntry(
+                uri=clean_uri,
+                state_token=clean_state_token,
+                payload=clean_payload,
+                stored_at=time.monotonic(),
+            )
+            self._mark_session_seen(sid)
+
+    async def get(
+        self,
+        *,
+        session_id: Optional[str],
+        uri: str,
+        state_token: str,
+    ) -> Optional[str]:
+        sid = _normalize_session_id(session_id)
+        clean_uri = str(uri or "").strip()
+        clean_state_token = str(state_token or "").strip()
+        if not clean_uri or not clean_state_token:
+            return None
+
+        async with self._guard:
+            self._prune_session_unlocked(sid)
+            entries = self._values.get(sid)
+            if not entries:
+                return None
+            entry = entries.get(clean_uri)
+            if entry is None:
+                self._mark_session_seen(sid)
+                return None
+            if entry.state_token != clean_state_token:
+                entries.pop(clean_uri, None)
+                if not entries:
+                    self._values.pop(sid, None)
+                    self._session_last_seen.pop(sid, None)
+                return None
+            self._mark_session_seen(sid)
+            return entry.payload
 
 
 class SessionFlushTracker:
@@ -867,6 +1154,9 @@ class ImportLearnAuditTracker:
         event_type_counter = Counter(item.event_type for item in snapshot)
         operation_counter = Counter(item.operation for item in snapshot)
         decision_counter = Counter(item.decision for item in snapshot)
+        operation_decision_counter = Counter(
+            f"{item.operation}|{item.decision}" for item in snapshot
+        )
         reason_counter = Counter(item.reason for item in snapshot if item.reason)
         rejected_events = sum(
             1
@@ -900,6 +1190,7 @@ class ImportLearnAuditTracker:
             "event_type_breakdown": dict(event_type_counter),
             "operation_breakdown": dict(operation_counter),
             "decision_breakdown": dict(decision_counter),
+            "operation_decision_breakdown": dict(operation_decision_counter),
             "rejected_events": rejected_events,
             "rollback_events": rollback_events,
             "top_reasons": [
@@ -2421,7 +2712,9 @@ class SleepTimeConsolidator:
 class RuntimeState:
     def __init__(self) -> None:
         self.write_lanes = WriteLaneCoordinator()
+        self.reflection_lanes = ReflectionLaneCoordinator()
         self.session_cache = SessionSearchCache()
+        self.recent_reads = SessionRecentReadCache()
         self.flush_tracker = SessionFlushTracker()
         self.promotion_tracker = SessionPromotionTracker()
         self.guard_tracker = GuardDecisionTracker()

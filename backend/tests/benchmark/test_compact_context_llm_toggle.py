@@ -40,6 +40,14 @@ def _enable_compact_gist_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COMPACT_GIST_LLM_MODEL", "fake-model")
 
 
+_LONG_GIST_SUMMARY = (
+    "Session compaction notes:\n"
+    "- user requested a detailed rollback checklist for the release incident\n"
+    "- system generated an owner map, pending actions, and recovery timeline\n"
+    "- follow-up compared earlier release notes, fallback behavior, and next validation steps\n"
+)
+
+
 @pytest.mark.asyncio
 async def test_generate_compact_gist_llm_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_compact_gist_env(monkeypatch)
@@ -97,7 +105,7 @@ async def test_generate_compact_gist_request_failed(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     payload = await client.generate_compact_gist(
-        summary="Session summary for compact gist.",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -128,7 +136,7 @@ async def test_generate_compact_gist_response_empty(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     result = await client.generate_compact_gist(
-        summary="Session summary for compact gist.",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -159,7 +167,7 @@ async def test_generate_compact_gist_response_invalid(monkeypatch: pytest.Monkey
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     result = await client.generate_compact_gist(
-        summary="Session summary for compact gist.",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -190,7 +198,7 @@ async def test_generate_compact_gist_gist_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     result = await client.generate_compact_gist(
-        summary="Session summary for compact gist.",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -233,7 +241,7 @@ async def test_generate_compact_gist_success_returns_llm_payload(
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     result = await client.generate_compact_gist(
-        summary="Session summary for compact gist.",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()

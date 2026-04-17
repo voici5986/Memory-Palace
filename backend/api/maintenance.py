@@ -23,6 +23,7 @@ from shared_utils import (
     TRUTHY_ENV_VALUES as _TRUTHY_ENV_VALUES,
     env_bool as _env_bool,
     env_float as _shared_env_float,
+    env_int as _shared_env_int,
     is_loopback_hostname as _is_loopback_hostname,
     utc_iso_now as _utc_iso_now,
 )
@@ -132,6 +133,7 @@ router = APIRouter(
     dependencies=[Depends(require_maintenance_api_key)],
 )
 _ALLOWED_SEARCH_MODES = {"keyword", "semantic", "hybrid"}
+_ALLOWED_INTERACTION_TIERS = {"fast", "deep"}
 _VALID_DOMAINS = [
     d.strip().lower()
     for d in str(os.getenv("VALID_DOMAINS", "core,writer,game,notes,system")).split(",")
@@ -156,6 +158,32 @@ _CLEANUP_QUERY_SLOW_MS = max(
     1.0, _env_float("OBSERVABILITY_CLEANUP_QUERY_SLOW_MS", 250.0)
 )
 _INTENT_LLM_ENABLED = str(os.getenv("INTENT_LLM_ENABLED") or "").strip().lower() in _TRUTHY_ENV_VALUES
+_DEFAULT_INTERACTION_TIER = (
+    str(os.getenv("DEFAULT_INTERACTION_TIER") or "fast").strip().lower() or "fast"
+)
+if _DEFAULT_INTERACTION_TIER not in _ALLOWED_INTERACTION_TIERS:
+    _DEFAULT_INTERACTION_TIER = "fast"
+_DEFAULT_SEARCH_CANDIDATE_MULTIPLIER = _shared_env_int(
+    "SEARCH_DEFAULT_CANDIDATE_MULTIPLIER",
+    4,
+    minimum=1,
+)
+_FAST_INTERACTION_CANDIDATE_MULTIPLIER = _shared_env_int(
+    "FAST_INTERACTION_CANDIDATE_MULTIPLIER",
+    _DEFAULT_SEARCH_CANDIDATE_MULTIPLIER,
+    minimum=1,
+)
+_DEEP_INTERACTION_CANDIDATE_MULTIPLIER = _shared_env_int(
+    "DEEP_INTERACTION_CANDIDATE_MULTIPLIER",
+    8,
+    minimum=1,
+)
+_SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER = _shared_env_int(
+    "SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER",
+    50,
+    minimum=1,
+)
+_ENABLE_SESSION_FIRST_SEARCH = _env_bool("RUNTIME_SESSION_FIRST_SEARCH", True)
 ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 
 
@@ -167,6 +195,7 @@ class SearchConsoleRequest(BaseModel):
     include_session: bool = True
     session_id: Optional[str] = None
     filters: Dict[str, Any] = Field(default_factory=dict)
+    interaction_tier: Optional[str] = None
     scope_hint: Optional[str] = None
 
 
@@ -234,6 +263,14 @@ class LearnTriggerRequest(BaseModel):
     execute: bool = True
 
 
+class ReflectionWorkflowRequest(BaseModel):
+    mode: str = Field(default="prepare", min_length=1, max_length=32)
+    source: str = Field(default="session_summary", min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=240)
+    session_id: str = Field(min_length=1, max_length=128)
+    actor_id: Optional[str] = Field(default=None, max_length=128)
+
+
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
 _IMPORT_LEARN_META_PERSIST_LOCK = asyncio.Lock()
 _IMPORT_JOB_MAX_PENDING = 64
@@ -253,6 +290,8 @@ _EXTERNAL_IMPORT_GUARD_LOCK = asyncio.Lock()
 _EXTERNAL_IMPORT_ALLOWED_DOMAINS_ENV = "EXTERNAL_IMPORT_ALLOWED_DOMAINS"
 _EXPLICIT_LEARN_SERVICE: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None
 _EXPLICIT_LEARN_SERVICE_LOCK = asyncio.Lock()
+_REFLECTION_WORKFLOW_SERVICE: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None
+_REFLECTION_WORKFLOW_SERVICE_LOCK = asyncio.Lock()
 def _parse_iso_ts(value: Optional[str]) -> Optional[datetime]:
     if not value or not isinstance(value, str):
         return None
@@ -400,6 +439,59 @@ async def _resolve_explicit_learn_service() -> Callable[..., Awaitable[Dict[str,
             service,
         )
         return _EXPLICIT_LEARN_SERVICE
+
+
+async def _resolve_reflection_workflow_service() -> Callable[..., Awaitable[Dict[str, Any]]]:
+    global _REFLECTION_WORKFLOW_SERVICE
+
+    if callable(_REFLECTION_WORKFLOW_SERVICE):
+        return _REFLECTION_WORKFLOW_SERVICE
+
+    async with _REFLECTION_WORKFLOW_SERVICE_LOCK:
+        if callable(_REFLECTION_WORKFLOW_SERVICE):
+            return _REFLECTION_WORKFLOW_SERVICE
+        try:
+            module = importlib.import_module("mcp_server")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "reflection_workflow_service_unavailable",
+                    "reason": "import_failed",
+                    "message": type(exc).__name__,
+                },
+            ) from exc
+
+        service = getattr(module, "run_reflection_workflow_service", None)
+        if not callable(service):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "reflection_workflow_service_unavailable",
+                    "reason": "missing_entrypoint",
+                },
+            )
+
+        _REFLECTION_WORKFLOW_SERVICE = cast(
+            Callable[..., Awaitable[Dict[str, Any]]],
+            service,
+        )
+        return _REFLECTION_WORKFLOW_SERVICE
+
+
+def _build_reflection_workflow_summary(import_learn_summary: Dict[str, Any]) -> Dict[str, int]:
+    breakdown = (
+        import_learn_summary.get("operation_decision_breakdown")
+        if isinstance(import_learn_summary, dict)
+        else {}
+    )
+    if not isinstance(breakdown, dict):
+        breakdown = {}
+    return {
+        "prepared": _safe_non_negative_int(breakdown.get("reflection_workflow|accepted")),
+        "executed": _safe_non_negative_int(breakdown.get("reflection_workflow|executed")),
+        "rolled_back": _safe_non_negative_int(breakdown.get("reflection_workflow|rolled_back")),
+    }
 
 
 def _normalize_import_parent_path(parent_path: Optional[str]) -> str:
@@ -1592,6 +1684,46 @@ def _normalize_search_filters(raw_filters: Dict[str, Any]) -> Dict[str, Any]:
             normalized["scope_hint"] = normalized_scope_hint
 
     return normalized
+
+
+def _resolve_interaction_tier(
+    raw_filters: Optional[Dict[str, Any]],
+    *,
+    requested_tier: Optional[Any] = None,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    filters_copy: Optional[Dict[str, Any]] = raw_filters
+    raw_value = requested_tier
+    if isinstance(filters_copy, dict):
+        filters_copy = dict(filters_copy)
+        if raw_value is None and "interaction_tier" in filters_copy:
+            raw_value = filters_copy.get("interaction_tier")
+        filters_copy.pop("interaction_tier", None)
+
+    value = str(raw_value or "").strip().lower()
+    if value not in _ALLOWED_INTERACTION_TIERS:
+        value = _DEFAULT_INTERACTION_TIER
+    return value, filters_copy
+
+
+def _should_try_intent_llm(
+    client: Any, rule_payload: Optional[Dict[str, Any]]
+) -> bool:
+    helper = getattr(client, "should_use_intent_llm", None)
+    if callable(helper):
+        try:
+            return bool(helper(rule_payload))
+        except Exception:
+            pass
+
+    if not isinstance(rule_payload, dict) or not rule_payload:
+        return True
+
+    rule_intent = str(rule_payload.get("intent") or "").strip().lower()
+    try:
+        rule_confidence = float(rule_payload.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        rule_confidence = 0.0
+    return rule_intent == "unknown" or rule_confidence < 0.70
 
 
 def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:
@@ -2852,6 +2984,19 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
     return response_payload
 
 
+@router.post("/learn/reflection")
+async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
+    reflection_workflow_service = await _resolve_reflection_workflow_service()
+    return await reflection_workflow_service(
+        mode=str(payload.mode or ""),
+        source=str(payload.source or ""),
+        reason=str(payload.reason or ""),
+        session_id=str(payload.session_id or ""),
+        actor_id=(str(payload.actor_id).strip() if payload.actor_id is not None else None) or None,
+        client=_LazySQLiteClientProxy(get_sqlite_client),
+    )
+
+
 @router.get("/orphans")
 async def get_orphans():
     """
@@ -3441,8 +3586,13 @@ async def run_observability_search(payload: SearchConsoleRequest):
             detail="mode must be one of: keyword, semantic, hybrid",
         )
 
+    interaction_tier, raw_filters = _resolve_interaction_tier(
+        payload.filters,
+        requested_tier=payload.interaction_tier,
+    )
+
     try:
-        filters = _normalize_search_filters(payload.filters)
+        filters = _normalize_search_filters(raw_filters or {})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -3495,58 +3645,94 @@ async def run_observability_search(payload: SearchConsoleRequest):
         str(query_preprocess.get("rewritten_query") or "").strip() or query
     )
 
-    classify_fn = None
     fallback_classify_fn = getattr(client, "classify_intent", None)
-    classify_with_intent_llm = False
-    if _INTENT_LLM_ENABLED:
-        classify_fn = getattr(client, "classify_intent_with_llm", None)
-        classify_with_intent_llm = callable(classify_fn)
-        if not callable(classify_fn):
-            preprocess_degrade_reasons.append("intent_llm_unavailable")
-            classify_fn = fallback_classify_fn
-    else:
-        classify_fn = fallback_classify_fn
-    if callable(classify_fn):
+    intent_llm_allowed = _INTENT_LLM_ENABLED and interaction_tier == "deep"
+    classify_with_intent_llm = callable(
+        getattr(client, "classify_intent_with_llm", None)
+    )
+    intent_llm_attempted = False
+
+    rule_payload: Optional[Dict[str, Any]] = None
+    if callable(fallback_classify_fn):
         try:
-            classify_payload = classify_fn(query, query_effective)
-            if inspect.isawaitable(classify_payload):
-                classify_payload = await classify_payload
-            if isinstance(classify_payload, dict):
-                intent_profile.update(classify_payload)
-                classify_degrade_reasons = classify_payload.get("degrade_reasons")
+            rule_candidate = fallback_classify_fn(query, query_effective)
+            if inspect.isawaitable(rule_candidate):
+                rule_candidate = await rule_candidate
+            if isinstance(rule_candidate, dict):
+                rule_payload = rule_candidate
+                intent_profile.update(rule_candidate)
+                classify_degrade_reasons = rule_candidate.get("degrade_reasons")
                 if isinstance(classify_degrade_reasons, list):
                     for reason in classify_degrade_reasons:
                         if isinstance(reason, str) and reason.strip():
                             preprocess_degrade_reasons.append(reason.strip())
         except Exception:
-            preprocess_degrade_reasons.append("intent_classification_failed")
-            if classify_with_intent_llm and callable(fallback_classify_fn):
-                try:
-                    fallback_payload = fallback_classify_fn(query, query_effective)
-                    if inspect.isawaitable(fallback_payload):
-                        fallback_payload = await fallback_payload
-                    if isinstance(fallback_payload, dict):
-                        intent_profile.update(fallback_payload)
-                        preprocess_degrade_reasons.append(
-                            "intent_llm_fallback_rule_applied"
-                        )
-                        fallback_degrade_reasons = fallback_payload.get(
-                            "degrade_reasons"
-                        )
-                        if isinstance(fallback_degrade_reasons, list):
-                            for reason in fallback_degrade_reasons:
-                                if isinstance(reason, str) and reason.strip():
-                                    preprocess_degrade_reasons.append(reason.strip())
-                except Exception:
+            preprocess_degrade_reasons.append("intent_classification_rule_failed")
+    else:
+        preprocess_degrade_reasons.append("intent_classification_unavailable")
+
+    should_try_intent_llm = (
+        intent_llm_allowed and _should_try_intent_llm(client, rule_payload)
+    )
+    if should_try_intent_llm:
+        classify_fn = getattr(client, "classify_intent_with_llm", None)
+        if callable(classify_fn):
+            try:
+                intent_llm_attempted = True
+                classify_payload = classify_fn(query, query_effective)
+                if inspect.isawaitable(classify_payload):
+                    classify_payload = await classify_payload
+                if isinstance(classify_payload, dict):
+                    intent_profile.update(classify_payload)
+                    classify_degrade_reasons = classify_payload.get("degrade_reasons")
+                    if isinstance(classify_degrade_reasons, list):
+                        for reason in classify_degrade_reasons:
+                            if isinstance(reason, str) and reason.strip():
+                                preprocess_degrade_reasons.append(reason.strip())
+            except Exception:
+                preprocess_degrade_reasons.append("intent_classification_failed")
+                if isinstance(rule_payload, dict):
+                    preprocess_degrade_reasons.append(
+                        "intent_llm_fallback_rule_applied"
+                    )
+                else:
                     preprocess_degrade_reasons.append(
                         "intent_classification_fallback_failed"
                     )
-    else:
-        preprocess_degrade_reasons.append("intent_classification_unavailable")
+        else:
+            preprocess_degrade_reasons.append("intent_llm_unavailable")
 
     intent_for_search: Optional[Dict[str, Any]] = None
     if intent_profile.get("intent") in {"factual", "exploratory", "temporal", "causal"}:
         intent_for_search = intent_profile
+
+    candidate_multiplier_provided = "candidate_multiplier" in payload.model_fields_set
+    resolved_candidate_multiplier = (
+        payload.candidate_multiplier
+        if candidate_multiplier_provided
+        else (
+            _FAST_INTERACTION_CANDIDATE_MULTIPLIER
+            if interaction_tier == "fast"
+            else _DEEP_INTERACTION_CANDIDATE_MULTIPLIER
+        )
+    )
+    if interaction_tier == "fast":
+        resolved_candidate_multiplier = min(
+            resolved_candidate_multiplier,
+            _FAST_INTERACTION_CANDIDATE_MULTIPLIER,
+        )
+    else:
+        resolved_candidate_multiplier = min(
+            resolved_candidate_multiplier,
+            _SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER,
+        )
+
+    include_session_provided = "include_session" in payload.model_fields_set
+    include_session_queue = (
+        payload.include_session
+        if include_session_provided
+        else (True if interaction_tier == "fast" else _ENABLE_SESSION_FIRST_SEARCH)
+    )
 
     started = time.perf_counter()
     try:
@@ -3555,7 +3741,7 @@ async def run_observability_search(payload: SearchConsoleRequest):
                 query=query_effective,
                 mode=mode,
                 max_results=payload.max_results,
-                candidate_multiplier=payload.candidate_multiplier,
+                candidate_multiplier=resolved_candidate_multiplier,
                 filters=filters,
                 intent_profile=intent_for_search,
             )
@@ -3568,7 +3754,7 @@ async def run_observability_search(payload: SearchConsoleRequest):
                 query=query_effective,
                 mode=mode,
                 max_results=payload.max_results,
-                candidate_multiplier=payload.candidate_multiplier,
+                candidate_multiplier=resolved_candidate_multiplier,
                 filters=filters,
             )
     except ValueError as exc:
@@ -3589,7 +3775,7 @@ async def run_observability_search(payload: SearchConsoleRequest):
     global_results = global_results_raw if isinstance(global_results_raw, list) else []
 
     session_results: List[Dict[str, Any]] = []
-    if payload.include_session:
+    if include_session_queue:
         try:
             session_rows = await runtime_state.session_cache.search(
                 session_id=payload.session_id or "api-observability",
@@ -3660,6 +3846,7 @@ async def run_observability_search(payload: SearchConsoleRequest):
         "global_contributed": int(session_first_metrics.get("global_contributed") or 0),
         "intent": str(intent_profile.get("intent") or "unknown"),
         "intent_applied": intent_applied,
+        "interaction_tier": interaction_tier,
         "strategy_template": str(
             intent_profile.get("strategy_template") or "default"
         ),
@@ -3677,8 +3864,10 @@ async def run_observability_search(payload: SearchConsoleRequest):
         "intent": str(intent_profile.get("intent") or "unknown"),
         "intent_applied": intent_applied,
         "intent_llm_enabled": _INTENT_LLM_ENABLED,
+        "intent_llm_attempted": intent_llm_attempted,
         "intent_llm_applied": bool(intent_profile.get("intent_llm_applied")),
         "intent_profile": intent_profile,
+        "interaction_tier": interaction_tier,
         "strategy_template": str(intent_profile.get("strategy_template") or "default"),
         "strategy_template_applied": strategy_template_applied,
         "mode_requested": mode,
@@ -3689,8 +3878,8 @@ async def run_observability_search(payload: SearchConsoleRequest):
         "scope_strategy_applied": scope_resolution.get("strategy"),
         "scope_effective": scope_resolution.get("effective", {}),
         "max_results": payload.max_results,
-        "candidate_multiplier": payload.candidate_multiplier,
-        "include_session": payload.include_session,
+        "candidate_multiplier": resolved_candidate_multiplier,
+        "include_session": include_session_queue,
         "latency_ms": round(latency_ms, 3),
         "degraded": degraded,
         "degrade_reasons": degrade_reasons,
@@ -3774,6 +3963,7 @@ async def get_observability_summary():
 
     worker_status = await runtime_state.index_worker.status()
     write_lane_status = await runtime_state.write_lanes.status()
+    reflection_lane_status = await runtime_state.reflection_lanes.status()
     vitality_decay_status = await runtime_state.vitality_decay.status()
     cleanup_review_status = await runtime_state.cleanup_reviews.summary()
     sleep_consolidation_status = await runtime_state.sleep_consolidation.status()
@@ -3797,6 +3987,8 @@ async def get_observability_summary():
     search_summary = _build_search_summary(events)
     cleanup_query_summary = _build_cleanup_query_summary(cleanup_query_events)
     guard_summary = await runtime_state.guard_tracker.summary()
+    import_learn_summary = await runtime_state.import_learn_tracker.summary()
+    reflection_workflow_summary = _build_reflection_workflow_summary(import_learn_summary)
     index_latency = _build_index_latency_summary(worker_status)
 
     status = (
@@ -3815,6 +4007,7 @@ async def get_observability_summary():
             "index": index_status,
             "runtime": {
                 "write_lanes": write_lane_status,
+                "reflection_lanes": reflection_lane_status,
                 "index_worker": worker_status,
                 "sleep_consolidation": sleep_consolidation_status,
                 "sm_lite": sm_lite_stats,
@@ -3823,6 +4016,7 @@ async def get_observability_summary():
         "search_stats": search_summary,
         "cleanup_query_stats": cleanup_query_summary,
         "guard_stats": guard_summary,
+        "reflection_workflow": reflection_workflow_summary,
         "index_latency": index_latency,
         "gist_stats": gist_stats,
         "vitality_stats": vitality_stats,

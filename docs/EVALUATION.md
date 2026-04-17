@@ -2,7 +2,7 @@
 
 本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
-> 状态说明（2026-03）：本页主要保留 2026-02 的公开基线表格，便于用户理解档位差异；当前发布口径请同时参考 `docs/changelog/release_v3.7.1_2026-03-26.md`。如果你还想看同口径的旧版 vs 当前版本摘要，再补看 `docs/changelog/release_summary_vs_old_project_2026-03-06.md`。
+> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的最新真实 A/B/C/D 复核结果收口到公开口径里。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
 
 ---
 
@@ -16,7 +16,7 @@
 | 当前发布说明 | `docs/changelog/release_v3.7.1_2026-03-26.md` |
 | 发布对比摘要 | `docs/changelog/release_summary_vs_old_project_2026-03-06.md` |
 
-> 数据生成时间：`2026-02-19T06:55:30+00:00`（门禁）/ `2026-02-18T21:22:48+00:00`（真实运行）
+> 数据生成时间：`2026-02-19T06:55:30+00:00`（早期门禁基线）/ `2026-04-17T08:16:01+00:00`（当前公开复核）
 
 ---
 
@@ -61,24 +61,41 @@
 
 **来源**：`profile_abcd_real_metrics.json`（`sample_size_requested=8`，2 个数据集 × 8 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
 
-策略：每条查询按 `first_relevant_only=true` 仅保留首个相关文档，额外灌入 `10` 条干扰文档，随机种子 `20260219`。
+策略：每条查询按 `first_relevant_only=true` 仅保留首个相关文档，额外灌入 `200` 条干扰文档，`candidate_multiplier=8`，随机种子 `20260219`。
 
 | 档位 | 数据集 | HR@10 | MRR | NDCG@10 | p50(ms) | p95(ms) | Gate |
 |---|---|---:|---:|---:|---:|---:|---|
-| A | SQuAD v2 Dev | 0.000 | 0.000 | 0.000 | 1.056 | 1.782 | ✅ PASS |
-| A | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 1.036 | 1.743 | ✅ PASS |
-| B | SQuAD v2 Dev | 0.625 | 0.302 | 0.383 | 3.999 | 4.915 | ✅ PASS |
-| B | BEIR NFCorpus | 0.750 | 0.478 | 0.542 | 4.709 | 5.025 | ✅ PASS |
-| C | SQuAD v2 Dev | 1.000 | 1.000 | 1.000 | 385.840 | 665.143 | ✅ PASS |
-| C | BEIR NFCorpus | 0.750 | 0.567 | 0.611 | 381.547 | 454.422 | ✅ PASS |
-| D | SQuAD v2 Dev | 1.000 | 1.000 | 1.000 | 1599.139 | 2078.378 | ✅ PASS |
-| D | BEIR NFCorpus | 0.750 | 0.650 | 0.673 | 1826.662 | 2364.969 | ✅ PASS |
+| A | SQuAD v2 Dev | 0.000 | 0.000 | 0.000 | 1.706 | 2.840 | ✅ PASS |
+| A | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 2.145 | 2.711 | ✅ PASS |
+| B | SQuAD v2 Dev | 0.125 | 0.062 | 0.079 | 9.627 | 11.220 | ✅ PASS |
+| B | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 14.438 | 15.744 | ✅ PASS |
+| C | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 186.068 | 195.240 | ✅ PASS |
+| C | BEIR NFCorpus | 0.625 | 0.531 | 0.554 | 205.430 | 221.215 | ✅ PASS |
+| D | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 2416.022 | 2690.375 | ✅ PASS |
+| D | BEIR NFCorpus | 0.750 | 0.656 | 0.679 | 3142.357 | 3268.025 | ✅ PASS |
 
 > **说明**：
 >
+> - `Profile B` 仍然是**默认交互档**：延迟最低，适合 CLI / IDE 日常 recall。
+> - `Profile C` 是**显式深检索档**：质量明显高于 B，p95 仍在百毫秒级。
+> - `Profile D` 仍然是**最高质量档**：质量最高，但 p95 已到秒级，只适合“质量优先于时延”的场景。
 > - C/D 为真实外部 embedding + reranker 链路调用，延迟显著高于本地 keyword/hash 档位。
-> - C 与 D 使用相同检索算法，差异来源于模型服务配置与网络延迟。
-> - 所有 Gate 均为 PASS，表明各档位在其适用场景下工作正常。
+> - 所有 Phase 6 Gate 均为 PASS，表明当前公开档位在这轮复核里没有出现失效或请求失败。
+
+### 3.1 这轮 2026-04-17 复核该怎么读
+
+- 如果你只想要**默认推荐**：选 `Profile B`。
+- 如果你明确知道自己在做**深检索 / 高质量优先**：显式切到 `Profile C` 或 `Profile D`。
+- `Profile C` 和 `Profile D` 都不是默认 recall 档，它们是按需打开的深检索档。
+
+按两个数据集做均值之后，这轮公开复核的摘要是：
+
+| 档位 | Avg HR@10 | Avg MRR | Avg NDCG@10 | Avg Recall@10 | Avg p95(ms) |
+|---|---:|---:|---:|---:|---:|
+| A | 0.125 | 0.125 | 0.125 | 0.125 | 2.8 |
+| B | 0.188 | 0.156 | 0.164 | 0.188 | 13.5 |
+| C | 0.812 | 0.714 | 0.737 | 0.812 | 208.2 |
+| D | 0.875 | 0.776 | 0.799 | 0.875 | 2979.2 |
 
 ## 3.5 旧版 vs 当前版本（同口径摘要）
 
@@ -223,6 +240,28 @@
 
 - **ROUGE-L** 可以简单理解成：生成的 gist 和参考摘要在“关键内容重合度”上有多接近。
 - 它不是“最终写作质量分”，而是看压缩后**有没有把关键意思留下来**。
+
+### Prompt Safety（反射提示安全契约）
+
+**来源**：`prompt_safety_contract_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+
+| 指标 | 值 | 阈值 | 状态 |
+|---|---:|---:|---|
+| Contract pass rate | 1.000 | ≥ 1.000 | ✅ PASS |
+
+- 关注点：system prompt 是否明确把输入当作不可信数据、是否强制 strict JSON 输出、基础 prompt payload 是否移除了控制字符。
+- 这是**安全契约门禁**，不是模型能力评分；目标是保证 write guard / gist / intent 反射链路的 prompt 框架本身不退化。
+
+### Reflection Lane（反射并发通道）
+
+**来源**：`reflection_lane_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+
+| Metric | Value | Threshold | Status |
+|---|---:|---:|---|
+| Timeout degrade correctness | 1 | = 1 | ✅ PASS |
+
+- 关注点：反射 lane 在并发受限且获取超时时，是否仍然按预期返回 `reflection_lane_timeout` 并留下运行时指标。
+- 关键观测字段包括：`tasks_total`、`tasks_failed`、`wait_ms_p95`、`duration_ms_p95`。
 
 ---
 

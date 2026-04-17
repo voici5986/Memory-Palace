@@ -72,6 +72,7 @@ def test_phase_d_hold_http_and_mcp_contracts() -> None:
         "/maintenance/import/prepare",
         "/maintenance/learn/jobs/{job_id}",
         "/maintenance/learn/jobs/{job_id}/rollback",
+        "/maintenance/learn/reflection",
         "/maintenance/learn/trigger",
         "/maintenance/observability/search",
         "/maintenance/observability/summary",

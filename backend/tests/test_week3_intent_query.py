@@ -113,7 +113,40 @@ class _IntentLlmSearchClient(_FakeSearchClient):
         }
 
 
+class _AmbiguousIntentSearchClient(_FakeSearchClient):
+    def classify_intent(self, _query: str, _rewritten_query: str) -> Dict[str, Any]:
+        return {
+            "intent": "unknown",
+            "strategy_template": "default",
+            "method": "keyword_scoring_v2",
+            "confidence": 0.46,
+            "signals": ["causal:why", "temporal:before"],
+        }
+
+
+class _AmbiguousIntentLlmSearchClient(_AmbiguousIntentSearchClient):
+    async def classify_intent_with_llm(
+        self, _query: str, _rewritten_query: str
+    ) -> Dict[str, Any]:
+        return {
+            "intent": "causal",
+            "strategy_template": "causal_wide_pool",
+            "method": "intent_llm",
+            "confidence": 0.91,
+            "signals": ["intent_llm:causal"],
+            "intent_llm_enabled": True,
+            "intent_llm_applied": True,
+        }
+
+
 class _IntentLlmFailureSearchClient(_FakeSearchClient):
+    async def classify_intent_with_llm(
+        self, _query: str, _rewritten_query: str
+    ) -> Dict[str, Any]:
+        raise RuntimeError("intent_llm_forced_failure")
+
+
+class _AmbiguousIntentLlmFailureSearchClient(_AmbiguousIntentSearchClient):
     async def classify_intent_with_llm(
         self, _query: str, _rewritten_query: str
     ) -> Dict[str, Any]:
@@ -218,6 +251,8 @@ async def test_search_memory_uses_preprocessed_query_and_returns_intent(
     assert fake_client.intent_profile["intent"] == "temporal"
     assert payload["intent_applied"] == "temporal"
     assert payload["strategy_template_applied"] == "temporal_time_filtered"
+    assert payload["interaction_tier"] == "fast"
+    assert payload["intent_llm_attempted"] is False
     assert payload["candidate_multiplier_applied"] == 4
 
 
@@ -270,16 +305,17 @@ async def test_search_memory_supports_legacy_search_advanced_signature(
 async def test_search_memory_marks_degrade_when_intent_llm_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_client = _FakeSearchClient()
+    fake_client = _AmbiguousIntentSearchClient()
     monkeypatch.setattr(mcp_server, "INTENT_LLM_ENABLED", True)
     monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
     monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
     monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
 
     raw = await mcp_server.search_memory(
-        query="Why did rebuild fail?",
+        query="before or after maybe why timeline",
         mode="hybrid",
         include_session=False,
+        filters={"interaction_tier": "deep"},
     )
     payload = json.loads(raw)
 
@@ -290,7 +326,7 @@ async def test_search_memory_marks_degrade_when_intent_llm_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_search_memory_uses_intent_llm_profile_when_available(
+async def test_deep_tier_skips_intent_llm_when_rule_classifier_is_confident(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_client = _IntentLlmSearchClient()
@@ -300,15 +336,42 @@ async def test_search_memory_uses_intent_llm_profile_when_available(
     monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
 
     raw = await mcp_server.search_memory(
-        query="Why did rebuild fail?",
+        query="When did we rebuild index?",
         mode="hybrid",
         include_session=False,
+        filters={"interaction_tier": "deep"},
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["intent"] == "temporal"
+    assert payload["intent_llm_enabled"] is True
+    assert payload["intent_llm_attempted"] is False
+    assert payload["intent_llm_applied"] is False
+    assert fake_client.intent_profile["method"] == "keyword_heuristic"
+
+
+@pytest.mark.asyncio
+async def test_deep_tier_calls_intent_llm_for_unknown_rule_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _AmbiguousIntentLlmSearchClient()
+    monkeypatch.setattr(mcp_server, "INTENT_LLM_ENABLED", True)
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    raw = await mcp_server.search_memory(
+        query="before or after maybe why timeline",
+        mode="hybrid",
+        include_session=False,
+        filters={"interaction_tier": "deep"},
     )
     payload = json.loads(raw)
 
     assert payload["ok"] is True
     assert payload["intent"] == "causal"
-    assert payload["intent_llm_enabled"] is True
+    assert payload["intent_llm_attempted"] is True
     assert payload["intent_llm_applied"] is True
     assert fake_client.intent_profile["method"] == "intent_llm"
 
@@ -317,24 +380,26 @@ async def test_search_memory_uses_intent_llm_profile_when_available(
 async def test_search_memory_falls_back_to_rule_classifier_when_intent_llm_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_client = _IntentLlmFailureSearchClient()
+    fake_client = _AmbiguousIntentLlmFailureSearchClient()
     monkeypatch.setattr(mcp_server, "INTENT_LLM_ENABLED", True)
     monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
     monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
     monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
 
     raw = await mcp_server.search_memory(
-        query="Why did rebuild fail?",
+        query="before or after maybe why timeline",
         mode="hybrid",
         include_session=False,
+        filters={"interaction_tier": "deep"},
     )
     payload = json.loads(raw)
 
     assert payload["ok"] is True
-    assert payload["intent"] == "causal"
-    assert payload["strategy_template"] == "causal_wide_pool"
+    assert payload["intent"] == "unknown"
+    assert payload["strategy_template"] == "default"
     assert payload["intent_llm_enabled"] is True
     assert payload["intent_llm_applied"] is False
+    assert payload["intent_llm_attempted"] is True
     assert "intent_classification_failed" in payload.get("degrade_reasons", [])
     assert "intent_llm_fallback_rule_applied" in payload.get("degrade_reasons", [])
 
@@ -366,6 +431,8 @@ async def test_observability_search_returns_intent_and_query_effective(
     assert response["query_effective"] == "why did index rebuild fail"
     assert response["intent"] == "causal"
     assert response["intent_profile"]["strategy_template"] == "causal_wide_pool"
+    assert response["interaction_tier"] == "fast"
+    assert response["intent_llm_attempted"] is False
     assert fake_client.search_query == "why did index rebuild fail"
     assert fake_client.intent_profile["intent"] == "causal"
     assert fake_client.received_filters == {}
@@ -375,7 +442,7 @@ async def test_observability_search_returns_intent_and_query_effective(
 async def test_observability_search_falls_back_to_rule_classifier_when_intent_llm_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_client = _IntentLlmFailureSearchClient()
+    fake_client = _AmbiguousIntentLlmFailureSearchClient()
 
     async def _ensure_started(_factory) -> None:
         return None
@@ -385,20 +452,49 @@ async def test_observability_search_falls_back_to_rule_classifier_when_intent_ll
     monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
 
     payload = maintenance_api.SearchConsoleRequest(
-        query="Why did index rebuild fail?",
+        query="before or after maybe why timeline",
         mode="hybrid",
         include_session=False,
+        filters={"interaction_tier": "deep"},
     )
     response = await maintenance_api.run_observability_search(payload)
 
     assert response["ok"] is True
-    assert response["intent"] == "causal"
-    assert response["intent_applied"] == "causal"
-    assert response["strategy_template"] == "causal_wide_pool"
+    assert response["intent"] == "unknown"
+    assert response["intent_applied"] == "unknown"
+    assert response["strategy_template"] == "default"
     assert response["intent_llm_enabled"] is True
     assert response["intent_llm_applied"] is False
+    assert response["intent_llm_attempted"] is True
     assert "intent_classification_failed" in response["degrade_reasons"]
     assert "intent_llm_fallback_rule_applied" in response["degrade_reasons"]
+
+
+@pytest.mark.asyncio
+async def test_observability_search_deep_tier_skips_intent_llm_when_rule_classifier_is_confident(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _IntentLlmSearchClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "_INTENT_LLM_ENABLED", True)
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="When did index rebuild fail?",
+        mode="hybrid",
+        include_session=False,
+        filters={"interaction_tier": "deep"},
+    )
+    response = await maintenance_api.run_observability_search(payload)
+
+    assert response["ok"] is True
+    assert response["intent"] == "temporal"
+    assert response["intent_llm_attempted"] is False
+    assert response["intent_llm_applied"] is False
 
 
 @pytest.mark.asyncio
@@ -541,6 +637,61 @@ async def test_preprocess_query_preserves_uri_and_multilingual_content(
 
     assert uri_result["rewritten_query"] == "core://agent/index"
     assert mixed_lang_result["rewritten_query"] == "昨天 index 为什么失败"
+
+
+@pytest.mark.asyncio
+async def test_intent_llm_can_use_fallback_chat_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week3-intent-llm-fallback.db"
+    monkeypatch.setenv("INTENT_LLM_ENABLED", "true")
+    monkeypatch.setenv(
+        "INTENT_LLM_API_BASE",
+        "http://127.0.0.1:8999/v1/chat/completions",
+    )
+    monkeypatch.setenv("INTENT_LLM_MODEL", "test-mini-model")
+    client = SQLiteClient(f"sqlite+aiosqlite:///{db_path}")
+    captured: Dict[str, Any] = {}
+
+    async def _fake_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+        error_sink: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        captured["base"] = base
+        captured["endpoint"] = endpoint
+        captured["payload"] = dict(payload)
+        captured["api_key"] = api_key
+        _ = error_sink
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "intent": "causal",
+                                "confidence": 0.83,
+                                "signals": ["intent_llm:causal"],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    payload = await client.classify_intent_with_llm(
+        "before or after maybe why timeline",
+        "before or after maybe why timeline",
+    )
+    await client.close()
+
+    assert payload["intent_llm_applied"] is True
+    assert captured["base"] == "http://127.0.0.1:8999/v1"
+    assert captured["endpoint"] == "/chat/completions"
 
 
 @pytest.mark.asyncio

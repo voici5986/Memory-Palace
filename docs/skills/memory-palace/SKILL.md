@@ -29,6 +29,7 @@ Use this skill whenever a task involves the Memory Palace memory system itself.
 
 - Before the first real Memory Palace operation in a session, start with `read_memory("system://boot")`.
 - If the task is recall-oriented and the URI is still unknown after boot, continue with `search_memory(..., include_session=true)`.
+- If the exact URI is already known, prefer `read_memory(uri)` directly instead of `search_memory(...)`.
 
 ## Fresh-context rule
 
@@ -40,6 +41,7 @@ Use this skill whenever a task involves the Memory Palace memory system itself.
 
 - Start with `read_memory("system://boot")` before the first real memory operation in a session.
 - If the URI is unknown, use `search_memory(..., include_session=true)` before `read_memory`.
+- If the exact URI is already known, prefer `read_memory(uri)` directly instead of `search_memory(...)`.
 - Read before every mutation: `create_memory`, `update_memory`, `delete_memory`, `add_alias`.
 - Prefer `update_memory` over duplicate `create_memory` when guard signals point to an existing memory.
 - Treat `guard_action=NOOP|UPDATE|DELETE` as a stop signal that requires inspection, not as a warning to ignore.
@@ -95,6 +97,7 @@ Do not shorten it to `docs/skills/memory-palace/trigger-samples.md` or any hidde
 
 - First memory tool call: `read_memory("system://boot")`
 - `guard_action=NOOP`: stop the write, inspect `guard_target_uri` / `guard_target_id`, and read the suggested target before deciding anything else
+- Known URI fast path: if the exact URI is already known, call `read_memory(uri)` directly instead of doing `search_memory(...)` first
 - Trigger sample set path: `docs/skills/memory-palace/references/trigger-samples.md`
 
 ## Examples

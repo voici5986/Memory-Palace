@@ -41,3 +41,22 @@ def test_repo_local_stdio_command_uses_python_wrapper_on_windows(
 
     assert command == r"C:\Python313\python.exe"
     assert args == [str(backend_root / "mcp_wrapper.py")]
+
+
+def test_python_wrapper_live_stdio_smoke() -> None:
+    harness = _load_harness()
+    backend_python = harness._resolve_backend_python()
+    if backend_python is None:
+        raise AssertionError("backend virtualenv python is required for python-wrapper smoke")
+
+    results, stderr_output = harness.run_suite_sync(
+        repo_local_command=(
+            str(backend_python),
+            [str(harness.BACKEND_ROOT / "mcp_wrapper.py")],
+        )
+    )
+
+    failing = [item for item in results if item.status == "FAIL"]
+    assert not failing, [(item.name, item.summary, item.details) for item in failing]
+    assert "tool_inventory" in {item.name for item in results}
+    assert "bound to a different event loop" not in stderr_output

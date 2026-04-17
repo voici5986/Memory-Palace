@@ -36,6 +36,15 @@
 
 - `docs/GETTING_STARTED.md` 的 `6.3.1 ~ 6.3.4`
 
+## 交互档位推荐（2026-04 公开复核）
+
+- `Profile B` 仍然是推荐默认档，适合 CLI / IDE 的日常 memory recall。
+- `Profile C` / `Profile D` 现在明确按**深检索档**来描述，只在你主动追求更高召回和排序质量时显式启用。
+- 这轮公开复核里，launcher 路径没有变化：
+  - 原生 Windows：`backend/mcp_wrapper.py`
+  - macOS / Linux / `Git Bash` / `WSL`：`scripts/run_memory_palace_mcp_stdio.sh`
+- 本文档只保留公开结论，不会把本地 benchmark 用的 endpoint、API key 或 model id 写进仓库。
+
 ## 先分清两层
 
 `memory-palace` 这套链路分成两层：
@@ -242,7 +251,10 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
-- 最近一次验证环境里，补完 `--scope user --with-mcp` 之后，`Codex` 的 `mcp_bindings` 和 `Codex smoke` 都能通过
+- 当前这轮实测里，`Codex` 的 skill 发现仍可用，但 `mcp_bindings` / smoke 仍应按 `PARTIAL` 理解：
+  - user-scope MCP 绑定已对齐当前仓库
+  - `codex exec` smoke 可能因为超时或缺少结构化输出而停在 `PARTIAL`
+  - 所以公开口径应写成“已具备接线条件，但仍建议本机再做一次 user-scope 复核”，不要写成“当前机器已完全通过”
 
 ### OpenCode
 
@@ -331,7 +343,7 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 ```
 
 如果刚 clone 下来的 GitHub 仓库里暂时没有这份文件，属于正常现象；这是运行后生成的本地验证摘要。
-如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败，当前默认的 Gemini smoke 模型是 `gemini-3-flash-preview`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
+如果你准备把它转发给别人，先自己看一遍内容；这类本地报告可能会带上你机器上的路径、客户端配置路径或其他环境痕迹。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH`，把 smoke 报告改写到别的本地路径。
 `gemini_live` 现在改为**显式可选**：只有当你设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会对 Gemini 当前配置反推出的真实数据库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 测试记忆；如果只想做普通 smoke，保持默认即可，或显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
 即使手动开启这轮 live 验证，只要撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。

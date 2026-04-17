@@ -103,3 +103,23 @@ def test_render_payload_auto_uses_python_wrapper_on_windows(
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
         str(project_root / "backend" / "mcp_wrapper.py")
     ]
+
+
+def test_render_payload_supports_windsurf_python_wrapper(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    payload = module.render_payload("windsurf", "python-wrapper")
+
+    assert payload["launcher"] == "python-wrapper"
+    assert "mcpServers" in payload["mcp_config"]
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
+        str(project_root / "backend" / "mcp_wrapper.py")
+    ]

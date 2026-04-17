@@ -285,6 +285,52 @@ def test_parse_args_defaults_to_cli_targets_only(monkeypatch) -> None:
     assert module.resolve_targets(args.targets) == ["claude", "codex", "opencode"]
 
 
+def test_install_skill_round_trip_workspace_then_check(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    source = project_root / "docs" / "skills" / "memory-palace"
+    workspace = tmp_path / "workspace"
+
+    for relative_path, content in {
+        Path("SKILL.md"): "---\nname: memory-palace\ndescription: test skill\n---\nbody\n",
+        Path("agents/openai.yaml"): "name: memory-palace\n",
+        Path("references/mcp-workflow.md"): "workflow\n",
+        Path("references/trigger-samples.md"): "triggers\n",
+        Path("variants/gemini/SKILL.md"): "---\nname: memory-palace\ndescription: gemini variant\n---\nbody\n",
+        Path("variants/gemini/memory-palace-overrides.toml"): "rule = true\n",
+    }.items():
+        path = source / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    (project_root / "scripts").mkdir(parents=True, exist_ok=True)
+    (project_root / "scripts" / "run_memory_palace_mcp_stdio.sh").write_text(
+        "#!/usr/bin/env bash\n",
+        encoding="utf-8",
+    )
+    (project_root / "backend").mkdir(parents=True, exist_ok=True)
+    (project_root / "backend" / "mcp_wrapper.py").write_text(
+        "print('wrapper')\n",
+        encoding="utf-8",
+    )
+    (project_root / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module, "workspace_root", lambda: workspace)
+
+    install_rc = module.main(
+        ["--targets", "claude,gemini", "--scope", "workspace", "--with-mcp"]
+    )
+    check_rc = module.main(
+        ["--targets", "claude,gemini", "--scope", "workspace", "--with-mcp", "--check"]
+    )
+
+    assert install_rc == 0
+    assert check_rc == 0
+
+
 def test_codex_server_block_uses_python_wrapper_on_windows(
     monkeypatch, tmp_path: Path
 ) -> None:

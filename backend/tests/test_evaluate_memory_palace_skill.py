@@ -433,6 +433,15 @@ def test_classify_skill_answer_accepts_repo_visible_trigger_sample_path() -> Non
     assert "trigger sample" in details
 
 
+def test_skill_text_mentions_known_uri_direct_read_path() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    skill_text = (
+        project_root / "docs" / "skills" / "memory-palace" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "If the exact URI is already known" in skill_text
+
+
 def test_smoke_codex_accepts_output_file_when_cli_times_out(
     monkeypatch, tmp_path: Path
 ) -> None:

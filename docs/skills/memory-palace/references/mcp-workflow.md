@@ -39,6 +39,14 @@ search_memory(query="...", include_session=True)
 read_memory("best-match-uri")
 ```
 
+If the exact URI is already known, prefer the direct read path:
+
+```python
+read_memory("core://agent/profile")
+```
+
+Avoid duplicate `search -> read -> read` loops inside one session when the exact target is already loaded and unchanged.
+
 ### 3. Read before write
 
 Never mutate first.

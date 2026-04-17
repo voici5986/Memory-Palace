@@ -39,7 +39,7 @@ SKILL_RELATIVE_FILES = [
 ]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Install the canonical Memory Palace skill into workspace-local or user-local "
@@ -97,7 +97,7 @@ def parse_args() -> argparse.Namespace:
             "When used with --with-mcp, also verify MCP bindings."
         ),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def resolve_targets(raw: str) -> list[str]:
@@ -801,8 +801,8 @@ def run_check(*, args: argparse.Namespace, targets: list[str], source: Path, bas
     return 0 if ok_all else 1
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     targets = resolve_targets(args.targets)
     source = source_dir()
     ensure_wrapper_script()
@@ -824,7 +824,7 @@ def main() -> None:
         raise SystemExit("Symlink mode is not supported by default on Windows. Use --mode copy.")
 
     if args.check:
-        raise SystemExit(run_check(args=args, targets=targets, source=source, base_dir=base_dir))
+        return run_check(args=args, targets=targets, source=source, base_dir=base_dir)
 
     print(f"Source: {source}")
     print(f"Scope: {args.scope} -> {base_dir}")
@@ -842,7 +842,8 @@ def main() -> None:
             install_mcp_binding(target_name, scope=args.scope, dry_run=args.dry_run)
 
     print("Dry run complete." if args.dry_run else "Install complete.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

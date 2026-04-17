@@ -120,6 +120,14 @@ async def _run_write_inline(_operation: str, task):
     return await task()
 
 
+_LONG_GIST_SUMMARY = (
+    "Session compaction notes:\n"
+    "- user requested a detailed rollback checklist for the release incident\n"
+    "- system generated an owner map, pending actions, and recovery timeline\n"
+    "- follow-up compared earlier release notes, fallback behavior, and next validation steps\n"
+)
+
+
 def _spawn_compact_context_worker(
     *, backend_dir: Path, script_path: Path, db_path: Path, hold_seconds: float
 ) -> subprocess.Popen[str]:
@@ -662,7 +670,7 @@ async def test_generate_compact_gist_uses_llm_response(monkeypatch: pytest.Monke
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     payload = await client.generate_compact_gist(
-        summary="Session summary content",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -672,6 +680,41 @@ async def test_generate_compact_gist_uses_llm_response(monkeypatch: pytest.Monke
     assert payload["gist_text"] == "Semantic gist from llm"
     assert payload["quality"] == pytest.approx(0.87)
     assert degrade_reasons == []
+
+
+@pytest.mark.asyncio
+async def test_generate_compact_gist_skips_llm_for_short_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COMPACT_GIST_LLM_ENABLED", "true")
+    monkeypatch.setenv("COMPACT_GIST_LLM_API_BASE", "http://fake.llm")
+    monkeypatch.setenv("COMPACT_GIST_LLM_MODEL", "fake-model")
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    called = False
+
+    async def _fake_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+    ) -> Dict[str, Any]:
+        nonlocal called
+        called = True
+        _ = base
+        _ = endpoint
+        _ = payload
+        _ = api_key
+        return {}
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    payload = await client.generate_compact_gist(
+        summary="Session compaction notes:\n- quick fix",
+    )
+    await client.close()
+
+    assert called is False
+    assert payload is None
 
 
 @pytest.mark.asyncio
@@ -699,7 +742,7 @@ async def test_generate_compact_gist_records_degrade_reason_on_invalid_json(
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     payload = await client.generate_compact_gist(
-        summary="Session summary content",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
@@ -719,8 +762,8 @@ async def test_generate_compact_gist_supports_legacy_llm_env_aliases(
     monkeypatch.delenv("WRITE_GUARD_LLM_API_BASE", raising=False)
     monkeypatch.delenv("WRITE_GUARD_LLM_API_KEY", raising=False)
     monkeypatch.delenv("WRITE_GUARD_LLM_MODEL", raising=False)
-    monkeypatch.setenv("LLM_RESPONSES_URL", "http://127.0.0.1:8317/v1/responses")
-    monkeypatch.setenv("LLM_API_KEY", "sk-12345678")
+    monkeypatch.setenv("LLM_RESPONSES_URL", "http://127.0.0.1:8999/v1/responses")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test-placeholder")
     monkeypatch.setenv("LLM_MODEL_NAME", "gpt-5.2")
     monkeypatch.setenv("LLM_REASONING_EFFORT", "none")
 
@@ -732,11 +775,11 @@ async def test_generate_compact_gist_supports_legacy_llm_env_aliases(
         payload: Dict[str, Any],
         api_key: str = "",
     ) -> Dict[str, Any]:
-        assert base == "http://127.0.0.1:8317/v1"
+        assert base == "http://127.0.0.1:8999/v1"
         assert endpoint == "/chat/completions"
         assert payload["model"] == "gpt-5.2"
         assert "reasoning" not in payload
-        assert api_key == "sk-12345678"
+        assert api_key == "sk-test-placeholder"
         return {
             "choices": [
                 {
@@ -752,7 +795,7 @@ async def test_generate_compact_gist_supports_legacy_llm_env_aliases(
     monkeypatch.setattr(client, "_post_json", _fake_post_json)
     degrade_reasons: List[str] = []
     payload = await client.generate_compact_gist(
-        summary="Session summary content",
+        summary=_LONG_GIST_SUMMARY,
         degrade_reasons=degrade_reasons,
     )
     await client.close()
