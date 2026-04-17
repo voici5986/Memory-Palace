@@ -148,6 +148,16 @@ def backend_venv_python_absolute() -> Path:
     return project_root() / "backend" / ".venv" / "bin" / "python"
 
 
+def _require_backend_venv_python() -> Path:
+    preferred = backend_venv_python_absolute()
+    if preferred.is_file():
+        return preferred
+    raise SystemExit(
+        "Missing repo backend virtualenv python for python-wrapper MCP config: "
+        f"{preferred}. Create backend/.venv before installing or rendering python-wrapper bindings."
+    )
+
+
 def source_dir() -> Path:
     source = project_root() / "docs" / "skills" / SKILL_NAME
     required = [source / relative_path for relative_path in SKILL_RELATIVE_FILES]
@@ -374,27 +384,40 @@ def _default_mcp_launcher() -> str:
 
 
 def _python_command() -> str:
-    preferred = backend_venv_python_absolute()
-    if preferred.is_file():
-        return str(preferred)
-    return sys.executable or "python"
+    return str(_require_backend_venv_python())
 
 
-def _wrapper_candidates(*, allow_relative: bool) -> set[str]:
-    candidates = {
-        _normalized(shell_wrapper_absolute()),
-        _normalized(python_wrapper_absolute()),
-    }
-    if allow_relative:
-        candidates.add(_normalized(shell_wrapper_relative()))
-        candidates.add(_normalized(python_wrapper_relative()))
-    return candidates
+def _same_path(a: object, b: object) -> bool:
+    return _normalized(a).lower() == _normalized(b).lower()
 
 
 def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bool:
     normalized_parts = [_normalized(part) for part in command_parts if str(part).strip()]
-    joined = " ".join(normalized_parts)
-    return any(candidate in joined for candidate in _wrapper_candidates(allow_relative=allow_relative))
+    if not normalized_parts:
+        return False
+
+    command = normalized_parts[0]
+    args = normalized_parts[1:]
+    if not args:
+        return False
+
+    shell_candidates = {_normalized(shell_wrapper_absolute())}
+    python_wrapper_candidates = {_normalized(python_wrapper_absolute())}
+    if allow_relative:
+        shell_candidates.add(_normalized(shell_wrapper_relative()))
+        python_wrapper_candidates.add(_normalized(python_wrapper_relative()))
+
+    shell_command = Path(command).name.lower()
+    if shell_command in {"bash", "sh"} and args[0] in shell_candidates:
+        return True
+
+    try:
+        expected_python = _normalized(_require_backend_venv_python())
+    except SystemExit:
+        expected_python = ""
+    if expected_python and _same_path(command, expected_python) and args[0] in python_wrapper_candidates:
+        return True
+    return False
 
 
 def _command_and_args(*, relative: bool) -> tuple[str, list[str]]:
@@ -499,6 +522,27 @@ def _parse_codex_memory_palace_block(text: str) -> dict:
         "command": command,
         "args": args,
     }
+
+
+def _read_codex_toml(path: Path) -> dict:
+    try:
+        with path.open("rb") as handle:
+            payload = tomllib.load(handle)
+    except getattr(tomllib, "TOMLDecodeError", ValueError) as exc:
+        message = getattr(exc, "msg", str(exc))
+        line = getattr(exc, "lineno", None)
+        column = getattr(exc, "colno", None)
+        location = ""
+        if line is not None and column is not None:
+            location = f" (line {line}, column {column})"
+        raise SystemExit(
+            f"Invalid TOML in {path}: {message}{location}. Fix or remove the file and retry."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"Invalid TOML root in {path}: expected a table, got {type(payload).__name__}."
+        )
+    return payload
 
 
 def _workspace_mcp_supported(target_name: str) -> bool:
@@ -736,8 +780,7 @@ def check_mcp_binding(target_name: str, *, scope: str) -> tuple[bool | None, str
         if tomllib is None:
             server = _parse_codex_memory_palace_block(config_path.read_text(encoding="utf-8"))
         else:
-            with config_path.open("rb") as handle:
-                payload = tomllib.load(handle)
+            payload = _read_codex_toml(config_path)
             server = payload.get("mcp_servers", {}).get("memory-palace", {})
         command = [server.get("command", ""), *(server.get("args") or [])]
         ok = _wrapper_binding_ok(command, allow_relative=False)

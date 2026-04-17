@@ -179,6 +179,19 @@ def build_runtime_env() -> dict[str, str]:
         )
         raise SystemExit(1)
 
+    if not effective_database_url and ENV_FILE.is_file():
+        print(
+            f"Refusing to start repo-local stdio MCP because {ENV_FILE} exists but DATABASE_URL is empty.",
+            file=sys.stderr,
+        )
+        print(
+            "Set DATABASE_URL to a host absolute path, regenerate .env with "
+            "'bash scripts/apply_profile.sh macos b' or '.\\scripts\\apply_profile.ps1 "
+            "-Platform windows -Profile b', or remove the empty entry before retrying.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     has_runtime_database_url = bool(
         _normalize_env_string_value(runtime_env.get("DATABASE_URL", ""))
     )

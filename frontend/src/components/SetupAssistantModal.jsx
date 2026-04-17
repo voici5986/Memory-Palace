@@ -147,9 +147,15 @@ export default function SetupAssistantModal({
   const [saveErrorState, setSaveErrorState] = React.useState(null);
   const [saveSuccess, setSaveSuccess] = React.useState(null);
   const [savingMode, setSavingMode] = React.useState(null);
+  const initializedOpenRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!open) return undefined;
+    if (!open) {
+      initializedOpenRef.current = false;
+      return undefined;
+    }
+    if (initializedOpenRef.current) return undefined;
+    initializedOpenRef.current = true;
 
     let cancelled = false;
     setForm(defaultFormState(authState));

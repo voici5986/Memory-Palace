@@ -65,7 +65,8 @@ That means:
 - `AGENTS.md` is the rule projection for IDE hosts
 - `mcpServers.memory-palace` is the tool projection for IDE hosts
 - `docs/skills/memory-palace/` remains the canonical source behind both projections
-- if a host passes `DATABASE_URL` as an empty string, the wrapper still treats that as “not set” and continues to read the current repository `.env`
+- if a host only passes runtime `DATABASE_URL` as an empty string while the repository `.env` still has a valid value, the wrapper continues to read the current repository `.env`
+- but if the local `.env` itself exists and leaves `DATABASE_URL=` empty, the wrapper now stops immediately and tells you to fix the local config first
 
 ### 3. Local prerequisites for the default IDE-host path
 
@@ -165,6 +166,8 @@ backend/mcp_wrapper.py
 
 and reminds you to replace `python` with the actual interpreter when your environment is managed by a virtualenv.
 
+If you explicitly request `python-wrapper` but the current checkout does not have a ready `backend/.venv`, `render_ide_host_config.py` now stops with an explicit error instead of silently falling back to some unrelated system Python.
+
 ---
 
 ## Unified validation stance
@@ -176,7 +179,7 @@ The safer layered approach is:
 1. **static contract checks**
    - `AGENTS.md` exists
    - wrapper / workflow / canonical source exists
-   - the MCP command really points at this checkout
+   - the MCP command really points at this checkout, and the launcher / args pair is the executable wrapper pair rather than just a config string that happens to mention the wrapper path
 
 2. **host connection checks**
    - the IDE can see the `memory-palace` MCP server

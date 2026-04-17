@@ -50,6 +50,8 @@ If the Dashboard shell opens but protected data does not load, the usual fix is:
 
 > If you choose **Save local `.env` settings** and also fill a Dashboard key, remember that the `.env` write and the browser key save are two separate steps. If the browser blocks local storage, the assistant now shows a save failure instead of a false success. In practice that usually means the `.env` change may already be written, but the browser-side auth is still not ready yet.
 
+> Conversely, when both steps succeed, the assistant now keeps the success message and restart reminder visible inside the dialog, so you can confirm the whole save path finished cleanly before closing it.
+
 > The `.env` write path is only enabled when the app is running directly against a non-Docker local checkout. If the page is talking to Docker containers, the assistant stays in guidance mode instead of pretending it can persist container env / proxy changes.
 
 > If you hit the assistant first and it opens in English, that is still fine on fresh first-run: the assistant has its own language toggle in the upper right corner.

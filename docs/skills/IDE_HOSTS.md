@@ -63,7 +63,8 @@ docs/skills/memory-palace/
 - `mcpServers.memory-palace` 是 IDE hosts 的工具接入投影
 - `docs/skills/memory-palace/` 继续是这些投影背后的 canonical source
 - 如果这个 repo-local `stdio` 入口要正常工作，本地 `.env` 里的 `DATABASE_URL` 也必须是宿主机可访问的路径；`/app/...` 或 `/data/...` 这类容器路径会被 wrapper 直接拒绝
-- 如果某个宿主把 `DATABASE_URL` 传成空字符串，wrapper 也会按“没设置”处理，继续读当前仓库 `.env`，不用为了清空旧值再手工绕路
+- 如果某个宿主只是把运行时 `DATABASE_URL` 传成空字符串，但仓库 `.env` 里本来就有有效值，wrapper 仍会继续读当前仓库 `.env`
+- 但如果本地 `.env` 自己就写成了 `DATABASE_URL=` 空值，wrapper 现在会直接停下并提示你先把本机配置改对
 
 ---
 
@@ -126,6 +127,8 @@ python scripts/render_ide_host_config.py --host antigravity
 
 两条路径都要求当前 checkout 下的 `backend/.venv` 已经可用。
 
+如果你显式要求 `python-wrapper`，但当前 checkout 还没准备好 `backend/.venv`，`render_ide_host_config.py` 现在会直接报错，不再偷偷回退到系统 Python。
+
 在 Windows 上，这条默认值通常已经是 `python-wrapper`。如果你在 macOS / Linux 上遇到 `stdin/stdout` / CRLF 兼容问题，再切到 wrapper 版本：
 
 ```bash
@@ -151,7 +154,7 @@ IDE hosts 不再承诺仓内“一键 live smoke”。
 1. **静态契约检查**
    - `AGENTS.md` 存在
    - wrapper / workflow / canonical source 存在
-   - MCP 命令确实指向当前仓库
+   - MCP 命令确实指向当前仓库，而且 launcher / args 组合本身是可执行的那一组，而不是“配置里刚好提到了 wrapper 路径”
 
 2. **宿主连接检查**
    - IDE 能看到 `memory-palace` MCP server

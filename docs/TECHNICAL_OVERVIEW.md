@@ -138,6 +138,7 @@ backend/
 | `GET` | `/maintenance/import/jobs/{job_id}` | 查看导入任务状态 |
 | `POST` | `/maintenance/import/jobs/{job_id}/rollback` | 回滚导入任务 |
 | `POST` | `/maintenance/learn/trigger` | 触发显式学习任务 |
+| `POST` | `/maintenance/learn/reflection` | 触发 reflection workflow（`prepare/execute`；执行后会登记 learn job，复用同一套 rollback API） |
 | `GET` | `/maintenance/learn/jobs/{job_id}` | 查看显式学习任务状态 |
 | `POST` | `/maintenance/learn/jobs/{job_id}/rollback` | 回滚显式学习任务 |
 | `POST` | `/maintenance/vitality/decay` | 触发 vitality 衰减 |

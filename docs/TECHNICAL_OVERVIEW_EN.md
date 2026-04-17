@@ -138,6 +138,7 @@ Route-level API Key authentication (all endpoints require authentication).
 | `GET` | `/maintenance/import/jobs/{job_id}` | View import task status |
 | `POST` | `/maintenance/import/jobs/{job_id}/rollback` | Rollback import task |
 | `POST` | `/maintenance/learn/trigger` | Trigger explicit learning task |
+| `POST` | `/maintenance/learn/reflection` | Trigger the reflection workflow (`prepare/execute`; executed runs now register a learn job and reuse the same rollback API) |
 | `GET` | `/maintenance/learn/jobs/{job_id}` | View explicit learning task status |
 | `POST` | `/maintenance/learn/jobs/{job_id}/rollback` | Rollback explicit learning task |
 | `POST` | `/maintenance/vitality/decay` | Trigger vitality decay |

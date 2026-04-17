@@ -570,7 +570,7 @@ python run_sse.py
 >
 > 在原生 Windows 或其它更依赖 wrapper 的宿主路径里，repo-local stdio launcher 现在也会按块转发 stdin/stdout，而不是逐字节转发。说人话就是：遇到更大的 MCP 响应时，体感会比以前顺一些，但原来的 CRLF 清理规则不变。
 >
-> 再补一个这轮实测过的细节：如果某个客户端 / IDE host 把 `DATABASE_URL` 传成了空字符串，这两条 wrapper 也会把它当成“没设置”，继续回退到当前仓库 `.env` 里的有效值；不会因为“变量名存在但值为空”就把 repo-local 启动误判成缺配置。
+> 再补一个这轮实测过的细节：如果某个客户端 / IDE host 只是把 `DATABASE_URL` 传成了空字符串，但当前仓库 `.env` 里本来就有有效值，这两条 wrapper 仍会把这个运行时空值当成“没设置”，继续复用仓库 `.env`。但如果本地 `.env` 自己就存在，而且写成了 `DATABASE_URL=` 空值，wrapper 现在会直接 fail-closed，明确提示你先把本机配置改对再重试。
 >
 > 同样地，如果 `.env` 或你显式传入的 `DATABASE_URL` 仍是 `/app/...` 或 `/data/...` 这类 Docker 容器路径，wrapper 现在也会直接拒绝启动。这不是 MCP 协议故障，而是本机路径配置错了；改成宿主机绝对路径，或者继续走 Docker `/sse`。
 >

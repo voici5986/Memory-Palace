@@ -176,6 +176,24 @@ def test_build_runtime_env_treats_empty_database_url_as_missing_when_no_env_exis
     assert runtime_env["DATABASE_URL"] == f"sqlite+aiosqlite:///{demo_db.as_posix()}"
 
 
+def test_build_runtime_env_rejects_empty_database_url_in_env_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text("DATABASE_URL=\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    assert str(excinfo.value) == "1"
+
+
 def test_build_runtime_env_prefers_env_file_remote_timeout_when_runtime_env_absent(
     monkeypatch, tmp_path: Path
 ) -> None:

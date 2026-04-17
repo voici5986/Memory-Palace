@@ -267,6 +267,38 @@ describe('App routing', () => {
     }
   });
 
+  it('shows server save success and persists browser auth when both succeed', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'stored-key'
+    );
+
+    await user.click(screen.getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(
+      (
+        await within(dialog).findAllByText((_, node) =>
+          node?.textContent?.includes(i18n.t('setup.messages.serverSaved', { target: '.env' }))
+        )
+      ).length
+    ).toBeGreaterThan(0);
+    expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toContain('stored-key');
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
+  });
+
   it('disables local .env save when setup status is authenticated-but-not-loopback', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/memory');

@@ -494,6 +494,108 @@ def _build_reflection_workflow_summary(import_learn_summary: Dict[str, Any]) -> 
     }
 
 
+def _build_reflection_learn_job_response(
+    *,
+    result: Dict[str, Any],
+    source: str,
+    reason_text: str,
+    actor_id: Optional[str],
+    session_id: str,
+) -> Tuple[bool, str, Dict[str, Any], Dict[str, Any]]:
+    nested_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    created_memories: List[Dict[str, Any]] = []
+    created_memory = nested_result.get("created_memory")
+    if isinstance(created_memory, dict):
+        memory_id = _safe_non_negative_int(created_memory.get("id"))
+        if memory_id > 0:
+            created_memories.append(
+                {
+                    "memory_id": memory_id,
+                    "uri": str(created_memory.get("uri") or ""),
+                    "path": str(created_memory.get("path") or ""),
+                    "source_hash": str(nested_result.get("source_hash") or ""),
+                }
+            )
+
+    created_namespace_memories = _normalize_created_namespace_memories(
+        nested_result.get("created_namespace_memories")
+    )
+    mode = str(result.get("mode") or "").strip().lower()
+    prepared = bool(result.get("prepared"))
+    executed = bool(result.get("executed"))
+    accepted = prepared or executed
+    job_status = "failed"
+    if executed:
+        job_status = "executed"
+    elif prepared:
+        job_status = "prepared"
+
+    batch_id = (
+        str(result.get("job_id") or "").strip()
+        or str(result.get("review_id") or "").strip()
+        or str(nested_result.get("batch_id") or "").strip()
+    )
+    if not batch_id:
+        batch_id = f"reflection-{uuid.uuid4().hex[:16]}"
+        result["job_id"] = batch_id
+        result["review_id"] = batch_id
+        nested_result["batch_id"] = batch_id
+
+    now = _utc_iso_now()
+    job_payload: Dict[str, Any] = {
+        "job_id": batch_id,
+        "job_type": "learn",
+        "workflow_operation": "reflection_workflow",
+        "mode": mode,
+        "status": job_status,
+        "created_at": now,
+        "updated_at": now,
+        "source": source,
+        "reason": reason_text,
+        "reason_text": reason_text,
+        "actor_id": actor_id,
+        "session_id": session_id,
+        "domain": str(nested_result.get("domain") or "notes"),
+        "path_prefix": str(nested_result.get("path_prefix") or "corrections"),
+        "execute": mode == "execute",
+        "source_hash": str(nested_result.get("source_hash") or ""),
+        "target_parent_uri": str(nested_result.get("target_parent_uri") or ""),
+        "created_memories": created_memories,
+        "created_namespace_memories": created_namespace_memories,
+        "result": result,
+    }
+    if job_status == "executed":
+        job_payload["rollback"] = {
+            "status": "not_started",
+            "rolled_back_count": 0,
+            "error_count": 0,
+            "errors": [],
+            "completed_at": None,
+            "side_effects_audit_required": True,
+            "residual_artifacts_review_required": True,
+        }
+    elif job_status == "failed":
+        job_payload["failure"] = {
+            "reason": str(result.get("reason") or "rejected"),
+            "updated_at": now,
+        }
+
+    response_payload = dict(result)
+    response_payload.update(
+        {
+            "job_id": batch_id,
+            "job_type": "learn",
+            "job": _public_import_job_payload(job_payload),
+            "rollback_endpoint": f"/maintenance/import/jobs/{batch_id}/rollback",
+            "rollback_endpoint_aliases": [
+                f"/maintenance/import/jobs/{batch_id}/rollback",
+                f"/maintenance/learn/jobs/{batch_id}/rollback",
+            ],
+        }
+    )
+    return accepted, batch_id, job_payload, response_payload
+
+
 def _normalize_import_parent_path(parent_path: Optional[str]) -> str:
     raw = str(parent_path or "").strip().strip("/")
     if not raw:
@@ -893,6 +995,29 @@ def _http_error_for_learn_trigger(
         "domain_not_allowed",
     }:
         return HTTPException(status_code=422, detail=detail)
+    return HTTPException(status_code=409, detail=detail)
+
+
+def _http_error_for_reflection_workflow(
+    *,
+    result: Dict[str, Any],
+    job_id: str,
+    job_payload: Dict[str, Any],
+) -> HTTPException:
+    reason = str(result.get("reason") or "rejected")
+    detail: Dict[str, Any] = {
+        "error": "reflection_workflow_rejected",
+        "reason": reason,
+        "job_id": job_id,
+        "job": _public_import_job_payload(job_payload),
+        "result": result,
+    }
+    if reason in {"unsupported_reflection_source", "unsupported_reflection_mode"}:
+        return HTTPException(status_code=422, detail=detail)
+    if reason == "session_summary_unavailable":
+        return HTTPException(status_code=503, detail=detail)
+    if reason == "session_summary_empty":
+        return HTTPException(status_code=409, detail=detail)
     return HTTPException(status_code=409, detail=detail)
 
 
@@ -2858,6 +2983,33 @@ async def _rollback_job(
             ),
         },
     )
+    if str(transitioned_job.get("workflow_operation") or "").strip() == "reflection_workflow":
+        await _record_import_learn_event(
+            event_type="rollback",
+            operation="reflection_workflow",
+            decision="rejected" if has_errors else "rolled_back",
+            reason=(
+                "rollback_failed"
+                if has_errors
+                else str(payload.reason or "manual_rollback").strip()
+            ),
+            source=str(transitioned_job.get("source") or "session_summary"),
+            session_id=str(transitioned_job.get("session_id") or ""),
+            actor_id=str(transitioned_job.get("actor_id") or "") or None,
+            batch_id=str(transitioned_job.get("job_id") or job_id),
+            metadata={
+                "rolled_back_count": _safe_non_negative_int(
+                    rollback_summary.get("rolled_back_count")
+                ),
+                "error_count": _safe_non_negative_int(rollback_summary.get("error_count")),
+                "side_effects_audit_required": bool(
+                    rollback_summary.get("side_effects_audit_required")
+                ),
+                "residual_artifacts_review_required": bool(
+                    rollback_summary.get("residual_artifacts_review_required")
+                ),
+            },
+        )
 
     return {
         "ok": not has_errors,
@@ -3042,14 +3194,49 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
 @router.post("/learn/reflection")
 async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
     reflection_workflow_service = await _resolve_reflection_workflow_service()
-    return await reflection_workflow_service(
-        mode=str(payload.mode or ""),
-        source=str(payload.source or ""),
-        reason=str(payload.reason or ""),
-        session_id=str(payload.session_id or ""),
-        actor_id=(str(payload.actor_id).strip() if payload.actor_id is not None else None) or None,
-        client=_LazySQLiteClientProxy(get_sqlite_client),
+    normalized_mode = str(payload.mode or "").strip()
+    normalized_source = str(payload.source or "").strip() or "session_summary"
+    normalized_reason = str(payload.reason or "").strip()
+    normalized_session_id = str(payload.session_id or "").strip()
+    normalized_actor_id = (
+        str(payload.actor_id).strip() if payload.actor_id is not None else None
+    ) or None
+    try:
+        result = await reflection_workflow_service(
+            mode=normalized_mode,
+            source=normalized_source,
+            reason=normalized_reason,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            client=_LazySQLiteClientProxy(get_sqlite_client),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "reflection_workflow_invalid_mode",
+                "reason": "unsupported_reflection_mode",
+                "allowed_modes": ["prepare", "execute"],
+                "mode": normalized_mode,
+                "message": str(exc),
+            },
+        ) from exc
+
+    accepted, batch_id, job_payload, response_payload = _build_reflection_learn_job_response(
+        result=result,
+        source=normalized_source,
+        reason_text=normalized_reason,
+        actor_id=normalized_actor_id,
+        session_id=normalized_session_id,
     )
+    await _put_learn_job(job_payload)
+    if not accepted:
+        raise _http_error_for_reflection_workflow(
+            result=result,
+            job_id=batch_id,
+            job_payload=job_payload,
+        )
+    return response_payload
 
 
 @router.get("/orphans")

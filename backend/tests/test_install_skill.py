@@ -336,14 +336,17 @@ def test_codex_server_block_uses_python_wrapper_on_windows(
 ) -> None:
     module = _load_install_skill_module()
     project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(module, "project_root", lambda: project_root)
     monkeypatch.setattr(module.os, "name", "nt")
-    monkeypatch.setattr(module.sys, "executable", r"C:\Python313\python.exe")
 
     rendered = module._codex_server_block_text()
 
-    assert 'command = "C:\\\\Python313\\\\python.exe"' in rendered
+    expected_command = str(venv_python).replace("\\", "\\\\")
+    assert f'command = "{expected_command}"' in rendered
     assert str(project_root / "backend" / "mcp_wrapper.py").replace("\\", "\\\\") in rendered
 
 
@@ -354,12 +357,14 @@ def test_check_mcp_binding_codex_falls_back_without_tomllib(
     project_root = tmp_path / "Memory-Palace"
     home_dir = tmp_path / "home"
     config_path = home_dir / ".codex" / "config.toml"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(module, "project_root", lambda: project_root)
     monkeypatch.setattr(module.Path, "home", lambda: home_dir)
     monkeypatch.setattr(module, "tomllib", None)
-    monkeypatch.setattr(module.sys, "executable", "/usr/bin/python3")
 
     config_path.write_text(module._codex_server_block_text(), encoding="utf-8")
 
@@ -374,17 +379,71 @@ def test_wrapper_binding_ok_accepts_python_wrapper_paths(
 ) -> None:
     module = _load_install_skill_module()
     project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(module, "project_root", lambda: project_root)
 
     assert module._wrapper_binding_ok(
-        ["python", str(project_root / "backend" / "mcp_wrapper.py")],
+        [str(venv_python), str(project_root / "backend" / "mcp_wrapper.py")],
         allow_relative=False,
     )
     assert module._wrapper_binding_ok(
-        ["python", "backend/mcp_wrapper.py"],
+        [str(venv_python), "backend/mcp_wrapper.py"],
         allow_relative=True,
     )
+
+
+def test_wrapper_binding_ok_rejects_non_wrapper_commands(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    assert not module._wrapper_binding_ok(
+        ["echo", str(project_root / "backend" / "mcp_wrapper.py")],
+        allow_relative=False,
+    )
+
+
+def test_python_command_requires_repo_backend_venv(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    with pytest.raises(SystemExit) as excinfo:
+        module._python_command()
+
+    assert "Missing repo backend virtualenv python" in str(excinfo.value)
+
+
+def test_check_mcp_binding_codex_reports_invalid_toml_with_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    home_dir = tmp_path / "home"
+    config_path = home_dir / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("[mcp_servers.memory-palace\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.Path, "home", lambda: home_dir)
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.check_mcp_binding("codex", scope="user")
+
+    assert "Invalid TOML in" in str(excinfo.value)
+    assert str(config_path) in str(excinfo.value)
 
 
 def test_install_target_force_keeps_existing_skill_when_copying_new_tree_fails(

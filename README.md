@@ -570,7 +570,7 @@ python run_sse.py
 >
 > On native Windows or other wrapper-heavy host paths, the repo-local stdio launcher now forwards stdin/stdout in chunks instead of byte by byte. In plain language: larger MCP responses should feel less sluggish than before, while the same CRLF cleanup rules still apply.
 >
-> One more detail rechecked in the current validation round: if a client or IDE host passes `DATABASE_URL` as an empty string, these wrappers still treat that as “not set” and keep reusing the repository `.env` value. They do not misclassify that case as a missing repo-local configuration just because the variable name exists.
+> One more detail rechecked in the current validation round: if a client or IDE host passes `DATABASE_URL` as an empty string **but the repository `.env` still has a valid value**, these wrappers still treat that runtime override as “not set” and keep using the repository `.env` value. But if the local `.env` itself exists and leaves `DATABASE_URL=` empty, the wrapper now fails closed and tells you to fix the local config before retrying.
 >
 > The same rule now applies when `.env` itself is wrong: if `.env` or an explicit `DATABASE_URL` still points to `/app/...` or `/data/...`, the wrapper refuses to start on purpose. That is a local path configuration error, not an MCP protocol failure.
 >

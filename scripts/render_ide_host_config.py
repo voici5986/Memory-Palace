@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 
@@ -56,6 +55,16 @@ def backend_venv_python_absolute() -> Path:
     return project_root() / "backend" / ".venv" / "bin" / "python"
 
 
+def require_backend_venv_python_absolute() -> Path:
+    python_path = backend_venv_python_absolute()
+    if python_path.is_file():
+        return python_path
+    raise SystemExit(
+        "Missing repo backend virtualenv python for python-wrapper launcher: "
+        f"{python_path}. Create backend/.venv before rendering python-wrapper host config."
+    )
+
+
 def antigravity_workflow_absolute() -> Path:
     return (
         project_root()
@@ -78,12 +87,11 @@ def resolve_launcher(launcher: str) -> str:
 def build_mcp_config(launcher: str) -> dict[str, object]:
     resolved = resolve_launcher(launcher)
     if resolved == "python-wrapper":
-        python_command = backend_venv_python_absolute()
-        command = str(python_command) if python_command.is_file() else (sys.executable or "python")
+        python_command = require_backend_venv_python_absolute()
         return {
             "mcpServers": {
                 "memory-palace": {
-                    "command": command,
+                    "command": str(python_command),
                     "args": [str(python_wrapper_absolute())],
                 }
             }

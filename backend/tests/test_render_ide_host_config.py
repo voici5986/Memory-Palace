@@ -4,6 +4,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_module():
     project_root = Path(__file__).resolve().parents[2]
@@ -103,6 +105,20 @@ def test_render_payload_auto_uses_python_wrapper_on_windows(
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
         str(project_root / "backend" / "mcp_wrapper.py")
     ]
+
+
+def test_render_payload_python_wrapper_requires_repo_backend_venv(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.render_payload("cursor", "python-wrapper")
+
+    assert "Missing repo backend virtualenv python" in str(excinfo.value)
 
 
 def test_render_payload_supports_windsurf_python_wrapper(
