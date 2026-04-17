@@ -67,6 +67,7 @@ PUSH_CHECKLIST.md
 code_review_report.md
 security_best_practices_report.md
 docs/improvement/
+docs/superpowers/
 docs/evaluation_old_vs_new_*.md
 docs/changelog/current_code_improvements_vs_legacy_docs.md
 docs/nodeseek_post.md
