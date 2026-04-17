@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { formatTime } from '../../lib/format';
+import { alertWithFallback, confirmWithFallback } from '../../lib/dialogs';
 
 const normalizeSessionList = (value) => {
   if (!Array.isArray(value)) return [];
@@ -65,6 +66,7 @@ function ReviewPage() {
   const [loading, setLoading] = useState(false);
   const [diffErrorState, setDiffErrorState] = useState(null);
   const [mutationInFlight, setMutationInFlight] = useState(false);
+  const [actionMessage, setActionMessage] = useState(null);
   
   const sessionsRequestRef = useRef(0);
   const currentSessionIdRef = useRef(null);
@@ -186,7 +188,16 @@ function ReviewPage() {
   const handleRollback = async () => {
     if (!currentSessionId || !selectedSnapshot) return;
     if (!beginMutation()) return;
-    if (!confirm(t('review.prompts.rejectChanges', { resourceId: selectedSnapshot.resource_id }))) {
+    setActionMessage(null);
+    const confirmResult = confirmWithFallback(
+      t('review.prompts.rejectChanges', { resourceId: selectedSnapshot.resource_id })
+    );
+    if (!confirmResult.available) {
+      setActionMessage(t('review.errors.confirmUnavailable'));
+      endMutation();
+      return;
+    }
+    if (!confirmResult.confirmed) {
       endMutation();
       return;
     }
@@ -205,16 +216,20 @@ function ReviewPage() {
       await loadSnapshots(currentSessionId);
       await loadSessions();
       if (cleanupError) {
-        alert(
-          t('review.alerts.rollbackCleanupFailed', {
-            detail: extractApiError(cleanupError, cleanupError?.message || t('review.errors.approve')),
-          })
-        );
+        const message = t('review.alerts.rollbackCleanupFailed', {
+          detail: extractApiError(cleanupError, cleanupError?.message || t('review.errors.approve')),
+        });
+        if (!alertWithFallback(message)) {
+          setActionMessage(message);
+        }
       }
     } catch (err) {
-      alert(t('review.alerts.rejectionFailed', {
+      const message = t('review.alerts.rejectionFailed', {
         detail: extractApiError(err, err?.message || t('review.errors.rollback')),
-      }));
+      });
+      if (!alertWithFallback(message)) {
+        setActionMessage(message);
+      }
     } finally {
       endMutation();
     }
@@ -223,14 +238,18 @@ function ReviewPage() {
   const handleApprove = async () => {
     if (!currentSessionId || !selectedSnapshot) return;
     if (!beginMutation()) return;
+    setActionMessage(null);
     try {
       await approveSnapshot(currentSessionId, selectedSnapshot.resource_id);
       await loadSnapshots(currentSessionId);
       await loadSessions();
     } catch (err) {
-      alert(t('review.alerts.integrationFailed', {
+      const message = t('review.alerts.integrationFailed', {
         detail: extractApiError(err, err?.message || t('review.errors.approve')),
-      }));
+      });
+      if (!alertWithFallback(message)) {
+        setActionMessage(message);
+      }
     } finally {
       endMutation();
     }
@@ -239,7 +258,14 @@ function ReviewPage() {
   const handleClearSession = async () => {
     if (!currentSessionId) return;
     if (!beginMutation()) return;
-    if (!confirm(t('review.prompts.integrateAll'))) {
+    setActionMessage(null);
+    const confirmResult = confirmWithFallback(t('review.prompts.integrateAll'));
+    if (!confirmResult.available) {
+      setActionMessage(t('review.errors.confirmUnavailable'));
+      endMutation();
+      return;
+    }
+    if (!confirmResult.confirmed) {
       endMutation();
       return;
     }
@@ -247,9 +273,12 @@ function ReviewPage() {
       await clearSession(currentSessionId);
       await loadSessions();
     } catch (err) {
-      alert(t('review.alerts.massIntegrationFailed', {
+      const message = t('review.alerts.massIntegrationFailed', {
         detail: extractApiError(err, err?.message || t('review.errors.clearSession')),
-      }));
+      });
+      if (!alertWithFallback(message)) {
+        setActionMessage(message);
+      }
     } finally {
       endMutation();
     }
@@ -501,6 +530,14 @@ function ReviewPage() {
             {/* Reading/Diff Area */}
             <div className="flex-1 overflow-y-auto px-8 py-8 custom-scrollbar">
                <div className="max-w-4xl mx-auto">
+                   {actionMessage ? (
+                     <div
+                       role="alert"
+                       className="mb-6 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900"
+                     >
+                       {actionMessage}
+                     </div>
+                   ) : null}
                    
                    {diffError ? (
                        <div className="mt-20 flex flex-col items-center justify-center text-rose-500 gap-6 animate-in fade-in zoom-in duration-300">

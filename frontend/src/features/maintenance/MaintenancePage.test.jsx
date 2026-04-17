@@ -76,6 +76,24 @@ describe('MaintenancePage', () => {
     });
   });
 
+  it('fails closed with inline notice when native confirm dialog is unavailable', async () => {
+    const user = userEvent.setup();
+    window.confirm.mockImplementation(() => {
+      throw new Error('confirm unavailable');
+    });
+
+    render(<MaintenancePage />);
+
+    await screen.findByText(/orphan snippet/i);
+    await user.click(screen.getByTitle(i18n.t('maintenance.selectAll')));
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.deleteOrphans', { count: 1 }) }));
+
+    expect(api.deleteOrphanMemory).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(i18n.t('maintenance.errors.confirmUnavailable'))
+    ).toBeInTheDocument();
+  });
+
   it('passes optional domain/path_prefix filters when applying vitality query', async () => {
     const user = userEvent.setup();
     render(<MaintenancePage />);
@@ -236,6 +254,55 @@ describe('MaintenancePage', () => {
     expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
     expect(screen.getByText('confirmation phrase mismatch')).toBeInTheDocument();
     expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps prepared review and shows inline error when prompt dialog is unavailable', async () => {
+    const user = userEvent.setup();
+    api.queryVitalityCleanupCandidates.mockResolvedValue({
+      status: 'ok',
+      items: [
+        {
+          memory_id: 101,
+          vitality_score: 0.12,
+          inactive_days: 30,
+          access_count: 0,
+          can_delete: true,
+          uri: 'core://agent/legacy',
+          content_snippet: 'legacy candidate',
+          state_hash: 'hash-101',
+        },
+      ],
+    });
+    api.prepareVitalityCleanup.mockResolvedValue({
+      review: {
+        review_id: 'review-1',
+        token: 'token-1',
+        confirmation_phrase: 'CONFIRM DELETE',
+        action: 'delete',
+        reviewer: 'maintenance_dashboard',
+      },
+    });
+    window.prompt.mockImplementation(() => {
+      throw new Error('prompt unavailable');
+    });
+
+    render(<MaintenancePage />);
+    await screen.findByText(/legacy candidate/i);
+
+    const selectAllButtons = screen.getAllByRole('button', { name: i18n.t('maintenance.selectAll') });
+    await user.click(selectAllButtons[selectAllButtons.length - 1]);
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 1 }) }));
+    await screen.findByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }));
+
+    await user.click(screen.getByRole('button', {
+      name: i18n.t('maintenance.vitality.confirmAction', {
+        action: i18n.t('maintenance.vitality.actionLabels.delete'),
+      }),
+    }));
+
+    expect(api.confirmVitalityCleanup).not.toHaveBeenCalled();
+    expect(screen.getByText(i18n.t('maintenance.errors.promptUnavailable'))).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
   });
 
   it('recomputes orphan load error copy when the language changes', async () => {

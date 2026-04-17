@@ -250,7 +250,7 @@ VITE v7.x.x  ready in xxx ms
 
 - `docs/DASHBOARD_GUIDE_CN.md`
 
-> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。第 5 节会继续说明本地验证方式。
+> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
 >
 > 再补一个这轮按代码实际行为复核过的小细节：如果向导里显示的占位文本本身带 `&` 或 `<...>` 这类字符，现在会按普通文本正常显示，不会再把 HTML 实体原样露给用户。
 
@@ -258,6 +258,8 @@ VITE v7.x.x  ready in xxx ms
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
 > 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。如果你本机的 router 还没准备好，就手动把检索字段切回直连 API 模式排障；如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
+>
+> 如果你当前是通过带鉴权的非 loopback 路径看这个页面，首启向导仍然能显示当前状态，但“保存到本地 `.env`”会继续保持禁用。这不是 UI 异常，而是现在明确保留的安全边界。
 
 > 这个向导不会假装自己能热更新 Docker 容器里的 env / 代理配置。只要你改的是 embedding / reranker / write_guard / intent 这类后端运行参数，保存后仍然需要重启 `backend` / `sse`（Docker 路径则继续建议用 profile 脚本重启容器）。
 
@@ -488,7 +490,7 @@ python scripts/evaluate_memory_palace_skill.py
 cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ```
 
-脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果你只想在本机临时换一套 Gemini smoke 模型，可设置 `MEMORY_PALACE_GEMINI_TEST_MODEL`；如果还要把 fallback 模型单独改开，再额外设置 `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
+脚本默认会分别在 `<repo-root>/docs/skills/TRIGGER_SMOKE_REPORT.md` 和 `<repo-root>/docs/skills/MCP_LIVE_E2E_REPORT.md` 生成摘要。这两份结果主要用于本地复核，不是主说明文档。当前脚本还会自动脱敏常见 secret、session token 和本地绝对路径，并在宿主支持时改用更私有的文件权限。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果你只想在本机临时换一套 Gemini smoke 模型，可设置 `MEMORY_PALACE_GEMINI_TEST_MODEL`；如果还要把 fallback 模型单独改开，再额外设置 `MEMORY_PALACE_GEMINI_FALLBACK_MODEL`。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
 如果你在并行 review 或 CI 里想隔离输出，也可以先设置 `MEMORY_PALACE_SKILL_REPORT_PATH` / `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。这两个变量如果写相对路径，脚本现在会自动把结果放到系统临时目录下的 `memory-palace-reports/`，避免把日志类产物直接落进当前仓库；如果你想完全自己控制位置，优先传仓库外的绝对路径。
 如果你是刚 clone 下来的 GitHub 仓库，暂时看不到这两份文件也正常；它们是运行脚本后才生成的本地产物。
 

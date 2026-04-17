@@ -26,7 +26,7 @@ records, and some metric JSONs are typically for development or local use only.
 | Release Comparison Summary | `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md` |
 
 > Data Generation Time: `2026-02-19T06:55:30+00:00` (early gate baseline) /
-> `2026-04-17T08:16:01+00:00` (current public verification)
+> `2026-04-17T10:35:51+00:00` (current public verification)
 
 ---
 
@@ -89,14 +89,14 @@ relevant document, with `200` extra distractor documents,
 
 | Profile | Dataset | HR@10 | MRR | NDCG@10 | p50(ms) | p95(ms) | Gate |
 |---|---|---:|---:|---:|---:|---:|---|
-| A | SQuAD v2 Dev | 0.000 | 0.000 | 0.000 | 1.706 | 2.840 | ✅ PASS |
-| A | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 2.145 | 2.711 | ✅ PASS |
-| B | SQuAD v2 Dev | 0.125 | 0.062 | 0.079 | 9.627 | 11.220 | ✅ PASS |
-| B | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 14.438 | 15.744 | ✅ PASS |
-| C | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 186.068 | 195.240 | ✅ PASS |
-| C | BEIR NFCorpus | 0.625 | 0.531 | 0.554 | 205.430 | 221.215 | ✅ PASS |
-| D | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 2416.022 | 2690.375 | ✅ PASS |
-| D | BEIR NFCorpus | 0.750 | 0.656 | 0.679 | 3142.357 | 3268.025 | ✅ PASS |
+| A | SQuAD v2 Dev | 0.000 | 0.000 | 0.000 | 5.179 | 7.920 | ✅ PASS |
+| A | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 8.218 | 13.576 | ✅ PASS |
+| B | SQuAD v2 Dev | 0.125 | 0.062 | 0.079 | 33.801 | 52.227 | ✅ PASS |
+| B | BEIR NFCorpus | 0.250 | 0.250 | 0.250 | 40.857 | 44.675 | ✅ PASS |
+| C | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 219.999 | 298.780 | ✅ PASS |
+| C | BEIR NFCorpus | 0.625 | 0.531 | 0.554 | 212.338 | 259.681 | ✅ PASS |
+| D | SQuAD v2 Dev | 1.000 | 0.896 | 0.920 | 2452.644 | 2764.629 | ✅ PASS |
+| D | BEIR NFCorpus | 0.750 | 0.656 | 0.679 | 3155.158 | 3409.331 | ✅ PASS |
 
 > **Note**:
 >
@@ -109,6 +109,10 @@ relevant document, with `200` extra distractor documents,
 >   matters more than latency.
 > - Profiles C/D use real external embedding + reranker chain calls, resulting
 >   in significantly higher latency than local keyword/hash profiles.
+> - The current real runner also folds both **query-time** and **index-time**
+>   degradation into the public gate. If the reranker is missing, returns an
+>   invalid response, or indexing already fell back earlier, the run no longer
+>   gets written up as a clean PASS.
 > - These results assume the **active profile's embedding dimension is already
 >   aligned**. They do not mean you can hot-switch between B's old vectors and
 >   C/D's old vectors in the same store. When dimensions differ, the current
@@ -130,10 +134,10 @@ After averaging the two datasets, the public summary for this run is:
 
 | Profile | Avg HR@10 | Avg MRR | Avg NDCG@10 | Avg Recall@10 | Avg p95(ms) |
 |---|---:|---:|---:|---:|---:|
-| A | 0.125 | 0.125 | 0.125 | 0.125 | 2.8 |
-| B | 0.188 | 0.156 | 0.164 | 0.188 | 13.5 |
-| C | 0.812 | 0.714 | 0.737 | 0.812 | 208.2 |
-| D | 0.875 | 0.776 | 0.799 | 0.875 | 2979.2 |
+| A | 0.125 | 0.125 | 0.125 | 0.125 | 10.7 |
+| B | 0.188 | 0.156 | 0.164 | 0.188 | 48.5 |
+| C | 0.812 | 0.714 | 0.737 | 0.812 | 279.2 |
+| D | 0.875 | 0.776 | 0.799 | 0.875 | 3087.0 |
 
 ## 3.5 Old vs Current Version (Same-Metric Summary)
 

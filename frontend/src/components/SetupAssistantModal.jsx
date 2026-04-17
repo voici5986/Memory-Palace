@@ -247,7 +247,8 @@ export default function SetupAssistantModal({
   const showEmbeddingApiFields = form.embedding_backend === 'api';
   const showRouterFields = form.embedding_backend === 'router';
   const showRerankerApiFields = form.reranker_enabled && form.embedding_backend !== 'router';
-  const canPersistServer = setupStatus?.apply_supported === true;
+  const canPersistServer =
+    setupStatus?.apply_supported === true && setupStatus?.write_supported === true;
   const restartTargets = setupStatus?.restart_targets || saveSuccess?.restart_targets || [];
   const summary = setupStatus?.summary || {};
   const rerankerStatus =
@@ -309,6 +310,9 @@ export default function SetupAssistantModal({
         ...(current || {}),
         ...response,
         apply_supported: current?.apply_supported ?? true,
+        apply_reason: current?.apply_reason ?? response.apply_reason,
+        write_supported: current?.write_supported ?? true,
+        write_reason: current?.write_reason ?? response.write_reason,
       }));
       if (authSaveFailed) {
         setSaveErrorState({
@@ -694,7 +698,9 @@ export default function SetupAssistantModal({
                     <div className="mt-2 text-sm leading-relaxed text-[color:var(--palace-muted)]">
                       {canPersistServer
                         ? t('setup.summary.applySupported')
-                        : t(`setup.reasons.${setupStatus?.apply_reason || 'status_unavailable'}`)}
+                        : t(
+                            `setup.reasons.${setupStatus?.write_reason || setupStatus?.apply_reason || 'status_unavailable'}`
+                          )}
                     </div>
                   </div>
 

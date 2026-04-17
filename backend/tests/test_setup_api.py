@@ -28,6 +28,8 @@ def test_setup_status_allows_loopback_without_api_key(monkeypatch, tmp_path: Pat
     assert response.status_code == 200
     payload = response.json()
     assert payload["apply_supported"] is True
+    assert payload["write_supported"] is True
+    assert payload["write_reason"] == "local_env_file"
     assert payload["target_label"] == ".env"
     assert payload["summary"]["dashboard_auth_configured"] is False
 
@@ -102,6 +104,10 @@ def test_setup_status_accepts_authenticated_remote_request(monkeypatch, tmp_path
         )
 
     assert response.status_code == 200
+    payload = response.json()
+    assert payload["apply_supported"] is True
+    assert payload["write_supported"] is False
+    assert payload["write_reason"] == "local_loopback_required_for_write"
 
 
 def test_setup_config_writes_seeded_env_and_refreshes_process_env(

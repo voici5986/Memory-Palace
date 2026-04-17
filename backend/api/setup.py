@@ -349,13 +349,19 @@ async def require_local_setup_write_access(request: Request) -> None:
 
 
 @router.get("/status", dependencies=[Depends(require_setup_access)])
-async def get_setup_status() -> Dict[str, Any]:
+async def get_setup_status(request: Request) -> Dict[str, Any]:
     target_env_path = _resolve_target_env_path()
     apply_supported, apply_reason = _resolve_apply_support(target_env_path)
+    write_supported = apply_supported and _is_direct_loopback_request(request)
+    write_reason = apply_reason if not apply_supported else (
+        "local_env_file" if write_supported else "local_loopback_required_for_write"
+    )
     return {
         "ok": True,
         "apply_supported": apply_supported,
         "apply_reason": apply_reason,
+        "write_supported": write_supported,
+        "write_reason": write_reason,
         "target_label": _target_label(target_env_path),
         "running_in_docker": _running_in_docker(),
         "restart_required": True,

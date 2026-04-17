@@ -17,6 +17,7 @@ import {
   deleteOrphanMemory,
 } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
+import { alertWithFallback, confirmWithFallback, promptWithFallback } from '../../lib/dialogs';
 
 const VITALITY_PREPARE_MAX_SELECTIONS = 100;
 const DEFAULT_VITALITY_REVIEWER = 'maintenance_dashboard';
@@ -48,6 +49,7 @@ export default function MaintenancePage() {
 
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [orphanActionMessage, setOrphanActionMessage] = useState(null);
 
   const [vitalityCandidates, setVitalityCandidates] = useState([]);
   const [vitalityLoading, setVitalityLoading] = useState(false);
@@ -246,7 +248,13 @@ export default function MaintenancePage() {
   const handleBatchDelete = async () => {
     const count = selectedIds.size;
     if (count === 0) return;
-    if (!confirm(t('maintenance.prompts.deleteMemories', { count }))) return;
+    setOrphanActionMessage(null);
+    const confirmResult = confirmWithFallback(t('maintenance.prompts.deleteMemories', { count }));
+    if (!confirmResult.available) {
+      setOrphanActionMessage(t('maintenance.errors.confirmUnavailable'));
+      return;
+    }
+    if (!confirmResult.confirmed) return;
 
     setBatchDeleting(true);
     const toDelete = [...selectedIds];
@@ -269,11 +277,14 @@ export default function MaintenancePage() {
     }
 
     if (failed.length > 0) {
-      alert(t('maintenance.errors.deleteSummary', {
+      const message = t('maintenance.errors.deleteSummary', {
         failed: failed.length,
         count,
         ids: failed.join(', '),
-      }));
+      });
+      if (!alertWithFallback(message)) {
+        setOrphanActionMessage(message);
+      }
     }
 
     setBatchDeleting(false);
@@ -361,12 +372,20 @@ export default function MaintenancePage() {
     if (!vitalityPreparedReview) return;
     const action = vitalityPreparedReview.action || 'delete';
 
-    const typed = window.prompt(
+    const promptResult = promptWithFallback(
       t('maintenance.prompts.executeCleanup', {
         action,
         phrase: vitalityPreparedReview.confirmation_phrase,
       })
     );
+    if (!promptResult.available) {
+      setVitalityErrorState({
+        type: 'translation',
+        key: 'maintenance.errors.promptUnavailable',
+      });
+      return;
+    }
+    const typed = promptResult.value;
     if (typed === null) return;
     if (typed.trim() !== vitalityPreparedReview.confirmation_phrase) {
       setVitalityErrorState({
@@ -695,6 +714,14 @@ export default function MaintenancePage() {
                 </div>
               ) : (
                 <div className="space-y-8">
+                  {orphanActionMessage ? (
+                    <div
+                      role="alert"
+                      className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200"
+                    >
+                      {orphanActionMessage}
+                    </div>
+                  ) : null}
                   {deprecated.length > 0 && (
                     <section>
                       {renderSectionHeader(

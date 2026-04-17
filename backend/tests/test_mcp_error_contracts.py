@@ -49,6 +49,51 @@ class _TimeoutWriteClient:
         return {"action": "ADD", "method": "stub", "reason": "timeout"}
 
 
+class _SnapshotFailureCreateClient:
+    def __init__(self) -> None:
+        self._memory = None
+        self.rollback_calls = 0
+
+    async def write_guard(self, **_kwargs):
+        return {"action": "ADD", "method": "stub", "reason": "allow"}
+
+    async def create_memory(
+        self,
+        *,
+        parent_path: str,
+        content: str,
+        priority: int,
+        title: str,
+        domain: str,
+        disclosure=None,
+        index_now: bool = True,
+    ):
+        _ = parent_path, priority, disclosure, index_now
+        path = title
+        self._memory = {
+            "id": 41,
+            "path": path,
+            "domain": domain,
+            "uri": f"{domain}://{path}",
+            "content": content,
+        }
+        return dict(self._memory)
+
+    async def get_memory_by_path(self, path: str, domain: str):
+        if self._memory and self._memory["path"] == path and self._memory["domain"] == domain:
+            return dict(self._memory)
+        return None
+
+    async def delete_path_atomically(self, path: str, domain: str, *, before_delete=None):
+        _ = before_delete
+        if self._memory and self._memory["path"] == path and self._memory["domain"] == domain:
+            self.rollback_calls += 1
+            removed = dict(self._memory)
+            self._memory = None
+            return {"removed_uri": removed["uri"], "memory_id": removed["id"]}
+        raise ValueError("path not found")
+
+
 @pytest.mark.asyncio
 async def test_read_memory_partial_validation_errors_return_json() -> None:
     raw = await mcp_server.read_memory("core://agent/index", chunk_id=-1)
@@ -187,6 +232,41 @@ async def test_create_memory_write_lane_timeout_returns_retryable_tool_payload(
     assert payload["reason"] == "write_lane_timeout"
     assert payload["retryable"] is True
     assert payload["message"] == "Error: write_lane_timeout"
+
+
+@pytest.mark.asyncio
+async def test_create_memory_snapshot_failure_rolls_back_written_memory(
+    monkeypatch,
+) -> None:
+    client = _SnapshotFailureCreateClient()
+
+    async def _raise_snapshot(*_args, **_kwargs):
+        raise OSError("snapshot_fs_failed")
+
+    async def _never_defer():
+        return False
+
+    async def _run_write_inline(_operation: str, task):
+        return await task()
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _raise_snapshot)
+    monkeypatch.setattr(mcp_server, "_should_defer_index_on_write", _never_defer)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://",
+        content="created before snapshot failure",
+        priority=1,
+        title="foo",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert "snapshot" in payload["message"].lower()
+    assert client.rollback_calls == 1
+    assert await client.get_memory_by_path("foo", "core") is None
 
 
 @pytest.mark.asyncio

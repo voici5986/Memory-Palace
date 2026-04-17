@@ -66,6 +66,14 @@ GEMINI_FALLBACK_MODEL = (
 )
 SKIP_GEMINI_LIVE = os.getenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
 ENABLE_GEMINI_LIVE = os.getenv("MEMORY_PALACE_ENABLE_GEMINI_LIVE", "").lower() in {"1", "true", "yes"}
+_SENSITIVE_ENV_NAME_PATTERN = re.compile(
+    r"(?:^|_)(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD)(?:$|_)",
+    re.IGNORECASE,
+)
+_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(/Users/[^\s\"']+|/private/var/[^\s\"']+|[A-Za-z]:[\\/][^\s\"']+)"
+)
+_SESSION_TOKEN_PATTERN = re.compile(r"\b(?:mcp_ctx_[\w-]+|session-[\w-]+)\b")
 
 
 def _read_timeout_seconds(env_name: str, default: int, *, minimum: int = 5) -> int:
@@ -192,6 +200,20 @@ def _resolve_report_path(env_name: str, default_path: Path) -> Path:
     return path
 
 
+def _backend_python_candidates() -> tuple[Path, ...]:
+    return (
+        BACKEND_DIR / ".venv" / "Scripts" / "python.exe",
+        BACKEND_DIR / ".venv" / "bin" / "python",
+    )
+
+
+def _preferred_backend_python() -> str | None:
+    for candidate in _backend_python_candidates():
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -206,7 +228,54 @@ def run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, tim
 
 
 def _python_command() -> str:
+    if os.name == "nt":
+        preferred = _preferred_backend_python()
+        if preferred:
+            return preferred
     return sys.executable or "python"
+
+
+def _sanitize_report_text(text: str) -> str:
+    sanitized = str(text or "")
+    sanitized = re.sub(
+        r'("?[A-Za-z0-9_]*DATABASE_URL"?\s*:\s*)"[^"]*"',
+        r'\1"<redacted>"',
+        sanitized,
+    )
+    sanitized = re.sub(
+        r'("?[A-Za-z0-9_]*(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD)"?\s*:\s*)"[^"]*"',
+        r'\1"<redacted>"',
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"\bDATABASE_URL=[^\s]+",
+        "DATABASE_URL=<redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(
+        r"\b([A-Za-z0-9_]*(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD))=[^\s]+",
+        r"\1=<redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(r"Bearer\s+\S+", "Bearer <redacted>", sanitized, flags=re.IGNORECASE)
+    sanitized = _ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", sanitized)
+    sanitized = _SESSION_TOKEN_PATTERN.sub("<redacted-session>", sanitized)
+    return sanitized
+
+
+def _write_private_report(report_path: Path, content: str) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    sanitized = _sanitize_report_text(content)
+    report_path.write_text(sanitized, encoding="utf-8")
+    try:
+        os.chmod(report_path, 0o600)
+    except OSError:
+        pass
+    if REPORT_OVERRIDE_ROOT in report_path.parents:
+        try:
+            os.chmod(report_path.parent, 0o700)
+        except OSError:
+            pass
 
 
 def _bash_relative_path(path: Path, *, cwd: Path) -> str:
@@ -1567,7 +1636,7 @@ def generate_markdown(results: dict[str, CheckResult]) -> str:
         if result.details:
             lines.append("")
             lines.append("```text")
-            lines.append(result.details.strip())
+            lines.append(_sanitize_report_text(result.details.strip()))
             lines.append("```")
         lines.append("")
     return "\n".join(lines)
@@ -1615,8 +1684,7 @@ def main() -> int:
             flush=True,
         )
     markdown = generate_markdown(results)
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(markdown + "\n", encoding="utf-8")
+    _write_private_report(report_path, markdown + "\n")
     print(report_path)
     return 1 if any(result.status == "FAIL" for result in results.values()) else 0
 

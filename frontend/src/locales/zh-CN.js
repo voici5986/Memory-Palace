@@ -228,6 +228,8 @@ const zhCN = {
         '当前进程没有目标目录的写权限。',
       env_file_not_writable:
         '目标 .env 文件存在，但当前进程没有写权限。',
+      local_loopback_required_for_write:
+        '只有直连本机回环地址的请求才能写入本地配置。',
       status_unavailable:
         '当前无法获取 setup 状态，你仍然可以先把 Dashboard 密钥保存到浏览器里。',
     },
@@ -333,6 +335,7 @@ const zhCN = {
       rollback: '回滚失败。',
       approve: '确认请求失败。',
       clearSession: '清空会话请求失败。',
+      confirmUnavailable: '当前运行环境不支持确认对话框，本次操作未发送。',
     },
     prompts: {
       rejectChanges: '确认拒绝 {{resourceId}} 的变更吗？该操作会回滚这条记忆。',
@@ -401,6 +404,8 @@ const zhCN = {
       loadOrphanDetail: '加载孤儿记忆详情失败',
       deleteSummary: '{{failed}} / {{count}} 删除失败。失败 ID：{{ids}}',
       tooManySelections: '选择数量过多：{{count}}。最多只能选择 {{max}} 条。',
+      confirmUnavailable: '当前运行环境不支持确认对话框，本次删除未发送。',
+      promptUnavailable: '当前运行环境不支持输入对话框，本次清理确认未发送。',
     },
     vitality: {
       title: '活力清理候选',

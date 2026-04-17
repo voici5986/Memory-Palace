@@ -52,6 +52,41 @@ async def test_get_index_status_does_not_persist_missing_fts_state(
 
 
 @pytest.mark.asyncio
+async def test_invalid_fts_query_degrades_only_current_request_without_disabling_fts(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "fts-invalid-query-regression.db"))
+    await client.init_db()
+
+    if not client._fts_available:
+        await client.close()
+        pytest.skip("SQLite FTS5 not available in this environment")
+
+    await client.create_memory(
+        parent_path="",
+        content="quoted search target",
+        priority=1,
+        title="quoted-target",
+        domain="core",
+    )
+
+    result = await client.search_advanced(
+        query='"',
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    status = await client.get_index_status()
+    await client.close()
+
+    assert result["degraded"] is True
+    assert "fts_query_invalid" in result["degrade_reasons"]
+    assert client._fts_available is True
+    assert status["capabilities"]["fts_available"] is True
+
+
+@pytest.mark.asyncio
 async def test_resolve_migration_chain_supports_long_noncyclic_chains(
     tmp_path: Path,
 ) -> None:

@@ -118,6 +118,21 @@ describe('ReviewPage', () => {
     await waitFor(() => expect(rejectButton).not.toBeDisabled());
   });
 
+  it('fails closed with inline notice when native confirm dialog is unavailable', async () => {
+    const user = userEvent.setup();
+    window.confirm.mockImplementation(() => {
+      throw new Error('confirm unavailable');
+    });
+
+    render(<ReviewPage />);
+
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
+    await user.click(rejectButton);
+
+    expect(api.rollbackResource).not.toHaveBeenCalled();
+    expect(await screen.findByText(i18n.t('review.errors.confirmUnavailable'))).toBeInTheDocument();
+  });
+
   it('does not approve snapshot when rollback returns success=false', async () => {
     const user = userEvent.setup();
     api.rollbackResource.mockResolvedValue({
@@ -169,6 +184,21 @@ describe('ReviewPage', () => {
     expect(window.alert).toHaveBeenCalledWith(
       '回滚成功，但快照清理失败：清理失败'
     );
+  });
+
+  it('shows inline fallback when native alert dialog is unavailable', async () => {
+    const user = userEvent.setup();
+    window.alert.mockImplementation(() => {
+      throw new Error('alert unavailable');
+    });
+    api.rollbackResource.mockRejectedValue(new Error('network down'));
+
+    render(<ReviewPage />);
+
+    const rejectButton = await screen.findByRole('button', { name: i18n.t('review.reject') });
+    await user.click(rejectButton);
+
+    expect(await screen.findByText('拒绝失败：network down')).toBeInTheDocument();
   });
 
   it('ignores stale snapshot responses when switching sessions quickly', async () => {

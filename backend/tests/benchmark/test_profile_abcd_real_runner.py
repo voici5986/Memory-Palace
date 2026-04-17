@@ -11,10 +11,14 @@ from helpers.profile_abcd_real_runner import (  # noqa: E402
     DatasetBundle,
     QueryCase,
     REAL_PROFILE_WORKDIR,
+    PROFILE_CONFIGS,
+    _build_comparison_rows,
     _evaluate_dataset,
+    _run_profile,
     build_phase6_gate,
     compute_percentile,
     compute_retrieval_metrics,
+    render_profile_cd_real_markdown,
     resolve_real_profile_workdir,
 )
 
@@ -110,6 +114,84 @@ def test_build_phase6_gate_api_tolerant_marks_invalid_when_rate_exceeds_threshol
     )
     assert gate["valid"] is False
     assert gate["rows"][0]["valid"] is False
+
+
+def test_build_phase6_gate_api_tolerant_rejects_non_request_failed_invalid_reason() -> None:
+    gate = build_phase6_gate(
+        [
+            {
+                "dataset": "beir_nfcorpus",
+                "dataset_label": "BEIR NFCorpus",
+                "degradation": {
+                    "queries": 500,
+                    "invalid_reasons": ["embedding_fallback_hash"],
+                    "invalid_count": 1,
+                    "invalid_rate": 0.002,
+                    "request_failed_count": 0,
+                    "request_failed_rate": 0.0,
+                },
+            }
+        ],
+        mode="api_tolerant",
+        invalid_rate_threshold=0.05,
+    )
+    assert gate["valid"] is False
+    assert gate["rows"][0]["valid"] is False
+
+
+def test_build_comparison_rows_respects_api_tolerant_gate_truth() -> None:
+    rows = _build_comparison_rows(
+        {
+            "profile_a": {
+                "rows": [
+                    {
+                        "dataset": "beir_nfcorpus",
+                        "dataset_label": "BEIR NFCorpus",
+                        "quality": {"hr_at_10": 0.2, "ndcg_at_10": 0.2},
+                        "latency_ms": {"p95": 2.0},
+                    }
+                ]
+            },
+            "profile_b": {
+                "rows": [
+                    {
+                        "dataset": "beir_nfcorpus",
+                        "dataset_label": "BEIR NFCorpus",
+                        "quality": {"hr_at_10": 0.23, "ndcg_at_10": 0.21},
+                        "latency_ms": {"p95": 20.0},
+                    }
+                ]
+            },
+            "profile_c": {
+                "rows": [
+                    {
+                        "dataset": "beir_nfcorpus",
+                        "dataset_label": "BEIR NFCorpus",
+                        "quality": {"hr_at_10": 0.5, "ndcg_at_10": 0.44},
+                        "latency_ms": {"p95": 330.0},
+                    }
+                ]
+            },
+            "profile_d": {
+                "rows": [
+                    {
+                        "dataset": "beir_nfcorpus",
+                        "dataset_label": "BEIR NFCorpus",
+                        "quality": {"hr_at_10": 0.6, "ndcg_at_10": 0.47},
+                        "latency_ms": {"p95": 3300.0},
+                        "degradation": {"invalid_reasons": ["reranker_request_failed"]},
+                    }
+                ]
+            },
+        },
+        gate_rows_by_dataset={
+            "beir_nfcorpus": {
+                "valid": True,
+                "invalid_reasons": ["reranker_request_failed"],
+            }
+        },
+    )
+    assert rows[0]["valid"] is True
 
 
 def test_resolve_real_profile_workdir_respects_env(
@@ -219,3 +301,160 @@ async def test_evaluate_dataset_passes_depth_params_and_keeps_top10_metrics() ->
         "candidate_multiplier": 9,
         "metric_top_k": 10,
     }
+
+
+class _PopulateStubClient:
+    def __init__(self, *_args, **_kwargs) -> None:
+        self._next_id = 1
+
+    async def init_db(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def create_memory(self, **_kwargs):
+        memory_id = self._next_id
+        self._next_id += 1
+        return {
+            "id": memory_id,
+            "index_report": {
+                "degraded": True,
+                "degrade_reasons": ["embedding_fallback_hash"],
+                "invalid_reasons": ["embedding_fallback_hash"],
+                "effective_backend": "hash",
+            },
+        }
+
+    async def search_advanced(self, **_kwargs):
+        return {
+            "results": [{"memory_id": 1}],
+            "degraded": False,
+            "degrade_reasons": [],
+        }
+
+
+@pytest.mark.asyncio
+async def test_run_profile_surfaces_index_time_degradation_provenance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = DatasetBundle(
+        key="squad_v2_dev",
+        label="SQuAD v2 Dev",
+        domain="bench_squad_v2_dev",
+        queries=[QueryCase(query_id="q-1", query="alpha", relevant_doc_ids={"doc-1"})],
+        docs=[("doc-1", "doc one")],
+        sample_bucket_size=100,
+        query_count_raw=1,
+    )
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_c")
+
+    monkeypatch.setattr(sys.modules[_run_profile.__module__], "SQLiteClient", _PopulateStubClient)
+
+    profile_payload, _mapping, _indexing = await _run_profile(
+        config=config,
+        bundles=[bundle],
+        db_path=tmp_path / "profile-c.db",
+        max_results=10,
+        candidate_multiplier=8,
+        existing_mapping=None,
+        existing_indexing=None,
+        populate=True,
+    )
+
+    row = profile_payload["rows"][0]
+    assert row["indexing"]["degraded"] is True
+    assert row["indexing"]["degrade_reasons"] == ["embedding_fallback_hash"]
+    assert row["indexing"]["effective_backend"] == "hash"
+
+
+def test_render_profile_cd_real_markdown_surfaces_observed_degradation_truthfully() -> None:
+    markdown = render_profile_cd_real_markdown(
+        {
+            "generated_at_utc": "2026-04-17T09:44:27+00:00",
+            "profiles": {
+                "profile_c": {
+                    "rows": [
+                        {
+                            "dataset": "squad_v2_dev",
+                            "dataset_label": "SQuAD v2 Dev",
+                            "query_count": 1,
+                            "corpus_doc_count": 1,
+                            "quality": {
+                                "hr_at_10": 1.0,
+                                "mrr": 1.0,
+                                "ndcg_at_10": 1.0,
+                                "recall_at_10": 1.0,
+                            },
+                            "latency_ms": {"p95": 10.0},
+                            "degradation": {
+                                "degrade_rate": 0.0,
+                                "invalid_reasons": [],
+                            },
+                            "indexing": {
+                                "degraded": True,
+                                "degrade_reasons": ["embedding_fallback_hash"],
+                                "invalid_reasons": ["embedding_fallback_hash"],
+                                "effective_backend": "hash",
+                            },
+                        }
+                    ]
+                },
+                "profile_d": {
+                    "rows": [
+                        {
+                            "dataset": "squad_v2_dev",
+                            "dataset_label": "SQuAD v2 Dev",
+                            "query_count": 1,
+                            "corpus_doc_count": 1,
+                            "quality": {
+                                "hr_at_10": 1.0,
+                                "mrr": 1.0,
+                                "ndcg_at_10": 1.0,
+                                "recall_at_10": 1.0,
+                            },
+                            "latency_ms": {"p95": 20.0},
+                            "degradation": {
+                                "degrade_rate": 0.0,
+                                "invalid_reasons": [],
+                            },
+                            "indexing": {
+                                "degraded": True,
+                                "degrade_reasons": ["embedding_fallback_hash"],
+                                "invalid_reasons": ["embedding_fallback_hash"],
+                                "effective_backend": "hash",
+                            },
+                        }
+                    ]
+                },
+            },
+            "phase6": {
+                "gate": {
+                    "valid": False,
+                    "mode": "strict",
+                    "invalid_rate_threshold": 0.0,
+                    "invalid_reasons": ["embedding_fallback_hash"],
+                    "invalid_count": 1,
+                    "query_count": 1,
+                    "invalid_rate": 1.0,
+                    "request_failed_count": 0,
+                    "request_failed_rate": 0.0,
+                    "rows": [
+                        {
+                            "dataset_label": "SQuAD v2 Dev",
+                            "valid": False,
+                            "invalid_reasons": ["embedding_fallback_hash"],
+                            "invalid_count": 1,
+                            "invalid_rate": 1.0,
+                            "request_failed_count": 0,
+                            "request_failed_rate": 0.0,
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    assert "observed degradation" in markdown.lower()
+    assert "index-time degradation" in markdown.lower()
+    assert "> mode: real API embedding/reranker execution" not in markdown

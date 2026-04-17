@@ -78,6 +78,24 @@ describe('extractApiError', () => {
     );
   });
 
+  it('does not append API-key hint for loopback-only setup write failures', () => {
+    const error = {
+      response: {
+        status: 403,
+        data: {
+          detail: {
+            error: 'setup_access_denied',
+            reason: 'local_loopback_required_for_write',
+          },
+        },
+      },
+    };
+
+    expect(extractApiError(error)).toBe(
+      'Setup access denied | Saving local setup is allowed only from direct loopback requests',
+    );
+  });
+
   it('returns fallback message when no structured detail exists', () => {
     const error = { message: '' };
     expect(extractApiError(error, 'fallback-message')).toBe('fallback-message');

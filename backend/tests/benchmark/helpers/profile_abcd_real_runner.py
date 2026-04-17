@@ -55,6 +55,8 @@ PROFILE_D_INVALID_GATE_REASONS = {
     "embedding_fallback_hash",
     "embedding_request_failed",
     "reranker_request_failed",
+    "reranker_config_missing",
+    "reranker_response_invalid",
 }
 PROFILE_D_REQUEST_FAILED_REASONS = {
     "embedding_request_failed",
@@ -506,11 +508,76 @@ def _reset_db(path: Path) -> None:
         path.unlink()
 
 
+def _collect_profile_d_invalid_reasons(reasons: Iterable[str]) -> List[str]:
+    return sorted(
+        {
+            reason
+            for reason in reasons
+            if isinstance(reason, str) and reason in PROFILE_D_INVALID_GATE_REASONS
+        }
+    )
+
+
+def _build_indexing_summary(index_reports: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    degrade_reasons: Set[str] = set()
+    configured_backends: Set[str] = set()
+    effective_backends: Set[str] = set()
+    configured_dims: Set[int] = set()
+    degraded_documents = 0
+
+    for report in index_reports:
+        reasons = [
+            reason
+            for reason in report.get("degrade_reasons", [])
+            if isinstance(reason, str)
+        ]
+        if report.get("degraded") or reasons:
+            degraded_documents += 1
+        degrade_reasons.update(reasons)
+
+        configured_backend = str(report.get("configured_backend") or "").strip()
+        if configured_backend:
+            configured_backends.add(configured_backend)
+        effective_backend = str(report.get("effective_backend") or "").strip()
+        if effective_backend:
+            effective_backends.add(effective_backend)
+        try:
+            configured_dim = int(report.get("configured_dim") or 0)
+        except (TypeError, ValueError):
+            configured_dim = 0
+        if configured_dim > 0:
+            configured_dims.add(configured_dim)
+
+    return {
+        "documents": int(len(index_reports)),
+        "degraded_documents": int(degraded_documents),
+        "degraded": bool(degrade_reasons),
+        "degrade_reasons": sorted(degrade_reasons),
+        "invalid_reasons": _collect_profile_d_invalid_reasons(degrade_reasons),
+        "configured_backend": (
+            next(iter(configured_backends))
+            if len(configured_backends) == 1
+            else ("mixed" if configured_backends else "")
+        ),
+        "effective_backend": (
+            next(iter(effective_backends))
+            if len(effective_backends) == 1
+            else ("mixed" if effective_backends else "")
+        ),
+        "configured_dim": (
+            next(iter(configured_dims))
+            if len(configured_dims) == 1
+            else (0 if not configured_dims else -1)
+        ),
+    }
+
+
 async def _populate_bundle_docs(
     client: SQLiteClient,
     bundle: DatasetBundle,
-) -> Dict[int, str]:
+) -> tuple[Dict[int, str], Dict[str, Any]]:
     memory_to_doc: Dict[int, str] = {}
+    index_reports: List[Dict[str, Any]] = []
     for idx, (doc_id, content) in enumerate(bundle.docs):
         if not content.strip():
             continue
@@ -524,9 +591,10 @@ async def _populate_bundle_docs(
         )
         memory_id = int(result["id"])
         memory_to_doc[memory_id] = doc_id
+        index_reports.append(dict(result.get("index_report") or {}))
     if not memory_to_doc:
         raise RuntimeError(f"{bundle.key}: no documents indexed for benchmark")
-    return memory_to_doc
+    return memory_to_doc, _build_indexing_summary(index_reports)
 
 
 def _round_metric(value: float) -> float:
@@ -604,6 +672,13 @@ def build_phase6_gate(
             for reason in degradation.get("invalid_reasons", [])
             if isinstance(reason, str)
         ]
+        indexing = row.get("indexing", {})
+        invalid_reasons = sorted(
+            set(
+                invalid_reasons
+                + _collect_profile_d_invalid_reasons(indexing.get("invalid_reasons", []))
+            )
+        )
         query_count = int(degradation.get("queries", 0) or 0)
         invalid_count = int(degradation.get("invalid_count", 0) or 0)
         request_failed_count = int(degradation.get("request_failed_count", 0) or 0)
@@ -629,7 +704,13 @@ def build_phase6_gate(
         if gate_mode == PHASE6_GATE_MODE_STRICT:
             row_valid = len(invalid_reasons) == 0
         else:
-            row_valid = invalid_rate <= threshold
+            row_valid = (
+                invalid_rate <= threshold
+                and all(
+                    reason in PROFILE_D_REQUEST_FAILED_REASONS
+                    for reason in invalid_reasons
+                )
+            )
 
         invalid_union.update(invalid_reasons)
         query_count_total += max(0, query_count)
@@ -682,6 +763,8 @@ def build_phase6_gate(
 
 def _build_comparison_rows(
     profiles: Mapping[str, Mapping[str, Any]],
+    *,
+    gate_rows_by_dataset: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     rows_a = {row["dataset"]: row for row in profiles["profile_a"]["rows"]}
     rows_b = {row["dataset"]: row for row in profiles["profile_b"]["rows"]}
@@ -694,7 +777,11 @@ def _build_comparison_rows(
         row_b = rows_b[dataset_key]
         row_c = rows_c[dataset_key]
         row_d = rows_d[dataset_key]
-        invalid_reasons = list(row_d.get("degradation", {}).get("invalid_reasons", []))
+        gate_row = (gate_rows_by_dataset or {}).get(dataset_key, {})
+        invalid_reasons = list(
+            gate_row.get("invalid_reasons")
+            or row_d.get("degradation", {}).get("invalid_reasons", [])
+        )
         comparison_rows.append(
             {
                 "dataset": dataset_key,
@@ -711,7 +798,7 @@ def _build_comparison_rows(
                 "b_p95": row_b["latency_ms"]["p95"],
                 "c_p95": row_c["latency_ms"]["p95"],
                 "d_p95": row_d["latency_ms"]["p95"],
-                "valid": len(invalid_reasons) == 0,
+                "valid": bool(gate_row.get("valid", len(invalid_reasons) == 0)),
                 "invalid_reasons": invalid_reasons,
             }
         )
@@ -876,11 +963,17 @@ async def _run_profile(
     max_results: int,
     candidate_multiplier: int,
     existing_mapping: Optional[Mapping[str, Mapping[int, str]]] = None,
+    existing_indexing: Optional[Mapping[str, Mapping[str, Any]]] = None,
     populate: bool,
-) -> tuple[Dict[str, Any], Dict[str, Dict[int, str]]]:
+) -> tuple[Dict[str, Any], Dict[str, Dict[int, str]], Dict[str, Dict[str, Any]]]:
     profile_mapping: Dict[str, Dict[int, str]] = (
         {key: dict(value) for key, value in existing_mapping.items()}
         if existing_mapping is not None
+        else {}
+    )
+    profile_indexing: Dict[str, Dict[str, Any]] = (
+        {key: dict(value) for key, value in existing_indexing.items()}
+        if existing_indexing is not None
         else {}
     )
 
@@ -891,25 +984,36 @@ async def _run_profile(
 
             if populate:
                 for bundle in bundles:
-                    profile_mapping[bundle.key] = await _populate_bundle_docs(client, bundle)
+                    mapping, indexing = await _populate_bundle_docs(client, bundle)
+                    profile_mapping[bundle.key] = mapping
+                    profile_indexing[bundle.key] = indexing
             else:
                 for bundle in bundles:
                     if bundle.key not in profile_mapping:
                         raise RuntimeError(
                             f"{config.key}: missing pre-populated mapping for {bundle.key}"
                         )
+                    if bundle.key not in profile_indexing:
+                        raise RuntimeError(
+                            f"{config.key}: missing pre-populated indexing for {bundle.key}"
+                        )
 
             rows: List[Dict[str, Any]] = []
             for bundle in bundles:
                 rows.append(
-                    await _evaluate_dataset(
-                        client=client,
-                        bundle=bundle,
-                        profile_mode=config.mode,
-                        memory_to_doc=profile_mapping[bundle.key],
-                        max_results=int(max_results),
-                        candidate_multiplier=int(candidate_multiplier),
-                    )
+                    {
+                        **(
+                            await _evaluate_dataset(
+                                client=client,
+                                bundle=bundle,
+                                profile_mode=config.mode,
+                                memory_to_doc=profile_mapping[bundle.key],
+                                max_results=int(max_results),
+                                candidate_multiplier=int(candidate_multiplier),
+                            )
+                        ),
+                        "indexing": dict(profile_indexing.get(bundle.key) or {}),
+                    }
                 )
             return (
                 {
@@ -918,6 +1022,7 @@ async def _run_profile(
                     "rows": rows,
                 },
                 profile_mapping,
+                profile_indexing,
             )
         finally:
             await client.close()
@@ -962,6 +1067,7 @@ async def build_profile_abcd_real_metrics(
 
     profile_results: Dict[str, Dict[str, Any]] = {}
     profile_doc_mappings: Dict[str, Dict[str, Dict[int, str]]] = {}
+    profile_indexing_summaries: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     real_profile_workdir = resolve_real_profile_workdir(workdir)
     real_profile_workdir.mkdir(parents=True, exist_ok=True)
@@ -974,6 +1080,7 @@ async def build_profile_abcd_real_metrics(
         if config.reuse_data_from is None:
             _reset_db(db_paths[config.key])
             existing_mapping = None
+            existing_indexing = None
             populate = True
         else:
             source_key = config.reuse_data_from
@@ -984,19 +1091,22 @@ async def build_profile_abcd_real_metrics(
                 )
             db_paths[config.key] = source_db_path
             existing_mapping = profile_doc_mappings.get(source_key)
+            existing_indexing = profile_indexing_summaries.get(source_key)
             populate = False
 
-        profile_payload, mapping = await _run_profile(
+        profile_payload, mapping, indexing = await _run_profile(
             config=config,
             bundles=bundles,
             db_path=db_paths[config.key],
             max_results=effective_max_results,
             candidate_multiplier=effective_candidate_multiplier,
             existing_mapping=existing_mapping,
+            existing_indexing=existing_indexing,
             populate=populate,
         )
         profile_results[config.key] = profile_payload
         profile_doc_mappings[config.key] = mapping
+        profile_indexing_summaries[config.key] = indexing
 
     phase6_config = resolve_phase6_gate_config()
     phase6_gate = build_phase6_gate(
@@ -1004,7 +1114,14 @@ async def build_profile_abcd_real_metrics(
         mode=str(phase6_config["mode"]),
         invalid_rate_threshold=float(phase6_config["invalid_rate_threshold"]),
     )
-    phase6_comparison = _build_comparison_rows(profile_results)
+    phase6_comparison = _build_comparison_rows(
+        profile_results,
+        gate_rows_by_dataset={
+            str(row.get("dataset")): row
+            for row in phase6_gate.get("rows", [])
+            if isinstance(row, Mapping) and row.get("dataset")
+        },
+    )
 
     return {
         "generated_at_utc": _utc_now_iso(),
@@ -1176,7 +1293,7 @@ def render_profile_cd_real_markdown(payload: Mapping[str, Any]) -> str:
         "# Benchmark Results - profile_cd_real",
         "",
         f"> generated_at_utc: {payload['generated_at_utc']}",
-        "> mode: real API embedding/reranker execution",
+        "> mode: real execution with observed API embedding/reranker outcomes",
         "",
         "## profile_c",
         "",
@@ -1190,6 +1307,42 @@ def render_profile_cd_real_markdown(payload: Mapping[str, Any]) -> str:
         ]
     )
     lines.extend(_render_profile_rows_table(profile_d["rows"]))
+    lines.append("")
+    lines.extend(
+        [
+            "## Observed Degradation",
+            "",
+        ]
+    )
+    for profile_key in ("profile_c", "profile_d"):
+        rows = payload["profiles"][profile_key]["rows"]
+        reasons = sorted(
+            {
+                reason
+                for row in rows
+                for reason in row.get("degradation", {}).get("degrade_reasons", [])
+                if isinstance(reason, str)
+            }
+        )
+        lines.append(f"- {profile_key}: {', '.join(reasons) if reasons else '(none)'}")
+    lines.extend(
+        [
+            "",
+            "## Index-Time Degradation",
+            "",
+        ]
+    )
+    for profile_key in ("profile_c", "profile_d"):
+        rows = payload["profiles"][profile_key]["rows"]
+        reasons = sorted(
+            {
+                reason
+                for row in rows
+                for reason in row.get("indexing", {}).get("degrade_reasons", [])
+                if isinstance(reason, str)
+            }
+        )
+        lines.append(f"- {profile_key}: {', '.join(reasons) if reasons else '(none)'}")
     lines.append("")
     lines.extend(
         [

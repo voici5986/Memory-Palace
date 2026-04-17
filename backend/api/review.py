@@ -782,6 +782,23 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
     elif operation_type == "create_alias":
         # Rollback of alias creation = remove the alias path only
         try:
+            existing_alias = await client.get_memory_by_path(
+                path, domain, reinforce_access=False
+            )
+            snapshot_memory_id = data.get("memory_id")
+            if (
+                existing_alias is not None
+                and snapshot_memory_id is not None
+                and existing_alias.get("id") != snapshot_memory_id
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Cannot rollback alias '{uri}': "
+                        "it now points to a different memory."
+                    ),
+                )
+
             async def _write_task_remove_alias() -> Any:
                 return await client.remove_path(path, domain)
 

@@ -2534,6 +2534,29 @@ async def execute_external_import(payload: ImportExecuteRequest):
             async def _write_task_create(
                 _entry: Dict[str, Any] = entry,
             ) -> Dict[str, Any]:
+                guard_decision = await client.write_guard(
+                    content=str(_entry.get("content") or ""),
+                    domain=domain,
+                    path_prefix=parent_path or None,
+                )
+                guard_action = str(guard_decision.get("action") or "UNKNOWN").upper()
+                if guard_action != "ADD":
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "external_import_execute_rejected",
+                            "reason": "write_guard_blocked_in_lane",
+                            "job_id": job_id,
+                            "guard_action": guard_action,
+                            "guard_method": str(
+                                guard_decision.get("method") or "unknown"
+                            ),
+                            "guard_target_uri": str(
+                                guard_decision.get("target_uri") or ""
+                            ),
+                            "source_path": str(_entry.get("source_path") or ""),
+                        },
+                    )
                 return await client.create_memory(
                     parent_path=parent_path,
                     content=str(_entry.get("content") or ""),
@@ -2547,6 +2570,38 @@ async def execute_external_import(payload: ImportExecuteRequest):
                 _write_task_create,
                 session_id=write_lane_session_id,
             )
+        except HTTPException as exc:
+            rollback_summary = await _rollback_import_created_memories(
+                client=client,
+                created_memories=created_memories,
+                session_id=write_lane_session_id,
+                job_id=job_id,
+            )
+            job["status"] = "failed"
+            job["created_memories"] = created_memories
+            job["rollback"] = rollback_summary
+            job["failure"] = {
+                "reason": "write_guard_blocked_in_lane",
+                "detail": exc.detail,
+                "updated_at": _utc_iso_now(),
+            }
+            await _update_import_job(job_id, job)
+            await _record_import_learn_event(
+                event_type="reject",
+                operation="import_execute",
+                decision="rejected",
+                reason="write_guard_blocked_in_lane",
+                source=source,
+                session_id=session_id,
+                actor_id=actor_id,
+                batch_id=job_id,
+                metadata={
+                    "domain": domain,
+                    "created_count": len(created_memories),
+                    "rollback_count": rollback_summary.get("rolled_back_count"),
+                },
+            )
+            raise
         except Exception as exc:
             rollback_summary = await _rollback_import_created_memories(
                 client=client,

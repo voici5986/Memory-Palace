@@ -228,6 +228,8 @@ const en = {
         'The target directory is not writable from the current process.',
       env_file_not_writable:
         'The target .env file exists but is not writable from the current process.',
+      local_loopback_required_for_write:
+        'Saving local setup is allowed only from direct loopback requests.',
       status_unavailable:
         'Setup status is unavailable right now. You can still save the dashboard key in this browser.',
     },
@@ -333,6 +335,7 @@ const en = {
       rollback: 'Rollback failed.',
       approve: 'Approve request failed.',
       clearSession: 'Clear session request failed.',
+      confirmUnavailable: 'Confirmation dialog is unavailable in this runtime. The action was not sent.',
     },
     prompts: {
       rejectChanges: 'Reject changes to {{resourceId}}? This will revert the memory.',
@@ -401,6 +404,8 @@ const en = {
       loadOrphanDetail: 'Failed to load orphan detail',
       deleteSummary: '{{failed}} of {{count}} deletions failed. Failed IDs: {{ids}}',
       tooManySelections: 'Too many selections: {{count}}. Max allowed is {{max}}.',
+      confirmUnavailable: 'Confirmation dialog is unavailable in this runtime. Delete was not sent.',
+      promptUnavailable: 'Prompt dialog is unavailable in this runtime. Cleanup confirmation was not sent.',
     },
     vitality: {
       title: 'Vitality Cleanup Candidates',

@@ -101,6 +101,49 @@ def test_check_sync_script_uses_current_python_interpreter(monkeypatch):
     assert recorded["cmd"][1:] == ["-B", str(module.PROJECT_ROOT / "scripts" / "sync_memory_palace_skill.py"), "--check"]
 
 
+def test_python_command_prefers_repo_backend_python_on_windows(monkeypatch, tmp_path):
+    module = _load_skill_eval_module()
+    backend_dir = tmp_path / "backend"
+    backend_dir.mkdir(parents=True)
+    preferred_python = backend_dir / ".venv" / "Scripts" / "python.exe"
+    preferred_python.parent.mkdir(parents=True)
+    preferred_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "BACKEND_DIR", backend_dir)
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setattr(module.sys, "executable", r"C:\Python313\python.exe")
+
+    assert module._python_command() == str(preferred_python)
+
+
+def test_sanitize_report_text_redacts_env_and_paths() -> None:
+    module = _load_skill_eval_module()
+    raw = (
+        'env={"DATABASE_URL":"sqlite+aiosqlite:////Users/test/demo.db",'
+        '"MCP_API_KEY":"super-secret-token"}\n'
+        'command=/Users/test/project/backend/mcp_server.py\n'
+        'session_id=mcp_ctx_client_ServerSession-123'
+    )
+
+    sanitized = module._sanitize_report_text(raw)
+
+    assert "super-secret-token" not in sanitized
+    assert "/Users/test/project" not in sanitized
+    assert "sqlite+aiosqlite" not in sanitized
+    assert "mcp_ctx_client_ServerSession-123" not in sanitized
+    assert "<redacted>" in sanitized
+
+
+def test_write_private_report_uses_private_permissions(monkeypatch, tmp_path):
+    module = _load_skill_eval_module()
+    report_path = tmp_path / "reports" / "skill-report.md"
+
+    module._write_private_report(report_path, "secret")
+
+    assert report_path.read_text(encoding="utf-8") == "secret"
+    assert report_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_smoke_gemini_live_suite_is_opt_in_by_default(monkeypatch):
     monkeypatch.delenv("MEMORY_PALACE_ENABLE_GEMINI_LIVE", raising=False)
     monkeypatch.delenv("MEMORY_PALACE_SKIP_GEMINI_LIVE", raising=False)

@@ -31,6 +31,9 @@ def test_repo_local_stdio_command_uses_python_wrapper_on_windows(
     harness = _load_harness()
     project_root = tmp_path / "Memory-Palace"
     backend_root = project_root / "backend"
+    preferred_python = backend_root / ".venv" / "Scripts" / "python.exe"
+    preferred_python.parent.mkdir(parents=True, exist_ok=True)
+    preferred_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(harness, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(harness, "BACKEND_ROOT", backend_root)
@@ -39,7 +42,7 @@ def test_repo_local_stdio_command_uses_python_wrapper_on_windows(
 
     command, args = harness._repo_local_stdio_command()
 
-    assert command == r"C:\Python313\python.exe"
+    assert command == str(preferred_python)
     assert args == [str(backend_root / "mcp_wrapper.py")]
 
 
@@ -53,6 +56,36 @@ def test_resolve_report_path_supports_relative_override_under_temp_root(
     resolved = harness._resolve_report_path()
 
     assert resolved == tmp_path / "tmp-root" / "tmp" / "custom-e2e-report.md"
+
+
+def test_build_markdown_redacts_sensitive_details() -> None:
+    harness = _load_harness()
+    report = harness.build_markdown(
+        [
+            harness.StepResult(
+                name="demo",
+                status="FAIL",
+                summary="failed",
+                details='DATABASE_URL=sqlite+aiosqlite:////Users/test/demo.db MCP_API_KEY=secret-token',
+            )
+        ],
+        "stderr from /Users/test/project",
+    )
+
+    assert "secret-token" not in report
+    assert "/Users/test/project" not in report
+    assert "sqlite+aiosqlite" not in report
+    assert "<redacted>" in report
+
+
+def test_write_private_report_uses_private_permissions(tmp_path: Path) -> None:
+    harness = _load_harness()
+    report_path = tmp_path / "tmp-root" / "mcp-e2e.md"
+
+    harness._write_private_report(report_path, "secret")
+
+    assert report_path.read_text(encoding="utf-8") == "secret"
+    assert report_path.stat().st_mode & 0o777 == 0o600
 
 
 def test_python_wrapper_live_stdio_smoke() -> None:

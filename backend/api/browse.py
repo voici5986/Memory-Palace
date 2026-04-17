@@ -8,7 +8,7 @@ hierarchical browser. Every path is just a node with content and children.
 import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Any
+from typing import Any, Optional, Dict
 from db import get_sqlite_client
 from db.snapshot import _resolve_current_database_scope, get_snapshot_manager
 from db.sqlite_client import Path as PathModel
@@ -262,7 +262,9 @@ def _snapshot_path_create(
     )
 
 
-async def _snapshot_path_delete(client: Any, uri: str) -> bool:
+async def _snapshot_path_delete(
+    client: Any, uri: str, *, memory: Optional[Dict[str, Any]] = None
+) -> bool:
     manager = get_snapshot_manager()
     session_id = _snapshot_session_id()
     existing = manager.get_snapshot(session_id, uri)
@@ -276,7 +278,8 @@ async def _snapshot_path_delete(client: Any, uri: str) -> bool:
             return False
 
     domain, path = _parse_uri(uri)
-    memory = await client.get_memory_by_path(path, domain, reinforce_access=False)
+    if memory is None:
+        memory = await client.get_memory_by_path(path, domain, reinforce_access=False)
     if not memory:
         return False
 
@@ -610,8 +613,14 @@ async def delete_node(
     full_uri = _make_uri(domain, path)
 
     async def _write_task():
-        await _snapshot_path_delete(client, full_uri)
-        return await client.remove_path(path=path, domain=domain)
+        async def _snapshot_before_delete(memory: Dict[str, Any]) -> None:
+            await _snapshot_path_delete(client, full_uri, memory=memory)
+
+        return await client.delete_path_atomically(
+            path=path,
+            domain=domain,
+            before_delete=_snapshot_before_delete,
+        )
 
     try:
         result = await _run_write_lane("browse.delete_node", _write_task)

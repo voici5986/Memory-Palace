@@ -443,6 +443,9 @@ export const extractApiError = (
     pushPart(translateApiErrorMessage(detail.message) || detail.message);
     const errorCode = normalizeApiErrorCode(detail.error);
     const reasonCode = normalizeApiErrorCode(detail.reason);
+    const isLoopbackWriteRestriction =
+      reasonCode === 'local_loopback_required_for_write'
+      || reasonCode === 'insecure_local_override_requires_loopback';
     const isAuthError =
       error?.response?.status === 401
       || errorCode === 'maintenance_auth_failed'
@@ -450,10 +453,8 @@ export const extractApiError = (
       || errorCode === 'mcp_sse_auth_failed'
       || reasonCode === 'invalid_or_missing_api_key'
       || reasonCode === 'api_key_not_configured'
-      || reasonCode === 'local_loopback_or_api_key_required'
-      || reasonCode === 'local_loopback_required_for_write'
-      || reasonCode === 'insecure_local_override_requires_loopback';
-    if (isAuthError) {
+      || reasonCode === 'local_loopback_or_api_key_required';
+    if (isAuthError && !isLoopbackWriteRestriction) {
       pushPart(i18n.t('apiErrors.authHint'));
     }
     if (parts.length > 0) {

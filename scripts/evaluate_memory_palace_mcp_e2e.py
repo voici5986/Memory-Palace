@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -14,6 +15,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
 REPORT_OVERRIDE_ROOT = Path(tempfile.gettempdir()) / "memory-palace-reports"
+_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(/Users/[^\s\"']+|/private/var/[^\s\"']+|[A-Za-z]:[\\/][^\s\"']+)"
+)
+_SESSION_TOKEN_PATTERN = re.compile(r"\b(?:mcp_ctx_[\w-]+|session-[\w-]+)\b")
 
 
 def _resolve_report_path() -> Path:
@@ -47,8 +52,38 @@ def _resolve_backend_python() -> Path | None:
 
 def _repo_local_stdio_command() -> tuple[str, list[str]]:
     if os.name == "nt":
-        return sys.executable or "python", [str(BACKEND_ROOT / "mcp_wrapper.py")]
+        return str(_resolve_backend_python() or (sys.executable or "python")), [
+            str(BACKEND_ROOT / "mcp_wrapper.py")
+        ]
     return "bash", [str(PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh")]
+
+
+def _sanitize_report_text(text: str) -> str:
+    sanitized = str(text or "")
+    sanitized = re.sub(r"\bDATABASE_URL=[^\s]+", "DATABASE_URL=<redacted>", sanitized)
+    sanitized = re.sub(
+        r"\b([A-Za-z0-9_]*(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD))=[^\s]+",
+        r"\1=<redacted>",
+        sanitized,
+    )
+    sanitized = re.sub(r"Bearer\s+\S+", "Bearer <redacted>", sanitized, flags=re.IGNORECASE)
+    sanitized = _ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", sanitized)
+    sanitized = _SESSION_TOKEN_PATTERN.sub("<redacted-session>", sanitized)
+    return sanitized
+
+
+def _write_private_report(report_path: Path, content: str) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_sanitize_report_text(content), encoding="utf-8")
+    try:
+        os.chmod(report_path, 0o600)
+    except OSError:
+        pass
+    if REPORT_OVERRIDE_ROOT in report_path.parents:
+        try:
+            os.chmod(report_path.parent, 0o700)
+        except OSError:
+            pass
 
 
 def _maybe_reexec_with_backend_python() -> None:
@@ -327,11 +362,20 @@ def build_markdown(results: list[StepResult], stderr_output: str) -> str:
         lines.append(f"- Status: `{item.status}`")
         lines.append(f"- Summary: {item.summary}")
         if item.details:
-            lines.extend(["", "```text", item.details.strip(), "```"])
+            lines.extend(["", "```text", _sanitize_report_text(item.details.strip()), "```"])
         lines.append("")
 
     if stderr_output.strip():
-        lines.extend(["## MCP Server stderr", "", "```text", stderr_output.strip(), "```", ""])
+        lines.extend(
+            [
+                "## MCP Server stderr",
+                "",
+                "```text",
+                _sanitize_report_text(stderr_output.strip()),
+                "```",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -344,8 +388,7 @@ def run_suite_sync(
 def main() -> int:
     results, stderr_output = run_suite_sync()
     report_path = _resolve_report_path()
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(build_markdown(results, stderr_output) + "\n", encoding="utf-8")
+    _write_private_report(report_path, build_markdown(results, stderr_output) + "\n")
     failed = [item for item in results if item.status == "FAIL"]
     print(report_path)
     return 1 if failed else 0

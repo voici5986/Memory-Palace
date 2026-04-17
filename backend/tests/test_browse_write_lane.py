@@ -17,7 +17,7 @@ class _FakeBrowseClient:
         }
         self.create_called = False
         self.update_called = False
-        self.remove_called = False
+        self.delete_atomically_called = False
         self.in_lane = False
         self.guard_calls_in_lane: list[bool] = []
 
@@ -58,15 +58,24 @@ class _FakeBrowseClient:
             "index_targets": [19],
         }
 
-    async def remove_path(self, path: str, domain: str = "core") -> Dict[str, Any]:
-        _ = path
-        _ = domain
-        self.remove_called = True
+    async def delete_path_atomically(
+        self, path: str, domain: str = "core", *, before_delete=None
+    ) -> Dict[str, Any]:
+        self.delete_atomically_called = True
+        memory = {
+            "id": 19,
+            "content": "updated content",
+            "priority": 1,
+            "disclosure": None,
+            "domain": domain,
+            "path": path,
+        }
+        if before_delete is not None:
+            await before_delete(dict(memory))
         return {
-            "deleted": True,
+            "removed_uri": f"{domain}://{path}",
             "memory_id": 19,
-            "descendants_deleted": 0,
-            "orphan_memories_deleted": 0,
+            "deleted_memory": memory,
         }
 
 
@@ -203,7 +212,7 @@ async def test_browse_write_endpoints_run_through_write_lane(
 
     assert fake_client.create_called is True
     assert fake_client.update_called is True
-    assert fake_client.remove_called is True
+    assert fake_client.delete_atomically_called is True
     assert fake_client.guard_calls_in_lane == [True, True]
     assert lane_calls == [
         {"session_id": "dashboard", "operation": "browse.create_node"},

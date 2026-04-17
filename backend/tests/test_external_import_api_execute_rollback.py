@@ -113,6 +113,40 @@ class _ImportClientStub:
         return {"removed_uri": f"{domain}://{path}", "memory_id": memory_id}
 
 
+class _ImportRaceClientStub(_ImportClientStub):
+    def __init__(self) -> None:
+        super().__init__()
+        self.race_injected = False
+
+    async def write_guard(self, **kwargs):
+        content = str(kwargs.get("content") or "")
+        for memory in self.memories.values():
+            if memory.get("content") == content:
+                return {
+                    "action": "UPDATE",
+                    "method": "stub",
+                    "reason": "duplicate content already present",
+                    "target_uri": "notes://racer",
+                }
+        return {
+            "action": "ADD",
+            "method": "stub",
+            "reason": "allow",
+        }
+
+    async def inject_race_memory(self, *, content: str, domain: str) -> None:
+        if self.race_injected:
+            return
+        self.race_injected = True
+        await self.create_memory(
+            parent_path="",
+            content=content,
+            priority=1,
+            title="racer",
+            domain=domain,
+        )
+
+
 def _build_client() -> TestClient:
     app = FastAPI()
     app.include_router(maintenance_api.router)
@@ -251,6 +285,58 @@ def test_external_import_execute_and_rollback_restores_snapshot(
         "maintenance.import.rollback.delete_memory",
     ]
     assert all(item["session_id"] == "session-1" for item in write_lane_calls)
+
+
+def test_external_import_execute_rechecks_write_guard_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    client_stub = _ImportRaceClientStub()
+
+    async def _run_write_lane_stub(*, session_id, operation, task):
+        _ = session_id
+        if operation == "maintenance.import.execute.create_memory":
+            await client_stub.inject_race_memory(
+                content="Import content v1",
+                domain="notes",
+            )
+        return await task()
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
+    monkeypatch.setattr(maintenance_api, "ENABLE_WRITE_LANE_QUEUE", True)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes,
+        "run_write",
+        _run_write_lane_stub,
+    )
+    monkeypatch.setenv("MCP_API_KEY", "import-secret")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ALLOWED_ROOTS", str(tmp_path))
+    headers = {"X-MCP-API-Key": "import-secret"}
+
+    file_path = tmp_path / "memo.md"
+    file_path.write_text("Import content v1", encoding="utf-8")
+
+    with _build_client() as client:
+        prepare = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_path),
+        )
+        assert prepare.status_code == 200
+        job_id = prepare.json()["job_id"]
+
+        execute = client.post(
+            "/maintenance/import/execute",
+            headers=headers,
+            json={"job_id": job_id},
+        )
+
+    assert execute.status_code == 409
+    detail = execute.json()["detail"]
+    assert detail["error"] == "external_import_execute_rejected"
+    assert detail["reason"] == "write_guard_blocked_in_lane"
+    assert detail["guard_action"] == "UPDATE"
+    assert client_stub.counts() == (1, 1)
 
 
 def test_external_import_rollback_keeps_reused_memory_aliases(

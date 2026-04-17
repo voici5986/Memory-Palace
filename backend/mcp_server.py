@@ -3950,7 +3950,22 @@ async def create_memory(
                 index_now=not defer_index,
             )
             created_uri = result.get("uri", make_uri(domain, result["path"]))
-            await _snapshot_path_create(created_uri, result["id"], operation_type="create")
+            try:
+                await _snapshot_path_create(
+                    created_uri, result["id"], operation_type="create"
+                )
+            except Exception as snapshot_exc:
+                try:
+                    await client.delete_path_atomically(result["path"], domain)
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        "snapshot_create_failed_after_write:"
+                        f"{type(snapshot_exc).__name__};rollback_failed:"
+                        f"{type(rollback_exc).__name__}"
+                    ) from snapshot_exc
+                raise RuntimeError(
+                    f"snapshot_create_failed_after_write:{type(snapshot_exc).__name__}"
+                ) from snapshot_exc
             result["_guard_decision"] = guard_decision
             return result
 

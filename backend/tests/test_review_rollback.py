@@ -416,6 +416,64 @@ async def test_rollback_path_create_alias_returns_409_when_alias_still_exists_af
     assert "Cannot rollback alias 'core://parent-alias'" in str(exc_info.value.detail)
 
 
+@pytest.mark.asyncio
+async def test_rollback_path_create_alias_rejects_when_alias_now_points_to_different_memory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-alias-rebind.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    source = await client.create_memory(
+        parent_path="",
+        content="source content",
+        priority=1,
+        title="source",
+        domain="core",
+    )
+    target = await client.create_memory(
+        parent_path="",
+        content="target content",
+        priority=1,
+        title="target",
+        domain="core",
+    )
+    await client.add_path(
+        new_path="shared-alias",
+        target_path="source",
+        new_domain="core",
+        target_domain="core",
+    )
+    await client.remove_path("shared-alias", "core")
+    await client.add_path(
+        new_path="shared-alias",
+        target_path="target",
+        new_domain="core",
+        target_domain="core",
+    )
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "create_alias",
+                "domain": "core",
+                "path": "shared-alias",
+                "uri": "core://shared-alias",
+                "memory_id": source["id"],
+            }
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "points to a different memory" in str(exc_info.value.detail)
+    current = await client.get_memory_by_path("shared-alias", "core", reinforce_access=False)
+    assert current is not None
+    assert current["id"] == target["id"]
+    await client.close()
+
+
 class _StubSnapshotManager:
     def get_snapshot(self, _session_id: str, resource_id: str):
         return {
@@ -751,6 +809,15 @@ async def test_rollback_path_create_alias_routes_writes_through_write_lane(
     lane_calls = []
 
     class _AliasClient:
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return None
+
         async def remove_path(self, path: str, domain: str):
             return {"removed_uri": f"{domain}://{path}"}
 

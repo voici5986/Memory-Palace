@@ -1893,6 +1893,17 @@ class SQLiteClient:
         return "legacy"
 
     @staticmethod
+    def _should_mark_fts_unavailable(exc: Exception) -> bool:
+        message = str(exc or "").strip().lower()
+        if not message:
+            return False
+        return (
+            "no such table: memory_chunks_fts" in message
+            or "no such module: fts5" in message
+            or "virtual table" in message and "memory_chunks_fts" in message
+        )
+
+    @staticmethod
     def _resolve_sqlite_extension_file(path_input: str) -> Optional[FilePath]:
         raw_path = str(path_input or "").strip()
         if not raw_path:
@@ -3301,7 +3312,13 @@ class SQLiteClient:
             # vec0 table is optional; writes continue through legacy table.
             self._sqlite_vec_knn_ready = False
 
-    async def _reindex_memory(self, session: AsyncSession, memory_id: int) -> int:
+    async def _reindex_memory(
+        self,
+        session: AsyncSession,
+        memory_id: int,
+        *,
+        degrade_reasons: Optional[List[str]] = None,
+    ) -> int:
         await self._clear_memory_index(session, memory_id)
 
         memory_result = await session.execute(
@@ -3338,7 +3355,11 @@ class SQLiteClient:
         vec_knn_rows: List[Dict[str, Any]] = []
         for chunk in chunk_rows:
             if self._vector_available:
-                embedding = await self._get_embedding(session, chunk.chunk_text)
+                embedding = await self._get_embedding(
+                    session,
+                    chunk.chunk_text,
+                    degrade_reasons=degrade_reasons,
+                )
                 vector_payload = json.dumps(embedding, separators=(",", ":"))
                 vec_rows.append(
                     MemoryChunkVec(
@@ -4486,8 +4507,20 @@ class SQLiteClient:
             )
             session.add(path_obj)
             indexed_chunks = 0
+            index_degrade_reasons: List[str] = []
             if index_now:
-                indexed_chunks = await self._reindex_memory(session, memory.id)
+                indexed_chunks = await self._reindex_memory(
+                    session,
+                    memory.id,
+                    degrade_reasons=index_degrade_reasons,
+                )
+
+            unique_index_reasons = sorted(set(index_degrade_reasons))
+            effective_backend = (
+                "hash"
+                if "embedding_fallback_hash" in unique_index_reasons
+                else (self._embedding_backend or "hash")
+            )
 
             return {
                 "id": memory.id,
@@ -4498,6 +4531,13 @@ class SQLiteClient:
                 "indexed_chunks": indexed_chunks,
                 "index_pending": not index_now,
                 "index_targets": [memory.id],
+                "index_report": {
+                    "degraded": bool(unique_index_reasons),
+                    "degrade_reasons": unique_index_reasons,
+                    "configured_backend": self._embedding_backend,
+                    "effective_backend": effective_backend,
+                    "configured_dim": int(self._embedding_dim),
+                },
             }
 
     async def _get_next_numeric_id(
@@ -6189,9 +6229,18 @@ class SQLiteClient:
                             },
                         )
                         keyword_rows = [dict(row) for row in keyword_result.mappings().all()]
-                    except Exception:
-                        self._fts_available = False
-                        await self._set_index_meta(session, "fts_available", "0")
+                    except Exception as exc:
+                        if self._should_mark_fts_unavailable(exc):
+                            self._fts_available = False
+                            await self._set_index_meta(session, "fts_available", "0")
+                        else:
+                            self._append_degrade_reason(
+                                degrade_reasons, "fts_query_invalid"
+                            )
+                            self._append_degrade_reason(
+                                degrade_reasons,
+                                f"fts_query_invalid:{type(exc).__name__}",
+                            )
 
                 if not keyword_rows:
                     like_pattern = f"%{query.lower()}%"
