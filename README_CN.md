@@ -54,7 +54,7 @@
 - **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
 - **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
 - **repo-local wrapper 现在会更一致地拦住 Docker sqlite 容器路径**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`，所以像 `sqlite+aiosqlite://///app/data/...` 这类值不会再被误放过。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端非 benchmark 测试 `857 passed, 15 skipped`；前端 `149 passed`；前端 build 和 `npm run typecheck` 通过。live MCP e2e、repo-local 真实浏览器 Profile B（`backend + SSE + Vite`）、Docker one-click 的 A/B/C/D、原生 Windows 宿主 runtime、原生 Linux 宿主 runtime 这轮都**没有**重跑，仍保留目标环境复验边界。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端非 benchmark 测试 `868 passed, 15 skipped`；前端 `154 passed`；前端 build 和 `npm run typecheck` 通过。这一轮也实际复核了 repo-local macOS `Profile B`（`backend + SSE + Vite + browser + i18n persistence`）、Docker one-click 的 A/B/C/D（`/health`、首页、`/sse` 和代理 `/api/browse/node`）；`skills+MCP` 与 `single-MCP` 通过，`skills-only` 仍是 **PARTIAL**。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection prepare 现在更不容易重复准备同一批内容**：同一个 session、source、reason、content 的并发 `prepare` 请求，现在会复用同一个 prepared review，不再为同一批内容生成多个 review ID。
 - **前端类型检查现在更容易复现，也更不容易在 CI 里漏掉了**：`frontend/package.json` 现在已经补上正式的 `npm run typecheck`，Docker publish 的校验工作流也会在发布前跑同一条检查。
@@ -146,7 +146,7 @@ Embedding 维度不匹配的检查现在会跟着**当前查询作用域**走（
 
 Observability 搜索和活力清理确认这类更容易跑久一点的操作，现在前端也会给更长的等待时间。对本地数据量更大的场景来说，这样更不容易出现“后端还在处理，浏览器先报超时”的错觉。
 
-当浏览器里既没有已保存的 Dashboard 鉴权，也没有运行时注入的 Dashboard 鉴权时，前端会自动打开首启配置向导。它可以把 Dashboard `MCP_API_KEY` 保存到当前浏览器会话里，并且在应用直接连本地 checkout 时，把常见本地运行参数写进 `.env`，不需要手动编辑文件。如果你走的是“保存到本地 `.env`”这条路径，并且同时填写了 Dashboard key，向导仍然需要浏览器会话存储来记住这把 key；如果浏览器拦住了这条存储路径，页面现在会明确提示保存失败，不再假装整套配置都已经成功。对带鉴权的非 loopback 请求，向导现在仍可显示当前 setup 状态，但本地 `.env` 写入会继续保持禁用，并明确提示这是直连回环地址才允许的操作。涉及后端运行链路的改动仍然需要重启服务。
+当浏览器里既没有已保存的 Dashboard 鉴权，也没有运行时注入的 Dashboard 鉴权时，前端会自动打开首启配置向导。它可以把 Dashboard `MCP_API_KEY` 保存到当前浏览器会话里，并且在应用直接连本地 checkout 时，把常见本地运行参数写进 `.env`，不需要手动编辑文件。现在向导里也会把 `Profile A` 直接标出来，不再让它只作为空表单的隐含默认态；这条默认基线仍然就是 `keyword + none`。如果你走的是“保存到本地 `.env`”这条路径，并且同时填写了 Dashboard key，向导仍然需要浏览器会话存储来记住这把 key；如果浏览器拦住了这条存储路径，页面现在会明确提示保存失败，不再假装整套配置都已经成功。对带鉴权的非 loopback 请求，向导现在仍可显示当前 setup 状态，但本地 `.env` 写入会继续保持禁用，并明确提示这是直连回环地址才允许的操作。涉及后端运行链路的改动仍然需要重启服务。
 
 如果你想看一份按页面拆开的使用说明，可以直接打开 [中文仪表盘使用指南](docs/DASHBOARD_GUIDE_CN.md)。
 
@@ -1041,7 +1041,7 @@ curl -fsS http://127.0.0.1:8000/health
 实时搜索查询监控、检索质量洞察和任务队列状态。当前版本还补了 `scope hint`、运行时快照和索引任务队列等信息。
 </details>
 
-> 💡 API 文档建议直接看运行中的 `/docs`。因为接口会继续补充，在线 Swagger 永远比静态截图更准。
+> 💡 后端现在默认不再公开运行中的 `/docs`。要看当前接口行为，优先看仓库文档和 `backend/tests/` 里的已核对测试。
 
 ---
 

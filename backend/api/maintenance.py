@@ -9,14 +9,16 @@ import os
 import re
 import time
 import uuid
+from urllib.parse import quote
 from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from db import get_sqlite_client
+from db.snapshot import SnapshotManager
 from runtime_state import runtime_state
 from security.import_guard import ExternalImportGuard, ExternalImportGuardConfig
 from shared_utils import (
@@ -262,6 +264,11 @@ class LearnTriggerRequest(BaseModel):
     path_prefix: str = Field(default="corrections", min_length=1, max_length=256)
     execute: bool = True
 
+    @field_validator("session_id")
+    @classmethod
+    def _validate_session_id(cls, value: str) -> str:
+        return SnapshotManager._validate_session_id(value)
+
 
 class ReflectionWorkflowRequest(BaseModel):
     mode: str = Field(default="prepare", min_length=1, max_length=32)
@@ -269,6 +276,11 @@ class ReflectionWorkflowRequest(BaseModel):
     reason: str = Field(default="", max_length=240)
     session_id: str = Field(min_length=1, max_length=128)
     actor_id: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("session_id")
+    @classmethod
+    def _validate_session_id(cls, value: str) -> str:
+        return SnapshotManager._validate_session_id(value)
 
 
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
@@ -495,9 +507,9 @@ def _build_reflection_workflow_summary(import_learn_summary: Dict[str, Any]) -> 
     }
 
 
-def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+def _import_learn_summary_core(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        return None
+        payload = {}
     return {
         "window_size": _safe_non_negative_int(payload.get("window_size")),
         "total_events": _safe_non_negative_int(payload.get("total_events")),
@@ -522,9 +534,114 @@ def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
         "recent_events": payload.get("recent_events")
         if isinstance(payload.get("recent_events"), list)
         else [],
-        "persistence_runtime_id": str(payload.get("persistence_runtime_id") or "").strip()
-        or None,
     }
+
+
+def _normalize_persistence_runtime_ids(payload: Any) -> List[str]:
+    if not isinstance(payload, list):
+        return []
+    runtime_ids: List[str] = []
+    for item in payload:
+        runtime_id = str(item or "").strip()
+        if runtime_id and runtime_id not in runtime_ids:
+            runtime_ids.append(runtime_id)
+    return runtime_ids
+
+
+def _sanitize_runtime_summary_contributions(payload: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return {}
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for raw_runtime_id, raw_summary in payload.items():
+        runtime_id = str(raw_runtime_id or "").strip()
+        if not runtime_id:
+            continue
+        normalized[runtime_id] = _import_learn_summary_core(raw_summary)
+    return normalized
+
+
+def _aggregate_runtime_summary_contributions(
+    contributions: Dict[str, Dict[str, Any]],
+    runtime_order: List[str],
+) -> Dict[str, Any]:
+    ordered_summaries = [
+        contributions[runtime_id]
+        for runtime_id in runtime_order
+        if runtime_id in contributions
+    ]
+    if not ordered_summaries:
+        return _import_learn_summary_core({})
+
+    last_event_at = max(
+        [
+            candidate
+            for summary in ordered_summaries
+            for candidate in [str(summary.get("last_event_at") or "").strip()]
+            if candidate
+        ],
+        default=None,
+    )
+    return {
+        "window_size": max(
+            _safe_non_negative_int(summary.get("window_size"))
+            for summary in ordered_summaries
+        ),
+        "total_events": sum(
+            _safe_non_negative_int(summary.get("total_events"))
+            for summary in ordered_summaries
+        ),
+        "event_type_breakdown": _merge_counter_payloads(
+            *[summary.get("event_type_breakdown") for summary in ordered_summaries]
+        ),
+        "operation_breakdown": _merge_counter_payloads(
+            *[summary.get("operation_breakdown") for summary in ordered_summaries]
+        ),
+        "decision_breakdown": _merge_counter_payloads(
+            *[summary.get("decision_breakdown") for summary in ordered_summaries]
+        ),
+        "operation_decision_breakdown": _merge_counter_payloads(
+            *[
+                summary.get("operation_decision_breakdown")
+                for summary in ordered_summaries
+            ]
+        ),
+        "rejected_events": sum(
+            _safe_non_negative_int(summary.get("rejected_events"))
+            for summary in ordered_summaries
+        ),
+        "rollback_events": sum(
+            _safe_non_negative_int(summary.get("rollback_events"))
+            for summary in ordered_summaries
+        ),
+        "top_reasons": _merge_reason_payloads(
+            *[summary.get("top_reasons") for summary in ordered_summaries]
+        ),
+        "last_event_at": last_event_at,
+        "recent_events": _merge_recent_events(
+            *[summary.get("recent_events") for summary in ordered_summaries]
+        ),
+    }
+
+
+def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    sanitized = _import_learn_summary_core(payload)
+    runtime_id = str(payload.get("persistence_runtime_id") or "").strip() or None
+    runtime_ids = _normalize_persistence_runtime_ids(
+        payload.get("persistence_runtime_ids")
+    )
+    contributions = _sanitize_runtime_summary_contributions(
+        payload.get("persistence_runtime_summaries")
+    )
+    if runtime_id and runtime_id not in runtime_ids:
+        runtime_ids.append(runtime_id)
+    if runtime_id and runtime_id not in contributions:
+        contributions[runtime_id] = dict(sanitized)
+    sanitized["persistence_runtime_id"] = runtime_id
+    sanitized["persistence_runtime_ids"] = runtime_ids
+    sanitized["persistence_runtime_summaries"] = contributions
+    return sanitized
 
 
 async def _load_persisted_import_learn_summary(client: Any) -> Optional[Dict[str, Any]]:
@@ -597,65 +714,46 @@ def _prepare_persisted_import_learn_summary(
     persisted_summary: Optional[Dict[str, Any]],
     runtime_id: str,
 ) -> Dict[str, Any]:
-    if not isinstance(persisted_summary, dict):
-        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+    runtime_contribution = _import_learn_summary_core(runtime_summary)
+    runtime_order: List[str] = []
+    contributions: Dict[str, Dict[str, Any]] = {}
 
-    if str(persisted_summary.get("persistence_runtime_id") or "").strip() == runtime_id:
-        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+    if isinstance(persisted_summary, dict):
+        runtime_order = _normalize_persistence_runtime_ids(
+            persisted_summary.get("persistence_runtime_ids")
+        )
+        contributions = _sanitize_runtime_summary_contributions(
+            persisted_summary.get("persistence_runtime_summaries")
+        )
+        persisted_runtime_id = str(
+            persisted_summary.get("persistence_runtime_id") or ""
+        ).strip()
+        if persisted_runtime_id:
+            if persisted_runtime_id not in runtime_order:
+                runtime_order.append(persisted_runtime_id)
+            if persisted_runtime_id not in contributions:
+                contributions[persisted_runtime_id] = _import_learn_summary_core(
+                    persisted_summary
+                )
+        elif not contributions:
+            legacy_runtime_id = "__legacy_persisted__"
+            runtime_order.append(legacy_runtime_id)
+            contributions[legacy_runtime_id] = _import_learn_summary_core(
+                persisted_summary
+            )
 
-    last_event_at = max(
-        [
-            candidate
-            for candidate in [
-                str(persisted_summary.get("last_event_at") or "").strip(),
-                str(runtime_summary.get("last_event_at") or "").strip(),
-            ]
-            if candidate
-        ],
-        default=None,
-    )
-    return {
-        "window_size": max(
-            _safe_non_negative_int(persisted_summary.get("window_size")),
-            _safe_non_negative_int(runtime_summary.get("window_size")),
-        ),
-        "total_events": _safe_non_negative_int(persisted_summary.get("total_events"))
-        + _safe_non_negative_int(runtime_summary.get("total_events")),
-        "event_type_breakdown": _merge_counter_payloads(
-            persisted_summary.get("event_type_breakdown"),
-            runtime_summary.get("event_type_breakdown"),
-        ),
-        "operation_breakdown": _merge_counter_payloads(
-            persisted_summary.get("operation_breakdown"),
-            runtime_summary.get("operation_breakdown"),
-        ),
-        "decision_breakdown": _merge_counter_payloads(
-            persisted_summary.get("decision_breakdown"),
-            runtime_summary.get("decision_breakdown"),
-        ),
-        "operation_decision_breakdown": _merge_counter_payloads(
-            persisted_summary.get("operation_decision_breakdown"),
-            runtime_summary.get("operation_decision_breakdown"),
-        ),
-        "rejected_events": _safe_non_negative_int(
-            persisted_summary.get("rejected_events")
-        )
-        + _safe_non_negative_int(runtime_summary.get("rejected_events")),
-        "rollback_events": _safe_non_negative_int(
-            persisted_summary.get("rollback_events")
-        )
-        + _safe_non_negative_int(runtime_summary.get("rollback_events")),
-        "top_reasons": _merge_reason_payloads(
-            persisted_summary.get("top_reasons"),
-            runtime_summary.get("top_reasons"),
-        ),
-        "last_event_at": last_event_at,
-        "recent_events": _merge_recent_events(
-            persisted_summary.get("recent_events"),
-            runtime_summary.get("recent_events"),
-        ),
-        "persistence_runtime_id": runtime_id,
-    }
+    for persisted_runtime_id in contributions:
+        if persisted_runtime_id not in runtime_order:
+            runtime_order.append(persisted_runtime_id)
+    if runtime_id not in runtime_order:
+        runtime_order.append(runtime_id)
+    contributions[runtime_id] = runtime_contribution
+
+    aggregated = _aggregate_runtime_summary_contributions(contributions, runtime_order)
+    aggregated["persistence_runtime_id"] = runtime_id
+    aggregated["persistence_runtime_ids"] = runtime_order
+    aggregated["persistence_runtime_summaries"] = contributions
+    return aggregated
 
 
 def _build_reflection_learn_job_response(
@@ -667,6 +765,11 @@ def _build_reflection_learn_job_response(
     session_id: str,
 ) -> Tuple[bool, str, Dict[str, Any], Dict[str, Any]]:
     nested_result = result.get("result") if isinstance(result.get("result"), dict) else {}
+    review_snapshot = None
+    if isinstance(result.get("review_snapshot"), dict):
+        review_snapshot = dict(result.get("review_snapshot"))
+    elif isinstance(nested_result.get("review_snapshot"), dict):
+        review_snapshot = dict(nested_result.get("review_snapshot"))
     created_memories: List[Dict[str, Any]] = []
     created_memory = nested_result.get("created_memory")
     if isinstance(created_memory, dict):
@@ -728,6 +831,8 @@ def _build_reflection_learn_job_response(
         "created_namespace_memories": created_namespace_memories,
         "result": result,
     }
+    if review_snapshot:
+        job_payload["review_snapshot"] = review_snapshot
     if job_status == "executed":
         job_payload["rollback"] = {
             "status": "not_started",
@@ -744,17 +849,32 @@ def _build_reflection_learn_job_response(
             "updated_at": now,
         }
 
+    rollback_endpoint = f"/maintenance/import/jobs/{batch_id}/rollback"
+    rollback_endpoint_aliases = [
+        f"/maintenance/import/jobs/{batch_id}/rollback",
+        f"/maintenance/learn/jobs/{batch_id}/rollback",
+    ]
+    if executed and review_snapshot:
+        review_session_id = str(review_snapshot.get("session_id") or "").strip()
+        review_resource_id = str(review_snapshot.get("resource_id") or "").strip()
+        if review_session_id and review_resource_id:
+            rollback_endpoint = (
+                f"/review/sessions/{review_session_id}/rollback/"
+                f"{quote(review_resource_id, safe='')}"
+            )
+            rollback_endpoint_aliases = [
+                rollback_endpoint,
+                f"/maintenance/learn/jobs/{batch_id}/rollback",
+            ]
+
     response_payload = dict(result)
     response_payload.update(
         {
             "job_id": batch_id,
             "job_type": "learn",
             "job": _public_import_job_payload(job_payload),
-            "rollback_endpoint": f"/maintenance/import/jobs/{batch_id}/rollback",
-            "rollback_endpoint_aliases": [
-                f"/maintenance/import/jobs/{batch_id}/rollback",
-                f"/maintenance/learn/jobs/{batch_id}/rollback",
-            ],
+            "rollback_endpoint": rollback_endpoint,
+            "rollback_endpoint_aliases": rollback_endpoint_aliases,
         }
     )
     return accepted, batch_id, job_payload, response_payload
@@ -1178,7 +1298,7 @@ def _http_error_for_reflection_workflow(
     }
     if reason in {"unsupported_reflection_source", "unsupported_reflection_mode"}:
         return HTTPException(status_code=422, detail=detail)
-    if reason == "session_summary_unavailable":
+    if reason in {"session_summary_unavailable", "write_lane_timeout"}:
         return HTTPException(status_code=503, detail=detail)
     if reason == "session_summary_empty":
         return HTTPException(status_code=409, detail=detail)
@@ -1812,6 +1932,60 @@ async def _best_effort_cleanup_learn_namespace(
     }
 
 
+def _extract_review_snapshot(payload: Any) -> Optional[Dict[str, str]]:
+    candidate = payload if isinstance(payload, dict) else {}
+    review_snapshot = candidate.get("review_snapshot")
+    if not isinstance(review_snapshot, dict):
+        nested = candidate.get("result")
+        if isinstance(nested, dict):
+            review_snapshot = nested.get("review_snapshot")
+    if not isinstance(review_snapshot, dict):
+        return None
+
+    session_id = str(review_snapshot.get("session_id") or "").strip()
+    resource_id = str(review_snapshot.get("resource_id") or "").strip()
+    resource_type = str(review_snapshot.get("resource_type") or "").strip() or "path"
+    if not session_id or not resource_id:
+        return None
+    return {
+        "session_id": session_id,
+        "resource_id": resource_id,
+        "resource_type": resource_type,
+    }
+
+
+async def _rollback_review_snapshot(
+    *,
+    review_snapshot: Dict[str, str],
+    reason_text: str,
+) -> Dict[str, Any]:
+    review_module = importlib.import_module("api.review")
+    request_model = getattr(review_module, "RollbackRequest")
+    rollback_request = request_model(task_description=reason_text)
+    rollback_result = await review_module.rollback_resource(
+        review_snapshot["session_id"],
+        review_snapshot["resource_id"],
+        rollback_request,
+    )
+    if hasattr(rollback_result, "model_dump"):
+        rollback_payload = rollback_result.model_dump()
+    elif isinstance(rollback_result, dict):
+        rollback_payload = dict(rollback_result)
+    else:
+        rollback_payload = {"raw": rollback_result}
+    return {
+        "mode": "review_snapshot",
+        "review_snapshot": dict(review_snapshot),
+        "review_result": rollback_payload,
+        "rolled_back_count": 1,
+        "error_count": 0,
+        "errors": [],
+        "side_effects_audit_required": False,
+        "residual_artifacts_review_required": False,
+        "completed_at": _utc_iso_now(),
+    }
+
+
 def _raise_on_enqueue_drop(
     enqueue_result: Dict[str, Any], *, operation: str
 ) -> None:
@@ -1955,9 +2129,6 @@ def _normalize_search_filters(raw_filters: Dict[str, Any]) -> Dict[str, Any]:
             parsed_priority = None
         elif isinstance(max_priority, int):
             parsed_priority = max_priority
-        elif isinstance(max_priority, float):
-            if max_priority.is_integer():
-                parsed_priority = int(max_priority)
         elif isinstance(max_priority, str):
             priority_raw = max_priority.strip()
             if priority_raw and priority_raw.lstrip("+-").isdigit():
@@ -3041,6 +3212,7 @@ async def _rollback_job(
 
     current_status = str(current_job.get("status") or "unknown")
     current_job_type = _normalize_import_job_type(current_job.get("job_type"))
+    review_snapshot = _extract_review_snapshot(current_job)
     created_memories = (
         current_job.get("created_memories")
         if isinstance(current_job.get("created_memories"), list)
@@ -3070,7 +3242,7 @@ async def _rollback_job(
                 "job_id": job_id,
             },
         )
-    has_rollback_targets = bool(created_memories) or bool(current_created_namespace_memories)
+    has_rollback_targets = bool(created_memories) or bool(current_created_namespace_memories) or bool(review_snapshot)
     if not has_rollback_targets:
         raise HTTPException(
             status_code=409,
@@ -3098,21 +3270,38 @@ async def _rollback_job(
     if not isinstance(transitioned_job, dict):
         raise HTTPException(status_code=404, detail={"error": not_found_error})
 
-    client = get_sqlite_client()
     job_type = _normalize_import_job_type(transitioned_job.get("job_type"))
-    created_namespace_memories = []
-    if job_type == "learn":
-        created_namespace_memories = _normalize_created_namespace_memories(
-            transitioned_job.get("created_namespace_memories")
-        )
-
-    rollback_summary = await _rollback_import_created_memories(
-        client=client,
-        created_memories=created_memories,
-        created_namespace_memories=created_namespace_memories,
-        session_id=str(transitioned_job.get("session_id") or "").strip(),
-        job_id=str(transitioned_job.get("job_id") or job_id),
-    )
+    try:
+        if review_snapshot is not None:
+            rollback_summary = await _rollback_review_snapshot(
+                review_snapshot=review_snapshot,
+                reason_text=str(payload.reason or "manual_rollback").strip()
+                or "manual_rollback",
+            )
+        else:
+            client = get_sqlite_client()
+            created_namespace_memories = []
+            if job_type == "learn":
+                created_namespace_memories = _normalize_created_namespace_memories(
+                    transitioned_job.get("created_namespace_memories")
+                )
+            rollback_summary = await _rollback_import_created_memories(
+                client=client,
+                created_memories=created_memories,
+                created_namespace_memories=created_namespace_memories,
+                session_id=str(transitioned_job.get("session_id") or "").strip(),
+                job_id=str(transitioned_job.get("job_id") or job_id),
+            )
+    except HTTPException:
+        transitioned_job["status"] = "rollback_failed"
+        transitioned_job["rollback"] = {
+            "mode": "review_snapshot" if review_snapshot is not None else "job_targets",
+            "error_count": 1,
+            "errors": ["rollback_failed"],
+            "completed_at": _utc_iso_now(),
+        }
+        await update_job(job_id, transitioned_job)
+        raise
     has_errors = bool(rollback_summary.get("error_count"))
     final_status = "rollback_failed" if has_errors else "rolled_back"
     transitioned_job["status"] = final_status
@@ -3257,17 +3446,27 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
     execute = bool(payload.execute)
     explicit_learn_service = await _resolve_explicit_learn_service()
 
-    result = await explicit_learn_service(
-        content=str(payload.content or ""),
-        source=normalized_source,
-        reason=normalized_reason,
-        session_id=normalized_session_id,
-        actor_id=normalized_actor_id,
-        domain=domain,
-        path_prefix=normalized_path_prefix,
-        execute=execute,
-        client=_LazySQLiteClientProxy(get_sqlite_client),
-    )
+    async def _run_explicit_learn() -> Dict[str, Any]:
+        return await explicit_learn_service(
+            content=str(payload.content or ""),
+            source=normalized_source,
+            reason=normalized_reason,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            domain=domain,
+            path_prefix=normalized_path_prefix,
+            execute=execute,
+            client=_LazySQLiteClientProxy(get_sqlite_client),
+        )
+
+    if execute:
+        result = await _run_write_lane(
+            "maintenance.learn.trigger.execute",
+            _run_explicit_learn,
+            session_id=normalized_session_id,
+        )
+    else:
+        result = await _run_explicit_learn()
 
     created_memories: List[Dict[str, Any]] = []
     created_memory = result.get("created_memory")
@@ -3391,6 +3590,26 @@ async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
                 "message": str(exc),
             },
         ) from exc
+    except RuntimeError as exc:
+        if str(exc or "").strip() != "write_lane_timeout":
+            raise
+        result = {
+            "ok": False,
+            "mode": normalized_mode.lower(),
+            "source": normalized_source,
+            "reason_text": normalized_reason,
+            "session_id": normalized_session_id,
+            "prepared": False,
+            "executed": False,
+            "reason": "write_lane_timeout",
+            "result": {
+                "ok": False,
+                "accepted": False,
+                "executed": False,
+                "reason": "write_lane_timeout",
+                "session_id": normalized_session_id,
+            },
+        }
 
     accepted, batch_id, job_payload, response_payload = _build_reflection_learn_job_response(
         result=result,

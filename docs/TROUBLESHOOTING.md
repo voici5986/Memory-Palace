@@ -607,7 +607,7 @@ cd backend
    index_status()
    ```
 
-   > 如果看到的是向量维度相关的降级原因，先重建**当前查询作用域**对应的数据就够了。现在这类检查已经会跟着 `domain` / `path_prefix` / `scope_hint` 等查询范围走，不应该再被别的无关 domain 误触发。
+   > 如果看到的是向量维度相关的降级原因，先重建**当前查询作用域**对应的数据就够了。现在这类检查已经会跟着 `domain` / `path_prefix` / `scope_hint` 等查询范围走，不应该再被别的无关 domain 误触发。要补一句兼容边界：如果你传的是 `scope_hint=fast` 或 `scope_hint=deep`，当前版本会先把它当成快/深档位快捷值处理，不是 path scope。
 
 4. **查看观测摘要**（通过 HTTP API）：
 
@@ -620,7 +620,7 @@ cd backend
 
 6. **观测页里看到新增字段不要慌**：
 
-   - `scope_hint`：只是告诉检索“优先看哪个范围”
+   - `scope_hint`：通常只是告诉检索“优先看哪个范围”；只有兼容旧调用方时，`fast/deep` 会先被当成快/深档位快捷值
    - `sm-lite`：是当前版本新增的一组轻量运行时状态，不是报错
    - `Runtime Snapshot`：是帮助你排障的摘要，不是必须每项都有值
 

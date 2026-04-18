@@ -16,11 +16,143 @@ import {
 
 import GlassCard from './GlassCard';
 import {
+  clearStoredMaintenanceAuth,
   extractApiError,
   getSetupStatus,
   saveSetupConfig,
   saveStoredMaintenanceAuth,
 } from '../lib/api';
+
+/**
+ * @typedef {'header' | 'bearer'} AuthMode
+ * @typedef {'none' | 'hash' | 'api' | 'openai' | 'router'} EmbeddingBackend
+ *
+ * @typedef {{
+ *   source?: string,
+ *   key?: string,
+ *   mode?: string,
+ * }} SetupAuthState
+ *
+ * @typedef {{
+ *   dashboard_api_key: string,
+ *   allow_insecure_local: boolean,
+ *   embedding_backend: EmbeddingBackend,
+ *   embedding_api_base: string,
+ *   embedding_api_key: string,
+ *   embedding_model: string,
+ *   embedding_dim: string,
+ *   reranker_enabled: boolean,
+ *   reranker_api_base: string,
+ *   reranker_api_key: string,
+ *   reranker_model: string,
+ *   write_guard_llm_enabled: boolean,
+ *   write_guard_llm_api_base: string,
+ *   write_guard_llm_api_key: string,
+ *   write_guard_llm_model: string,
+ *   intent_llm_enabled: boolean,
+ *   intent_llm_api_base: string,
+ *   intent_llm_api_key: string,
+ *   intent_llm_model: string,
+ *   router_api_base: string,
+ *   router_api_key: string,
+ *   router_chat_model: string,
+ *   router_embedding_model: string,
+ *   router_reranker_model: string,
+ * }} SetupFormState
+ *
+ * @typedef {{
+ *   allow_insecure_local?: boolean,
+ *   dashboard_auth_configured?: boolean,
+   *   embedding_backend?: EmbeddingBackend,
+ *   embedding_configured?: boolean,
+ *   embedding_dim?: number | null,
+ *   reranker_enabled?: boolean,
+ *   reranker_configured?: boolean,
+ *   write_guard_enabled?: boolean,
+ *   write_guard_configured?: boolean,
+ *   intent_llm_enabled?: boolean,
+ *   intent_llm_configured?: boolean,
+ * }} SetupSummary
+ *
+ * @typedef {{
+ *   summary?: SetupSummary,
+ *   apply_supported?: boolean,
+ *   write_supported?: boolean,
+ *   apply_reason?: string,
+ *   write_reason?: string,
+ *   restart_targets?: string[],
+ *   target_label?: string,
+ * }} SetupStatus
+ *
+ * @typedef {{
+ *   kind: 'success',
+ *   payload: SetupStatus,
+ * } | {
+ *   kind: 'error',
+ *   error: unknown,
+ * }} InitialStatusProbe
+ *
+ * @typedef {{
+ *   error: unknown,
+ *   fallbackKey: string,
+ * }} SetupErrorState
+ *
+ * @typedef {{
+ *   kind: 'browser' | 'server',
+ *   targetLabel?: string,
+ *   restart_targets?: string[],
+ * }} SetupSaveSuccess
+ *
+ * @typedef {{
+ *   missingFields: string[],
+ *   placeholderFields: string[],
+ *   isValid: boolean,
+ * }} PersistValidationResult
+ *
+ * @typedef {{
+ *   label: string,
+ *   hint?: string,
+ *   value: string | number,
+ *   onChange: (event: import('react').ChangeEvent<HTMLInputElement>) => void,
+ *   placeholder?: string,
+ *   type?: string,
+ *   min?: number | string,
+ *   step?: number | string,
+ *   inputProps?: Record<string, unknown>,
+ * }} SetupInputProps
+ *
+ * @typedef {{
+ *   label: string,
+ *   hint?: string,
+ *   value: string,
+ *   onChange: (event: import('react').ChangeEvent<HTMLSelectElement>) => void,
+ *   options: Array<{ value: string, label: string }>,
+ * }} SetupSelectProps
+ *
+ * @typedef {{
+ *   label: string,
+ *   hint?: string,
+ *   checked: boolean,
+ *   onChange: (event: import('react').ChangeEvent<HTMLInputElement>) => void,
+ * }} SetupToggleProps
+ *
+ * @typedef {{
+ *   label: string,
+ *   value: unknown,
+ *   configuredText: string,
+ *   missingText: string,
+ * }} SummaryItemProps
+ *
+ * @typedef {{
+ *   open: boolean,
+ *   authState?: SetupAuthState | null,
+ *   initialStatusProbe?: InitialStatusProbe | null,
+ *   onClose?: (() => void) | undefined,
+ *   onAuthUpdated?: ((auth: unknown) => void) | undefined,
+ * }} SetupAssistantModalProps
+ *
+ * @typedef {keyof SetupFormState} SetupFormField
+ */
 
 export const SETUP_ASSISTANT_DISMISSED_STORAGE_KEY = 'memory-palace.setupAssistantDismissed';
 
@@ -41,6 +173,22 @@ const ROUTER_PRESET_DEFAULTS = {
   },
 };
 
+/** @type {Record<'a' | 'b', Pick<SetupFormState, 'embedding_backend' | 'reranker_enabled' | 'write_guard_llm_enabled' | 'intent_llm_enabled'>>} */
+const PROFILE_PRESET_DEFAULTS = {
+  a: {
+    embedding_backend: 'none',
+    reranker_enabled: false,
+    write_guard_llm_enabled: false,
+    intent_llm_enabled: false,
+  },
+  b: {
+    embedding_backend: 'hash',
+    reranker_enabled: false,
+    write_guard_llm_enabled: false,
+    intent_llm_enabled: false,
+  },
+};
+
 const PLACEHOLDER_VALUES = {
   router_api_base: new Set(['https://router.example.com/v1']),
   embedding_model: new Set(['text-embedding-model']),
@@ -52,19 +200,44 @@ const PLACEHOLDER_VALUES = {
   router_chat_model: new Set(['router-chat-model']),
 };
 
+const FOCUSABLE_DIALOG_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+/** @param {unknown} value */
 const normalizeFieldValue = (value) => String(value ?? '').trim();
+/** @param {unknown} value */
 const isPositiveIntegerValue = (value) => /^[1-9]\d*$/.test(normalizeFieldValue(value));
 
+/** @param {SetupSummary} summary */
+const shouldHydrateRetrievalShape = (summary) => (
+  ['none', 'api', 'openai', 'router'].includes(summary.embedding_backend ?? '')
+  || Boolean(summary.reranker_enabled)
+);
+
+/**
+ * @param {string} field
+ * @param {unknown} value
+ */
 const isPlaceholderValue = (field, value) => {
   const normalized = normalizeFieldValue(value);
   if (!normalized) return false;
-  return PLACEHOLDER_VALUES[field]?.has(normalized) ?? false;
+  return /** @type {Record<string, Set<string>>} */ (PLACEHOLDER_VALUES)[field]?.has(normalized) ?? false;
 };
 
+/**
+ * @param {SetupAuthState | null | undefined} authState
+ * @returns {SetupFormState}
+ */
 const defaultFormState = (authState) => ({
-  dashboard_api_key: authState?.source === 'stored' ? authState.key : '',
+  dashboard_api_key: authState?.key ?? '',
   allow_insecure_local: false,
-  embedding_backend: 'hash',
+  embedding_backend: 'none',
   embedding_api_base: '',
   embedding_api_key: '',
   embedding_model: '',
@@ -88,6 +261,10 @@ const defaultFormState = (authState) => ({
   router_reranker_model: '',
 });
 
+/**
+ * @param {SetupFormState} nextForm
+ * @returns {SetupFormState}
+ */
 const clearHiddenRetrievalFields = (nextForm) => {
   const cleaned = { ...nextForm };
 
@@ -138,14 +315,23 @@ const clearHiddenRetrievalFields = (nextForm) => {
   return cleaned;
 };
 
+/**
+ * @param {SetupFormState} form
+ * @returns {PersistValidationResult}
+ */
 const validatePersistableForm = (form) => {
-  const missingFields = [];
-  const placeholderFields = [];
+  const missingFields = /** @type {string[]} */ ([]);
+  const placeholderFields = /** @type {string[]} */ ([]);
+  /**
+   * @param {string[]} bucket
+   * @param {string} field
+   */
   const pushField = (bucket, field) => {
     if (!bucket.includes(field)) {
       bucket.push(field);
     }
   };
+  /** @param {SetupFormField} field */
   const requireTextField = (field) => {
     const value = normalizeFieldValue(form[field]);
     if (!value) {
@@ -196,7 +382,18 @@ const validatePersistableForm = (form) => {
   };
 };
 
-function SetupInput({ label, hint, value, onChange, placeholder, type = 'text', min, step }) {
+/** @param {SetupInputProps} props */
+function SetupInput({
+  label,
+  hint = '',
+  value,
+  onChange,
+  placeholder = '',
+  type = 'text',
+  min,
+  step,
+  inputProps = {},
+}) {
   return (
     <label className="block space-y-2">
       <div>
@@ -216,12 +413,14 @@ function SetupInput({ label, hint, value, onChange, placeholder, type = 'text', 
         min={min}
         step={step}
         className="palace-input"
+        {...inputProps}
       />
     </label>
   );
 }
 
-function SetupSelect({ label, hint, value, onChange, options }) {
+/** @param {SetupSelectProps} props */
+function SetupSelect({ label, hint = '', value, onChange, options }) {
   return (
     <label className="block space-y-2">
       <div>
@@ -243,7 +442,8 @@ function SetupSelect({ label, hint, value, onChange, options }) {
   );
 }
 
-function SetupToggle({ label, hint, checked, onChange }) {
+/** @param {SetupToggleProps} props */
+function SetupToggle({ label, hint = '', checked, onChange }) {
   return (
     <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl border border-[color:var(--palace-line)] bg-white/55 px-4 py-3">
       <div className="min-w-0">
@@ -265,6 +465,7 @@ function SetupToggle({ label, hint, checked, onChange }) {
   );
 }
 
+/** @param {SummaryItemProps} props */
 function SummaryItem({ label, value, configuredText, missingText }) {
   const active = Boolean(value);
   return (
@@ -283,44 +484,57 @@ function SummaryItem({ label, value, configuredText, missingText }) {
   );
 }
 
+/** @param {SetupAssistantModalProps} props */
 export default function SetupAssistantModal({
   open,
-  authState,
-  initialStatusProbe,
+  authState = null,
+  initialStatusProbe = null,
   onClose,
   onAuthUpdated,
 }) {
   const { t, i18n } = useTranslation();
+  const dialogRef = React.useRef(/** @type {HTMLDivElement | null} */ (null));
   const [form, setForm] = React.useState(() => defaultFormState(authState));
   const [statusLoading, setStatusLoading] = React.useState(false);
-  const [setupStatus, setSetupStatus] = React.useState(null);
-  const [statusErrorState, setStatusErrorState] = React.useState(null);
-  const [saveErrorState, setSaveErrorState] = React.useState(null);
-  const [saveSuccess, setSaveSuccess] = React.useState(null);
-  const [savingMode, setSavingMode] = React.useState(null);
+  const [setupStatus, setSetupStatus] = React.useState(/** @type {SetupStatus | null} */ (null));
+  const [statusErrorState, setStatusErrorState] = React.useState(
+    /** @type {SetupErrorState | null} */ (null)
+  );
+  const [saveErrorState, setSaveErrorState] = React.useState(
+    /** @type {SetupErrorState | null} */ (null)
+  );
+  const [saveSuccess, setSaveSuccess] = React.useState(
+    /** @type {SetupSaveSuccess | null} */ (null)
+  );
+  const [savingMode, setSavingMode] = React.useState(/** @type {'server' | null} */ (null));
   const initializedOpenRef = React.useRef(false);
-  const touchedFieldsRef = React.useRef(new Set());
+  const touchedFieldsRef = React.useRef(new Set(/** @type {string[]} */ ([])));
 
-  const markFieldsTouched = React.useCallback((keys) => {
-    keys.forEach((key) => touchedFieldsRef.current.add(key));
+  const markFieldsTouched = React.useCallback((/** @type {string[]} */ keys) => {
+    keys.forEach((/** @type {string} */ key) => touchedFieldsRef.current.add(key));
   }, []);
 
-  const applySetupStatus = React.useCallback((payload) => {
+  const applySetupStatus = React.useCallback((/** @type {SetupStatus} */ payload) => {
     setSetupStatus(payload);
     setForm((current) => {
       const next = { ...current };
       const summary = payload?.summary ?? {};
+      const hydrateRetrievalShape = shouldHydrateRetrievalShape(summary);
 
       if (!touchedFieldsRef.current.has('allow_insecure_local')) {
         next.allow_insecure_local = summary.allow_insecure_local ?? current.allow_insecure_local;
       }
-      if (!touchedFieldsRef.current.has('embedding_backend')) {
+      if (!touchedFieldsRef.current.has('embedding_backend') && hydrateRetrievalShape) {
         next.embedding_backend = summary.embedding_backend ?? current.embedding_backend;
       }
-      if (!touchedFieldsRef.current.has('embedding_dim') && summary.embedding_dim != null) {
+      if (
+        !touchedFieldsRef.current.has('embedding_dim')
+        && hydrateRetrievalShape
+        && summary.embedding_dim != null
+      ) {
         next.embedding_dim = String(summary.embedding_dim);
       }
-      if (!touchedFieldsRef.current.has('reranker_enabled')) {
+      if (!touchedFieldsRef.current.has('reranker_enabled') && hydrateRetrievalShape) {
         next.reranker_enabled = summary.reranker_enabled ?? current.reranker_enabled;
       }
       if (!touchedFieldsRef.current.has('write_guard_llm_enabled')) {
@@ -395,11 +609,76 @@ export default function SetupAssistantModal({
     };
   }, [applySetupStatus, authState, initialStatusProbe, open]);
 
-  const updateField = React.useCallback((key, value) => {
+  React.useEffect(() => {
+    if (!open) return undefined;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+
+    const preferredFocus =
+      dialog.querySelector('[data-autofocus="true"]')
+      || dialog.querySelector(FOCUSABLE_DIALOG_SELECTOR);
+    if (preferredFocus instanceof HTMLElement) {
+      preferredFocus.focus();
+    } else {
+      dialog.focus();
+    }
+
+    return undefined;
+  }, [open]);
+
+  const handleDialogKeyDown = React.useCallback((event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose?.();
+      return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusableElements = Array.from(
+      dialog.querySelectorAll(FOCUSABLE_DIALOG_SELECTOR)
+    ).filter((element) => element instanceof HTMLElement);
+
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement;
+
+    if (event.shiftKey) {
+      if (activeElement === firstElement || activeElement === dialog) {
+        event.preventDefault();
+        lastElement.focus();
+      }
+      return;
+    }
+
+    if (activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  }, [onClose]);
+
+  const updateField = React.useCallback((
+    /** @type {SetupFormField} */ key,
+    /** @type {SetupFormState[SetupFormField]} */ value
+  ) => {
     markFieldsTouched([key]);
     setForm((current) => {
       const next = { ...current, [key]: value };
-      if (key === 'embedding_backend' && REMOTE_EMBEDDING_BACKENDS.has(value)) {
+      if (
+        key === 'embedding_backend'
+        && typeof value === 'string'
+        && REMOTE_EMBEDDING_BACKENDS.has(value)
+      ) {
         const currentDim = normalizeFieldValue(next.embedding_dim);
         if (!currentDim || currentDim === '64') {
           next.embedding_dim = '1024';
@@ -432,8 +711,8 @@ export default function SetupAssistantModal({
     });
   }, [saveSuccess, t]);
 
-  const applyPreset = React.useCallback((preset) => {
-    if (preset === 'b') {
+  const applyPreset = React.useCallback((/** @type {'a' | 'b' | 'c' | 'd'} */ preset) => {
+    if (preset === 'a' || preset === 'b') {
       markFieldsTouched([
         'embedding_backend',
         'reranker_enabled',
@@ -451,13 +730,16 @@ export default function SetupAssistantModal({
       ]);
     }
     setForm((current) => {
+      if (preset === 'a') {
+        return clearHiddenRetrievalFields({
+          ...current,
+          ...PROFILE_PRESET_DEFAULTS.a,
+        });
+      }
       if (preset === 'b') {
         return clearHiddenRetrievalFields({
           ...current,
-          embedding_backend: 'hash',
-          reranker_enabled: false,
-          write_guard_llm_enabled: false,
-          intent_llm_enabled: false,
+          ...PROFILE_PRESET_DEFAULTS.b,
         });
       }
       if (preset === 'c') {
@@ -503,6 +785,8 @@ export default function SetupAssistantModal({
       : false;
 
   const handleSaveBrowserOnly = React.useCallback(() => {
+    setSaveErrorState(null);
+    setSaveSuccess(null);
     const saved = saveStoredMaintenanceAuth(form.dashboard_api_key, authState?.mode ?? 'header');
     if (saved === false) {
       setSaveErrorState({
@@ -523,8 +807,7 @@ export default function SetupAssistantModal({
     setSaveSuccess({
       kind: 'browser',
     });
-    onClose();
-  }, [authState?.mode, form.dashboard_api_key, onAuthUpdated, onClose]);
+  }, [authState?.mode, form.dashboard_api_key, onAuthUpdated]);
 
   const handlePersistConfig = React.useCallback(async () => {
     setSavingMode('server');
@@ -538,18 +821,27 @@ export default function SetupAssistantModal({
         });
         return;
       }
+      const normalizedDashboardApiKey = normalizeFieldValue(form.dashboard_api_key);
       const payload = {
         ...form,
+        dashboard_api_key: normalizedDashboardApiKey,
         embedding_dim: normalizeFieldValue(form.embedding_dim)
           ? Number.parseInt(normalizeFieldValue(form.embedding_dim), 10)
           : null,
       };
       const response = await saveSetupConfig(payload);
       let authSaveFailed = false;
-      if (String(form.dashboard_api_key || '').trim()) {
-        const saved = saveStoredMaintenanceAuth(form.dashboard_api_key, authState?.mode ?? 'header');
+      if (normalizedDashboardApiKey) {
+        const saved = saveStoredMaintenanceAuth(normalizedDashboardApiKey, authState?.mode ?? 'header');
         if (saved) {
           onAuthUpdated?.(saved);
+        } else {
+          authSaveFailed = true;
+        }
+      } else {
+        const cleared = clearStoredMaintenanceAuth();
+        if (cleared) {
+          onAuthUpdated?.(null);
         } else {
           authSaveFailed = true;
         }
@@ -620,6 +912,9 @@ export default function SetupAssistantModal({
             role="dialog"
             aria-modal="true"
             aria-labelledby="setup-assistant-title"
+            ref={dialogRef}
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
             initial={{ opacity: 0, y: 18, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -690,6 +985,7 @@ export default function SetupAssistantModal({
                       onChange={(event) => updateField('dashboard_api_key', event.target.value)}
                       placeholder={t('setup.dashboard.apiKeyPlaceholder')}
                       type="password"
+                      inputProps={{ 'data-autofocus': 'true' }}
                     />
                     <SetupToggle
                       label={t('setup.dashboard.insecureLocalLabel')}
@@ -720,7 +1016,7 @@ export default function SetupAssistantModal({
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    {['b', 'c', 'd'].map((preset) => (
+                    {/** @type {Array<'a' | 'b' | 'c' | 'd'>} */ (['a', 'b', 'c', 'd']).map((preset) => (
                       <button
                         key={preset}
                         type="button"

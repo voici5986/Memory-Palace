@@ -175,7 +175,7 @@ The following are the most commonly used configuration items in `.env` (for more
 >
 > For repo-local `stdio` / `python-wrapper`, `RETRIEVAL_REMOTE_TIMEOUT_SEC` is now also reused from the current repository `.env`; if you leave it unset, the repo-local default remains `8` seconds.
 >
-> The current Setup Assistant follows the same contract now: `Profile B/C/D` preset switches and related retrieval toggles clear hidden stale fields before save, the assistant supports the `openai` embedding backend, and switching from local hash to a remote embedding backend keeps `RETRIEVAL_EMBEDDING_DIM` aligned instead of leaving the old `64` behind. `Profile C` is the local/private router preset, so its `http://127.0.0.1:8001/v1` base is treated as a real local endpoint rather than a placeholder; `Profile D` keeps the remote template base and still expects you to replace it. `Profile C/D` also no longer make the local `.env` save button look ready until the required remote fields are real values. On direct `api` / `openai` embedding paths, that now also means a real positive-integer `embedding_dim`.
+> The current Setup Assistant follows the same contract now: `Profile B/C/D` preset switches and related retrieval toggles clear hidden stale fields before save, the assistant supports the `openai` embedding backend, and switching from local hash to a remote embedding backend keeps `RETRIEVAL_EMBEDDING_DIM` aligned instead of leaving the old `64` behind. `Profile C` is the local/private router preset, so its `http://127.0.0.1:8001/v1` base is treated as a real local endpoint rather than a placeholder; `Profile D` keeps the remote template base and still expects you to replace it. `Profile C/D` also no longer make the local `.env` save button look ready until the required remote fields are real values. On direct `api` / `openai` embedding paths, that now also means a real positive-integer `embedding_dim`. `Profile A` is now also shown explicitly in the assistant, and it still maps to the default `keyword + none` baseline.
 >
 > More advanced options (such as `INTENT_LLM_*`, `RETRIEVAL_MMR_*`, `RETRIEVAL_SQLITE_VEC_*`, `CORS_ALLOW_*`, runtime observability/sleep consolidation toggles) are documented in `.env.example` and default to conservative values, not affecting the minimal startup path.
 >
@@ -428,13 +428,14 @@ Default access addresses:
 | Backend API | `http://localhost:18000` |
 | SSE | `http://localhost:3000/sse` |
 | Health Check | `http://localhost:18000/health` |
-| API Docs (Swagger) | `http://localhost:18000/docs` |
 
 > **Port Mapping Explanation** (from `docker-compose.yml`):
 >
 > - The frontend container internally runs on port `8080`, mapped externally to `3000` (can be overridden by the `MEMORY_PALACE_FRONTEND_PORT` environment variable).
 > - The backend container internally runs on port `8000`, mapped externally to `18000` (can be overridden by the `MEMORY_PALACE_BACKEND_PORT` environment variable).
 > - Docker by default persists the database volume (`/app/data`) and review snapshot volume (`/app/snapshots`).
+>
+> Swagger `/docs` is no longer exposed by default; direct access will usually return `404`. For route details, use this guide plus [TECHNICAL_OVERVIEW_EN.md](TECHNICAL_OVERVIEW_EN.md) and [TOOLS_EN.md](TOOLS_EN.md).
 
 Stop services:
 
@@ -516,7 +517,7 @@ If you just cloned the GitHub repository, it is normal if you don't see these tw
 
 > The checks here focus on "getting the system running"; if you need additional local Markdown validation summaries, run the validation scripts mentioned above.
 >
-> Current real verification snapshot for this repository session: backend non-benchmark tests `857 passed, 15 skipped`; frontend `149 passed`; `npm run typecheck` passed; frontend build passed. Live MCP e2e, the repo-local macOS Profile B real-browser path, and Docker one-click Profiles A/B/C/D were **not** rerun in this session and still keep explicit target-environment recheck boundaries.
+> Current real verification snapshot for this repository session: backend non-benchmark tests `868 passed, 15 skipped`; frontend `154 passed`; `npm run typecheck` passed; frontend build passed. This round also rechecked repo-local macOS `Profile B` (`backend + SSE + Vite + browser + i18n persistence`) and Docker one-click Profiles A/B/C/D (`/health`, frontend root, `/sse`, and proxied `/api/browse/node`); `skills+MCP` and `single-MCP` passed, while `skills-only` remains **PARTIAL**. Native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries.
 
 ### 5.1 Health Check
 
@@ -561,9 +562,15 @@ curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path=" \
 > - If you configured `MCP_API_KEY`, please include the `X-MCP-API-Key` as shown above.
 > - If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` and the request comes from the local loopback address (and has no forwarded headers), you can omit the authentication header.
 
-### 5.3 Viewing API Docs
+### 5.3 Checking Route Documentation
 
-Visit `http://127.0.0.1:8000/docs` in your browser to open the Swagger documentation automatically generated by FastAPI, where you can view all HTTP endpoint parameters and return formats.
+The backend no longer exposes `http://127.0.0.1:8000/docs` by default; direct access will usually return `404`. That is the default security boundary, not a startup failure.
+
+If you need to inspect the interfaces:
+
+- Start with Sections 5 and 6 in this guide
+- Then read the HTTP / MCP overview in [TECHNICAL_OVERVIEW_EN.md](TECHNICAL_OVERVIEW_EN.md)
+- For the most exact current behavior, check the API tests under `backend/tests/`
 
 ---
 

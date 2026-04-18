@@ -618,7 +618,7 @@ If this command can normally output the version number, starting `mcp_server.py`
    index_status()
    ```
 
-   > If the warning is about vector dimensions, rebuilding the data inside the **current query scope** is usually enough. These checks now follow `domain` / `path_prefix` / `scope_hint` and similar query constraints, so unrelated domains should no longer trigger the warning by accident.
+   > If the warning is about vector dimensions, rebuilding the data inside the **current query scope** is usually enough. These checks now follow `domain` / `path_prefix` / `scope_hint` and similar query constraints, so unrelated domains should no longer trigger the warning by accident. One compatibility edge is worth noting: when callers send `scope_hint=fast` or `scope_hint=deep`, the current version consumes that first as a fast/deep tier shortcut instead of a path scope.
 
 4. **View observability summary** (via HTTP API):
 
@@ -631,7 +631,7 @@ If this command can normally output the version number, starting `mcp_server.py`
 
 6. **Don't panic when seeing new fields on the observation page**:
 
-   - `scope_hint`: Just tells the retrieval "which scope to prioritize".
+   - `scope_hint`: Usually just tells the retrieval "which scope to prioritize"; only the legacy `fast/deep` values are treated first as fast/deep tier shortcuts.
    - `sm-lite`: A new set of lightweight runtime states in the current version, not an error.
    - `Runtime Snapshot`: A summary to help you troubleshoot, not every item must have a value.
 

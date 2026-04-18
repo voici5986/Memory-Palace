@@ -54,13 +54,21 @@ const createDeferred = () => {
   return { promise, resolve, reject };
 };
 
+const SETUP_ASSISTANT_DISMISSED_STORAGE_KEY = 'memory-palace.setupAssistantDismissed';
+
+const clearSetupAssistantDismissedState = () => {
+  window.localStorage?.removeItem?.(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+  window.sessionStorage?.removeItem?.(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+};
+
 describe('App routing', () => {
   beforeEach(async () => {
     memoryMountCounter.current = 0;
     window.localStorage?.removeItem?.('memory-palace.dashboardAuth');
     window.sessionStorage?.removeItem?.('memory-palace.dashboardAuth');
     window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
-    window.localStorage?.setItem?.('memory-palace.setupAssistantDismissed', '1');
+    clearSetupAssistantDismissedState();
+    window.sessionStorage?.setItem?.(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
     delete document.documentElement.dataset.browserProfile;
     delete window.__MEMORY_PALACE_RUNTIME__;
     await i18n.changeLanguage('en');
@@ -148,6 +156,26 @@ describe('App routing', () => {
 
     expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toContain('stored-key');
     expect(await screen.findByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
+  });
+
+  it('keeps the setup assistant open and shows browser-only save success feedback', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'stored-key'
+    );
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveBrowserOnly') }));
+
+    expect(
+      await within(dialog).findByText(i18n.t('setup.messages.browserOnlySaved'))
+    ).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();
   });
 
   it('keeps browser-only dashboard auth across remounts until it is cleared', async () => {
@@ -309,10 +337,79 @@ describe('App routing', () => {
     expect(screen.getByRole('button', { name: i18n.t('app.auth.updateApiKey') })).toBeInTheDocument();
   });
 
+  it('persists the current runtime dashboard key when saving local env settings', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+    window.__MEMORY_PALACE_RUNTIME__ = {
+      maintenanceApiKey: 'runtime-key',
+      maintenanceApiKeyMode: 'bearer',
+    };
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.openSetup') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+
+    expect(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder'))
+    ).toHaveValue('runtime-key');
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dashboard_api_key: 'runtime-key',
+      })
+    );
+    expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toContain('runtime-key');
+  });
+
+  it('clears stored browser auth when the dashboard key is emptied before local env save', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+    window.sessionStorage.setItem(
+      'memory-palace.dashboardAuth',
+      JSON.stringify({
+        maintenanceApiKey: 'stored-key',
+        maintenanceApiKeyMode: 'header',
+        preferStoredOverRuntime: true,
+      })
+    );
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.updateApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const apiKeyInput = within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder'));
+
+    await user.clear(apiKeyInput);
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dashboard_api_key: '',
+      })
+    );
+    expect(window.sessionStorage.getItem('memory-palace.dashboardAuth')).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') })).toBeInTheDocument();
+    });
+  });
+
   it('disables local .env save when setup status is authenticated-but-not-loopback', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/memory');
-    setupApi.getSetupStatus.mockResolvedValueOnce({
+    setupApi.getSetupStatus.mockResolvedValue({
       ok: true,
       apply_supported: true,
       apply_reason: 'local_env_file',
@@ -341,9 +438,9 @@ describe('App routing', () => {
     const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
     const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
 
-    expect(saveButton).toBeDisabled();
+    await waitFor(() => expect(saveButton).toBeDisabled());
     expect(
-      within(dialog).getByText(i18n.t('setup.reasons.local_loopback_required_for_write'))
+      await within(dialog).findByText(i18n.t('setup.reasons.local_loopback_required_for_write'))
     ).toBeInTheDocument();
   });
 
@@ -435,7 +532,7 @@ describe('App routing', () => {
   });
 
   it('auto-opens setup assistant on first load when no auth is configured', async () => {
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -443,8 +540,23 @@ describe('App routing', () => {
     expect(await screen.findByRole('dialog', { name: i18n.t('setup.title') })).toBeInTheDocument();
   });
 
+  it('migrates legacy setup assistant dismissal into sessionStorage', async () => {
+    window.localStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
+    window.sessionStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    expect(await screen.findByText('memory-page')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: i18n.t('setup.title') })).not.toBeInTheDocument();
+    });
+    expect(window.sessionStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY)).toBe('1');
+    expect(window.localStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY)).toBeNull();
+  });
+
   it('does not auto-open setup assistant when runtime auth is already present', async () => {
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
     window.__MEMORY_PALACE_RUNTIME__ = {
       maintenanceApiKey: 'runtime-key',
@@ -460,9 +572,9 @@ describe('App routing', () => {
   });
 
   it('does not auto-open setup assistant when proxy-held auth is already effective', async () => {
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
-    setupApi.getSetupStatus.mockResolvedValueOnce({
+    setupApi.getSetupStatus.mockResolvedValue({
       ok: true,
       apply_supported: true,
       apply_reason: 'local_env_file',
@@ -495,7 +607,7 @@ describe('App routing', () => {
 
   it('allows switching language from inside the setup assistant on first load', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -509,6 +621,9 @@ describe('App routing', () => {
     const translatedDialog = screen.getByRole('dialog', { name: '配置 Memory Palace' });
     expect(within(translatedDialog).getByText('首启配置')).toBeInTheDocument();
     expect(
+      within(translatedDialog).getByRole('button', { name: '档位 A · 纯关键词' })
+    ).toBeInTheDocument();
+    expect(
       within(translatedDialog).getByRole('button', { name: '档位 B · 仅 hash' })
     ).toBeInTheDocument();
     expect(
@@ -518,7 +633,7 @@ describe('App routing', () => {
 
   it('keeps typed setup values when switching language inside the setup assistant', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -533,9 +648,28 @@ describe('App routing', () => {
     expect(within(translatedDialog).getByDisplayValue('typed-key-123')).toBeInTheDocument();
   });
 
+  it('starts the setup assistant on the documented Profile A baseline instead of an unnamed hash state', async () => {
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+
+    expect(
+      within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.a') })
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox')).toHaveValue('none');
+    expect(
+      within(dialog).getByRole('checkbox', {
+        name: new RegExp(`^${i18n.t('setup.retrieval.rerankerEnabledLabel')}`),
+      })
+    ).not.toBeChecked();
+  });
+
   it('relocalizes setup assistant status errors when switching language', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
     setupApi.getSetupStatus.mockRejectedValueOnce({
       message: 'Request failed with status code 500',
@@ -552,9 +686,58 @@ describe('App routing', () => {
     expect(await within(translatedDialog).findByText('请求失败（状态码 500）')).toBeInTheDocument();
   });
 
+  it('focuses the dashboard API key input when the setup assistant opens', async () => {
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const apiKeyInput = within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder'));
+
+    await waitFor(() => {
+      expect(apiKeyInput).toHaveFocus();
+    });
+  });
+
+  it('closes the setup assistant when Escape is pressed inside the dialog', async () => {
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const apiKeyInput = within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder'));
+
+    fireEvent.keyDown(apiKeyInput, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: i18n.t('setup.title') })).not.toBeInTheDocument();
+    });
+  });
+
+  it('traps keyboard tab navigation inside the setup assistant', async () => {
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const firstFocusable = within(dialog).getByTestId('setup-language-toggle');
+    const closeButtons = within(dialog).getAllByRole('button', { name: i18n.t('setup.actions.close') });
+    const lastFocusable = closeButtons[closeButtons.length - 1];
+
+    firstFocusable.focus();
+    fireEvent.keyDown(firstFocusable, { key: 'Tab', shiftKey: true });
+    expect(lastFocusable).toHaveFocus();
+
+    fireEvent.keyDown(lastFocusable, { key: 'Tab' });
+    expect(firstFocusable).toHaveFocus();
+  });
+
   it('maps setup profile presets to the documented B/C/D retrieval shapes', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -592,7 +775,7 @@ describe('App routing', () => {
 
   it('blocks saving preset C until required remote retrieval fields are real values', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -617,7 +800,7 @@ describe('App routing', () => {
 
   it('requires an embedding dimension before api backend config can be saved', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -647,7 +830,7 @@ describe('App routing', () => {
     ['openai', '1.5'],
   ])('rejects invalid embedding dimensions for %s backends: %s', async (backend, invalidDim) => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -687,7 +870,7 @@ describe('App routing', () => {
 
   it('supports the openai embedding backend and sends a provider-specific embedding dimension', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
     setupApi.saveSetupConfig.mockResolvedValueOnce({
       ok: true,
@@ -734,7 +917,7 @@ describe('App routing', () => {
     const setupStatusDeferred = createDeferred();
     window.history.pushState({}, '', '/memory');
     setupApi.getSetupStatus.mockReset();
-    setupApi.getSetupStatus.mockReturnValueOnce(setupStatusDeferred.promise);
+    setupApi.getSetupStatus.mockReturnValue(setupStatusDeferred.promise);
     setupApi.saveSetupConfig.mockResolvedValueOnce({
       ok: true,
       target_label: '.env',
@@ -814,7 +997,7 @@ describe('App routing', () => {
 
   it('allows the real local router endpoint but still blocks example router model ids', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
 
     render(<App />);
@@ -852,7 +1035,7 @@ describe('App routing', () => {
 
   it('clears hidden router fallback fields when switching back to preset B before saving', async () => {
     const user = userEvent.setup();
-    window.localStorage.removeItem('memory-palace.setupAssistantDismissed');
+    clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
     setupApi.saveSetupConfig.mockResolvedValueOnce({
       ok: true,

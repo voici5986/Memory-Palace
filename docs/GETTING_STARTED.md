@@ -166,7 +166,7 @@ bash scripts/apply_profile.sh macos b
 >
 > 如果你已经准备好模型服务，并且明确要更高质量的深检索，再考虑升级到 `Profile C/D`：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
-> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。对 `Profile C/D` 来说，真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为只点了预设就把表单伪装成已经可保存。`Profile C` 预填的是本地 router 调试地址 `http://127.0.0.1:8001/v1`，它本身不是占位符；`Profile D` 预填的是远端模板地址 `https://router.example.com/v1`，保存前必须换成真实值。对直连 `api` / `openai` embedding 路径来说，本地 `.env` 保存前也必须填一个真实的正整数 `embedding_dim`。
+> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。对 `Profile C/D` 来说，真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为只点了预设就把表单伪装成已经可保存。`Profile C` 预填的是本地 router 调试地址 `http://127.0.0.1:8001/v1`，它本身不是占位符；`Profile D` 预填的是远端模板地址 `https://router.example.com/v1`，保存前必须换成真实值。对直连 `api` / `openai` embedding 路径来说，本地 `.env` 保存前也必须填一个真实的正整数 `embedding_dim`。`Profile A` 现在也会在向导里直接显示出来，它对应的仍然是默认 `keyword + none` 基线。
 >
 > 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
@@ -436,13 +436,14 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 | Backend API | `http://localhost:18000` |
 | SSE | `http://localhost:3000/sse` |
 | Health Check | `http://localhost:18000/health` |
-| API 文档 (Swagger) | `http://localhost:18000/docs` |
 
 > **端口映射说明**（来自 `docker-compose.yml`）：
 >
 > - 前端容器内部运行在 `8080` 端口，对外映射到 `3000`（可通过 `MEMORY_PALACE_FRONTEND_PORT` 环境变量覆盖）
 > - 后端容器内部运行在 `8000` 端口，对外映射到 `18000`（可通过 `MEMORY_PALACE_BACKEND_PORT` 环境变量覆盖）
 > - Docker 默认同时持久化数据库卷（`/app/data`）和 review snapshot 卷（`/app/snapshots`）
+>
+> 当前默认不会暴露 Swagger `/docs`；直接访问一般会得到 `404`。接口说明优先看本文、[TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) 和 [TOOLS.md](TOOLS.md)。
 
 停止服务：
 
@@ -524,7 +525,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend 非 benchmark 测试 `857 passed, 15 skipped`；frontend `149 passed`；`npm run typecheck` 通过；前端 build 通过。live MCP e2e、repo-local macOS Profile B 的真实浏览器链路、Docker one-click 的 A/B/C/D 这轮都没有重跑，仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend 非 benchmark 测试 `868 passed, 15 skipped`；frontend `154 passed`；`npm run typecheck` 通过；前端 build 通过。本轮也实际复核了 repo-local macOS `Profile B`（`backend + SSE + Vite + browser + i18n persistence`）和 Docker one-click 的 A/B/C/D（`/health`、首页、`/sse` 和代理 `/api/browse/node`）；`skills+MCP` 与 `single-MCP` 通过，`skills-only` 仍是 **PARTIAL**。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
@@ -571,9 +572,15 @@ curl -fsS "http://127.0.0.1:8000/browse/node?domain=core&path=" \
 >
 > 当前 Dashboard 里通过 `/browse` 成功写入的新内容，后续也已经能直接喂给 reflection workflow。说人话就是：你在 Dashboard 里新建或改完内容后，再走 `/maintenance/learn/reflection`，不应该再因为“这次写入来自 Dashboard”卡在 `session_summary_empty`。
 
-### 5.3 查看 API 文档
+### 5.3 查看接口说明
 
-浏览器访问 `http://127.0.0.1:8000/docs`，可打开 FastAPI 自动生成的 Swagger 文档，查看所有 HTTP 端点的参数和返回格式。
+当前后端默认不会公开 `http://127.0.0.1:8000/docs`；直接访问一般会返回 `404`。这是默认安全边界，不是启动失败。
+
+如果你要核对接口：
+
+- 先看本文第 5 节和第 6 节
+- 再看 [TECHNICAL_OVERVIEW.md](TECHNICAL_OVERVIEW.md) 里的 HTTP / MCP 总览
+- 要看最精确的当前行为，直接看 `backend/tests/` 里的接口测试
 
 ---
 

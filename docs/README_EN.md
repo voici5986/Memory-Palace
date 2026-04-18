@@ -12,7 +12,9 @@
 >
 > Also, A/B/C/D are better understood as different configuration profiles, not a seamless hot-switch button. Once you change embedding backend / model / dimension, be ready to re-check whether the existing index still matches; when the runtime detects a dimension mismatch, it asks for reindex instead of pretending the profile switch already succeeded.
 >
-> The frontend currently defaults to English; the language button in the upper-right corner lets you switch between English and Chinese with one click, and the browser will remember your choice.
+> The frontend currently defaults to English; the language button in the upper-right corner lets you switch between English and Chinese with one click, and the browser will remember your choice. If a stored language already exists, the current frontend now applies that choice to `document.lang` and the page title before React mounts.
+
+> Current docs in this English set reflect the 2026-04-18 verified behavior for Review rollback safety, fail-closed search revalidation, side-effect-free setup status probing, and the latest Dashboard language/setup interaction details.
 
 ![System Architecture Diagram](images/系统架构图.png)
 
@@ -60,3 +62,5 @@
 | Document | Description |
 |---|---|
 | [EVALUATION_EN.md](EVALUATION_EN.md) | Public benchmark methodology, summary of key A/B/C/D metrics, and reproduction commands |
+
+> Verification note (2026-04-18): backend non-benchmark reruns were `868 passed / 15 skipped`; frontend reruns were `154 passed`; frontend `typecheck` and build both passed. This same session also rechecked repo-local macOS `Profile B` (`backend + SSE + Vite + browser + i18n persistence`) and Docker Profiles A/B/C/D (`/health`, frontend root, `/sse`, proxied `/api/browse/node`). `skills+MCP` and `single-MCP` passed in this round; `skills-only` is still partial. Native Windows and native Linux host runtime paths were not rerun here.

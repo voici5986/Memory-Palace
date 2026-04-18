@@ -346,11 +346,14 @@ search_memory(
 | `results` | 搜索结果列表；当前返回顺序会和对外暴露的 `results[].score` 保持一致 |
 | `results[].score` | 当前对外可见的排序分数；`results` 默认按这个字段降序返回 |
 | `degrade_reasons` | 降级原因（如有） |
+| `session_first_metrics` | session-first 合并与路径复核统计；例如 `stale_result_dropped`、`session_queue_refreshed`、`revalidate_lookup_failed` |
 
 **实用说明：**
 
 - 默认 `verbose=true`，会带上 `query_preprocess`、`intent_profile`、`session_first_metrics`、`backend_metadata` 这类调试信息
 - 如果你只关心结果、分数和降级原因，可以传 `verbose=false`，这样返回更短，更适合 MCP 上下文窗口
+- 如果最终路径状态复核本身查库失败，当前实现会直接丢掉那条结果，并在 `degrade_reasons` 里追加 `path_revalidation_lookup_failed`；不会再把一条“当前状态不确定”的旧结果继续当成正常命中返回
+- `candidate_multiplier` 仍然只是“你希望放大多少”的提示值；真正生效的上限请看 `candidate_limit_applied`，尤其是 `fast` 交互档下，后端现在不会再因为后续意图策略把它悄悄抬高
 
 **使用示例：**
 
@@ -560,6 +563,7 @@ index_status()
 | `embedding_dim_mismatch_requires_reindex` | 当前查询作用域内的向量维度与当前配置不一致，需要重建索引 |
 | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | 当前查询作用域内混入了多种向量维度，或该作用域整体维度与当前配置不一致，需要重建索引 |
 | `reranker_request_failed` | Reranker 请求失败 |
+| `path_revalidation_lookup_failed` | 最终路径状态复核本身失败；相关结果已被直接丢弃，不再 fail-open 暴露旧 URI |
 | `write_guard_exception` | Write Guard 执行异常，写入已被拒绝（fail-closed） |
 | `query_preprocess_failed` | 查询预处理失败 |
 | `index_enqueue_dropped` | 索引任务入队失败 |

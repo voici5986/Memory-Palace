@@ -1,4 +1,5 @@
 import inspect
+import json
 import hmac
 import logging
 import os
@@ -12,12 +13,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from shared_utils import env_bool as _env_bool, utc_iso_now as _utc_iso_now
 
+_PRE_DOTENV_ENV_KEYS_MARKER = "MEMORY_PALACE_PRE_DOTENV_ENV_KEYS"
+
 
 def _load_project_dotenv(project_root: Optional[Path] = None) -> Optional[Path]:
     root = project_root or Path(__file__).resolve().parents[1]
     dotenv_path = root / ".env"
     if not dotenv_path.exists():
         return None
+    os.environ.setdefault(
+        _PRE_DOTENV_ENV_KEYS_MARKER,
+        json.dumps(sorted(os.environ.keys())),
+    )
     load_dotenv(dotenv_path, override=False)
     return dotenv_path
 
@@ -126,6 +133,9 @@ app = FastAPI(
     description="Persistent memory backend for AI agents.",
     version="1.0.1",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 # Configure CORS.
@@ -148,11 +158,13 @@ app.include_router(setup_router)
 @app.get("/")
 async def root():
     """Return the API root payload."""
-    return {
+    payload = {
         "message": "Memory Palace API",
         "version": "1.0.1",
-        "docs": "/docs",
     }
+    if app.docs_url:
+        payload["docs"] = app.docs_url
+    return payload
 
 
 @app.get("/health")

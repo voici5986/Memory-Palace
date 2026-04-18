@@ -37,10 +37,11 @@ def _resolve_report_path() -> Path:
 
 
 def _backend_python_candidates() -> tuple[Path, ...]:
-    return (
-        BACKEND_ROOT / ".venv" / "bin" / "python",
-        BACKEND_ROOT / ".venv" / "Scripts" / "python.exe",
-    )
+    windows_python = BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
+    posix_python = BACKEND_ROOT / ".venv" / "bin" / "python"
+    if os.name == "nt":
+        return (windows_python, posix_python)
+    return (posix_python, windows_python)
 
 
 def _resolve_backend_python() -> Path | None:
@@ -50,9 +51,36 @@ def _resolve_backend_python() -> Path | None:
     return None
 
 
+def _require_backend_python() -> Path:
+    backend_python = _resolve_backend_python()
+    if backend_python is not None:
+        return backend_python
+    windows_python = BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
+    posix_python = BACKEND_ROOT / ".venv" / "bin" / "python"
+    raise SystemExit(
+        "Missing backend virtualenv python: "
+        f"{windows_python} or {posix_python}"
+    )
+
+
+def _is_windows_posix_shell_host() -> bool:
+    if os.name != "nt":
+        return False
+
+    for key in ("MSYSTEM", "CYGWIN", "WSL_DISTRO_NAME", "WSL_INTEROP"):
+        if str(os.getenv(key) or "").strip():
+            return True
+
+    ostype = str(os.getenv("OSTYPE") or "").strip().lower()
+    if any(marker in ostype for marker in ("msys", "cygwin")):
+        return True
+
+    return False
+
+
 def _repo_local_stdio_command() -> tuple[str, list[str]]:
-    if os.name == "nt":
-        return str(_resolve_backend_python() or (sys.executable or "python")), [
+    if os.name == "nt" and not _is_windows_posix_shell_host():
+        return str(_require_backend_python()), [
             str(BACKEND_ROOT / "mcp_wrapper.py")
         ]
     return "bash", [str(PROJECT_ROOT / "scripts" / "run_memory_palace_mcp_stdio.sh")]

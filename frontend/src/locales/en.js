@@ -115,15 +115,16 @@ const en = {
     retrieval: {
       title: 'Retrieval profile',
       description:
-        'Choose a safe starting profile first, then fill only the fields your current local setup really needs. Profile C/D presets follow the documented router + reranker path; if your local router is not ready yet, switch to direct API mode manually for debugging.',
+        'Profile A is the untouched baseline: keyword search with embedding disabled (none). Profile B upgrades to documented hybrid + local hash, and Profile C/D keep the existing router + reranker presets for deeper retrieval once those services are ready.',
       presets: {
+        a: 'Profile A · keyword only',
         b: 'Profile B · hash only',
         c: 'Profile C · router + reranker (local/private)',
         d: 'Profile D · router + reranker (remote)',
       },
       embeddingBackendLabel: 'Embedding backend',
       embeddingBackendHint:
-        'This maps to RETRIEVAL_EMBEDDING_BACKEND. Use api for local direct wiring, router for your final routed deployment, or hash/none for lighter setups.',
+        'This maps to RETRIEVAL_EMBEDDING_BACKEND. Profile A uses none for pure keyword search, Profile B uses hash for the local hybrid baseline, and api/router/openai are for explicit provider wiring.',
       backends: {
         none: 'None',
         hash: 'Hash (local baseline)',

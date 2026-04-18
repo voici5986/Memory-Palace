@@ -115,15 +115,16 @@ const zhCN = {
     retrieval: {
       title: '检索配置',
       description:
-        '先选一个安全起步档位，再只填写当前本地环境真正需要的字段。档位 C/D 预设默认走文档里的 router + reranker 路线；如果你本地 router 还没接好，再手动切到直连 API 模式排障。',
+        '档位 A 是未触碰时的基线：只走关键词检索，embedding 关闭为 none。档位 B 对应文档里的 hybrid + 本地 hash；档位 C/D 继续保留现有的 router + reranker 预设，适合相关服务已经就绪后的深检索场景。',
       presets: {
+        a: '档位 A · 纯关键词',
         b: '档位 B · 仅 hash',
         c: '档位 C · router + reranker（本地/私有）',
         d: '档位 D · router + reranker（远程）',
       },
       embeddingBackendLabel: 'Embedding 后端',
       embeddingBackendHint:
-        '对应 RETRIEVAL_EMBEDDING_BACKEND。本地直连排障优先选 api，最终路由部署再选 router；轻量环境可以用 hash/none。',
+        '对应 RETRIEVAL_EMBEDDING_BACKEND。档位 A 用 none 表示纯关键词检索；档位 B 用 hash 作为本地 hybrid 基线；api/router/openai 则用于显式接入实际 provider。',
       backends: {
         none: '关闭',
         hash: 'Hash（本地基线）',

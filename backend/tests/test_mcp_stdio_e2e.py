@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import pytest
+
 
 def _load_harness():
     repo_root = Path(__file__).resolve().parents[2]
@@ -14,6 +16,13 @@ def _load_harness():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _set_windows_posix_shell_env(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
+    for key in ("MSYSTEM", "CYGWIN", "WSL_DISTRO_NAME", "WSL_INTEROP", "OSTYPE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
 
 
 def test_live_mcp_stdio_e2e_suite_passes() -> None:
@@ -44,6 +53,52 @@ def test_repo_local_stdio_command_uses_python_wrapper_on_windows(
 
     assert command == str(preferred_python)
     assert args == [str(backend_root / "mcp_wrapper.py")]
+
+
+def test_repo_local_stdio_command_fails_closed_without_backend_venv_on_windows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    harness = _load_harness()
+    project_root = tmp_path / "Memory-Palace-no-venv"
+    backend_root = project_root / "backend"
+    backend_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(harness, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(harness, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(harness.os, "name", "nt")
+    monkeypatch.setattr(harness.sys, "executable", r"C:\Python313\python.exe")
+
+    with pytest.raises(SystemExit, match="Missing backend virtualenv python"):
+        harness._repo_local_stdio_command()
+
+
+@pytest.mark.parametrize(
+    ("env", "label"),
+    [
+        ({"MSYSTEM": "MINGW64"}, "git-bash"),
+        ({"CYGWIN": "1"}, "cygwin"),
+        ({"WSL_DISTRO_NAME": "Ubuntu"}, "wsl-distro"),
+        ({"WSL_INTEROP": r"\\wsl$\\Ubuntu\\interop"}, "wsl-interop"),
+        ({"OSTYPE": "msys"}, "msys-ostype"),
+        ({"OSTYPE": "cygwin"}, "cygwin-ostype"),
+    ],
+)
+def test_repo_local_stdio_command_keeps_bash_wrapper_for_windows_posix_shell_hosts(
+    monkeypatch, tmp_path: Path, env: dict[str, str], label: str
+) -> None:
+    harness = _load_harness()
+    project_root = tmp_path / f"Memory-Palace-{label}"
+    backend_root = project_root / "backend"
+
+    monkeypatch.setattr(harness, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(harness, "BACKEND_ROOT", backend_root)
+    monkeypatch.setattr(harness.os, "name", "nt")
+    _set_windows_posix_shell_env(monkeypatch, env)
+
+    command, args = harness._repo_local_stdio_command()
+
+    assert command == "bash"
+    assert args == [str(project_root / "scripts" / "run_memory_palace_mcp_stdio.sh")]
 
 
 def test_resolve_report_path_supports_relative_override_under_temp_root(

@@ -587,6 +587,8 @@ async def _snapshot_path_create(
     memory_id: int,
     operation_type: str = "create",
     target_uri: Optional[str] = None,
+    *,
+    session_id: Optional[str] = None,
 ) -> bool:
     """
     Record that a path was created (for rollback = remove the path).
@@ -595,7 +597,7 @@ async def _snapshot_path_create(
     add_alias (operation_type="create_alias").
     """
     manager = get_snapshot_manager()
-    session_id = get_session_id()
+    resolved_session_id = str(session_id or "").strip() or get_session_id()
 
     domain, path = parse_uri(uri)
 
@@ -610,7 +612,10 @@ async def _snapshot_path_create(
         data["target_uri"] = target_uri
 
     return manager.create_snapshot(
-        session_id=session_id, resource_id=uri, resource_type="path", snapshot_data=data
+        session_id=resolved_session_id,
+        resource_id=uri,
+        resource_type="path",
+        snapshot_data=data,
     )
 
 
@@ -1238,6 +1243,7 @@ async def run_explicit_learn_service(
     path_prefix: str = "corrections",
     execute: bool = False,
     client: Optional[Any] = None,
+    review_session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Internal explicit learn service for H1/H3 rollout.
@@ -1255,6 +1261,7 @@ async def run_explicit_learn_service(
     normalized_actor_id = (str(actor_id).strip() if actor_id is not None else None) or None
     normalized_domain = str(domain or "").strip().lower() or "notes"
     normalized_path_prefix = _normalize_path_prefix(path_prefix)
+    normalized_review_session_id = str(review_session_id or "").strip() or None
 
     payload: Dict[str, Any] = {
         "ok": True,
@@ -1553,6 +1560,50 @@ async def run_explicit_learn_service(
             else "rollback_only_covers_created_memory_ids"
         ),
     }
+    if normalized_review_session_id:
+        try:
+            await _snapshot_path_create(
+                created_memory_payload["uri"],
+                created_memory_payload["id"],
+                operation_type="create",
+                session_id=normalized_review_session_id,
+            )
+        except Exception as snapshot_exc:
+            delete_path_atomically = getattr(learn_client, "delete_path_atomically", None)
+            remove_path = getattr(learn_client, "remove_path", None)
+            permanently_delete_memory = getattr(
+                learn_client, "permanently_delete_memory", None
+            )
+            try:
+                if callable(delete_path_atomically):
+                    await delete_path_atomically(
+                        created_memory_payload["path"],
+                        created_memory_payload["domain"],
+                    )
+                elif callable(remove_path):
+                    await remove_path(
+                        created_memory_payload["path"],
+                        domain=created_memory_payload["domain"],
+                    )
+                if callable(permanently_delete_memory):
+                    await permanently_delete_memory(
+                        created_memory_payload["id"],
+                        require_orphan=True,
+                    )
+            except Exception as rollback_exc:
+                raise RuntimeError(
+                    "snapshot_create_failed_after_write:"
+                    f"{type(snapshot_exc).__name__};rollback_failed:"
+                    f"{type(rollback_exc).__name__}"
+                ) from snapshot_exc
+            raise RuntimeError(
+                f"snapshot_create_failed_after_write:{type(snapshot_exc).__name__}"
+            ) from snapshot_exc
+        payload["review_snapshot"] = {
+            "session_id": normalized_review_session_id,
+            "resource_id": created_memory_payload["uri"],
+            "resource_type": "path",
+        }
     await _record_import_learn_event(
         event_type="learn",
         operation=operation,
@@ -1670,6 +1721,9 @@ async def run_reflection_workflow_service(
             actor_id=actor_id,
             execute=normalized_mode == "execute",
             client=client,
+            review_session_id=(
+                normalized_session_id if normalized_mode == "execute" else None
+            ),
         )
 
         review_id = str(result.get("batch_id") or "").strip()
@@ -1711,8 +1765,17 @@ async def run_reflection_workflow_service(
             "job_id": review_id or None,
             "result": result,
         }
+        if created_memory:
+            payload["created_memory"] = created_memory
         if snapshot_id > 0:
             payload["snapshot_id"] = snapshot_id
+        review_snapshot = (
+            result.get("review_snapshot")
+            if isinstance(result.get("review_snapshot"), dict)
+            else None
+        )
+        if review_snapshot:
+            payload["review_snapshot"] = review_snapshot
         if isinstance(result.get("rollback"), dict):
             payload["rollback"] = result.get("rollback")
         return payload
@@ -1842,6 +1905,7 @@ async def _revalidate_search_results(
     validated: List[Dict[str, Any]] = []
     dropped_missing = 0
     refreshed_session_entries = 0
+    failed_lookups = 0
     path_state_cache: Dict[str, Optional[Dict[str, Any]]] = {}
     get_memory_by_path = getattr(client, "get_memory_by_path", None)
     get_memories_by_paths = getattr(client, "get_memories_by_paths", None)
@@ -1850,6 +1914,7 @@ async def _revalidate_search_results(
         return list(results), {
             "stale_result_dropped": 0,
             "session_queue_refreshed": 0,
+            "revalidate_lookup_failed": 0,
         }
 
     uri_lookup_pairs: Dict[str, Tuple[str, str]] = {}
@@ -1898,7 +1963,7 @@ async def _revalidate_search_results(
                     path_state_cache[uri_value] = await get_memory_by_path(path, domain)
                 except Exception:
                     path_state_cache[uri_value] = None
-                    validated.append(item)
+                    failed_lookups += 1
                     continue
 
         current_memory = path_state_cache.get(uri_value)
@@ -1931,6 +1996,7 @@ async def _revalidate_search_results(
     return validated, {
         "stale_result_dropped": dropped_missing,
         "session_queue_refreshed": refreshed_session_entries,
+        "revalidate_lookup_failed": failed_lookups,
     }
 
 
@@ -2677,19 +2743,26 @@ def _resolve_interaction_tier(
     raw_filters: Optional[Dict[str, Any]],
     *,
     requested_tier: Optional[Any] = None,
-) -> Tuple[str, Optional[Dict[str, Any]]]:
+    requested_scope_hint: Optional[Any] = None,
+) -> Tuple[str, Optional[Dict[str, Any]], Optional[Any]]:
     filters_copy: Optional[Dict[str, Any]] = raw_filters
     raw_value = requested_tier
+    scope_hint_value = requested_scope_hint
     if isinstance(filters_copy, dict):
         filters_copy = dict(filters_copy)
         if raw_value is None and "interaction_tier" in filters_copy:
             raw_value = filters_copy.get("interaction_tier")
         filters_copy.pop("interaction_tier", None)
+    if raw_value is None:
+        scope_hint_tier = str(scope_hint_value or "").strip().lower()
+        if scope_hint_tier in ALLOWED_INTERACTION_TIERS:
+            raw_value = scope_hint_tier
+            scope_hint_value = None
 
     value = str(raw_value or "").strip().lower()
     if value not in ALLOWED_INTERACTION_TIERS:
         value = DEFAULT_INTERACTION_TIER
-    return value, filters_copy
+    return value, filters_copy, scope_hint_value
 
 
 def _should_try_intent_llm(
@@ -3245,6 +3318,7 @@ async def _fetch_and_format_memory(
     uri: str,
     *,
     include_ancestors: bool = False,
+    prefetched_children: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """
     Internal helper to fetch memory data and return formatted string.
@@ -3266,7 +3340,11 @@ async def _fetch_and_format_memory(
     # Get children across ALL paths (aliases) of this memory.
     # Once you reach a memory, the sub-memories you see depend on
     # what the memory IS, not which path you used to get here.
-    children = await client.get_children(memory["id"])
+    children = (
+        [dict(item) for item in prefetched_children]
+        if prefetched_children is not None
+        else await client.get_children(memory["id"])
+    )
     ancestors: List[Dict[str, Any]] = []
     ancestors_lookup_failed = False
     if include_ancestors:
@@ -3381,7 +3459,32 @@ async def _get_memory_for_read(
         return await client.get_memory_by_path(path, domain)
 
 
-def _recent_read_state_token(memory: Dict[str, Any]) -> str:
+def _recent_read_children_token(children: Optional[List[Dict[str, Any]]]) -> str:
+    normalized_children: List[Dict[str, Any]] = []
+    for child in children or []:
+        if not isinstance(child, dict):
+            continue
+        normalized_children.append(
+            {
+                "domain": child.get("domain"),
+                "path": child.get("path"),
+                "priority": child.get("priority"),
+                "disclosure": child.get("disclosure"),
+                "content_snippet": child.get("content_snippet"),
+            }
+        )
+    return hashlib.sha256(
+        json.dumps(normalized_children, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _recent_read_state_token(
+    memory: Dict[str, Any],
+    *,
+    children: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     payload = {
         "id": memory.get("id"),
         "domain": memory.get("domain"),
@@ -3391,6 +3494,7 @@ def _recent_read_state_token(memory: Dict[str, Any]) -> str:
         "disclosure": memory.get("disclosure"),
         "created_at": memory.get("created_at"),
         "content": memory.get("content"),
+        "children_token": _recent_read_children_token(children),
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -3955,11 +4059,18 @@ async def read_memory(
             full_uri = make_uri(domain, path)
             memory = await _get_memory_for_read(client, domain=domain, path=path)
             cacheable_read = not include_ancestors_flag and memory is not None
+            recent_children: Optional[List[Dict[str, Any]]] = None
+            recent_state_token: Optional[str] = None
             if cacheable_read:
+                recent_children = await client.get_children(memory["id"])
+                recent_state_token = _recent_read_state_token(
+                    memory,
+                    children=recent_children,
+                )
                 cached = await runtime_state.recent_reads.get(
                     session_id=get_session_id(),
                     uri=full_uri,
-                    state_token=_recent_read_state_token(memory),
+                    state_token=recent_state_token,
                 )
                 if cached is not None:
                     try:
@@ -3980,12 +4091,13 @@ async def read_memory(
                 client,
                 uri,
                 include_ancestors=include_ancestors_flag,
+                prefetched_children=recent_children,
             )
             if cacheable_read:
                 await runtime_state.recent_reads.remember(
                     session_id=get_session_id(),
                     uri=full_uri,
-                    state_token=_recent_read_state_token(memory),
+                    state_token=recent_state_token or _recent_read_state_token(memory),
                     payload=rendered,
                 )
             try:
@@ -5058,7 +5170,17 @@ async def search_memory(
             )
 
         raw_filters = filters
-        interaction_tier, raw_filters = _resolve_interaction_tier(raw_filters)
+        scope_hint_value: Optional[Any] = scope_hint
+        if isinstance(raw_filters, dict):
+            raw_filters = dict(raw_filters)
+            if "scope_hint" in raw_filters:
+                if scope_hint_value is None:
+                    scope_hint_value = raw_filters.get("scope_hint")
+                raw_filters.pop("scope_hint", None)
+        interaction_tier, raw_filters, scope_hint_value = _resolve_interaction_tier(
+            raw_filters,
+            requested_scope_hint=scope_hint_value,
+        )
         default_candidate_multiplier = (
             FAST_INTERACTION_CANDIDATE_MULTIPLIER
             if interaction_tier == "fast"
@@ -5092,13 +5214,6 @@ async def search_memory(
                 resolved_candidate_multiplier,
                 SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER,
             )
-
-        scope_hint_value: Optional[Any] = scope_hint
-        if isinstance(raw_filters, dict):
-            if "scope_hint" in raw_filters:
-                if scope_hint_value is None:
-                    scope_hint_value = raw_filters.get("scope_hint")
-                raw_filters.pop("scope_hint", None)
 
         normalized_filters = _normalize_search_filters(raw_filters)
         normalized_scope_hint = _normalize_scope_hint(scope_hint_value)
@@ -5201,7 +5316,10 @@ async def search_memory(
             "temporal",
             "causal",
         }:
-            intent_for_search = intent_profile
+            intent_for_search = dict(intent_profile)
+            intent_for_search["max_candidate_multiplier"] = (
+                resolved_candidate_multiplier
+            )
 
         candidate_pool_size = min(
             SEARCH_HARD_MAX_RESULTS,
@@ -5331,6 +5449,8 @@ async def search_memory(
             client=client,
             results=merged_results,
         )
+        if int(revalidation_metrics.get("revalidate_lookup_failed") or 0) > 0:
+            degraded_reasons.append("path_revalidation_lookup_failed")
         ordered_results = _sort_search_results_for_response(revalidated_results)
         session_first_metrics.update(revalidation_metrics)
         final_results = ordered_results[:resolved_max_results]

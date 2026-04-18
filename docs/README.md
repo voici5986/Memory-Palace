@@ -12,7 +12,9 @@
 >
 > 另外，A/B/C/D 更适合理解成不同配置档，不是“无感热切换按钮”。只要你切了 embedding backend / model / dimension，就要准备检查索引是否仍然匹配；当前运行时如果发现维度不一致，会明确要求重建索引，而不是假装切档已经成功。
 >
-> 当前前端默认英文；右上角语言按钮可在英文和中文之间一键切换，浏览器会记住你的选择。
+> 当前前端会在 React 挂载前先按浏览器已保存语言同步首帧 `lang` 和页面标题；右上角语言按钮可在英文和中文之间一键切换，浏览器会记住你的选择。
+>
+> 2026-04-18 这轮公开复核：backend 非 benchmark `868 passed / 15 skipped`，frontend `154 passed`，前端 `typecheck/build` 通过；repo-local `Profile B` 的 backend + SSE + Vite + 浏览器页面 + 中英切换/刷新持久化通过；Docker `A/B/C/D` 的 `health`、首页、`/sse` 和代理 API 通过。`skills+MCP` 与 `single-MCP` 是 PASS；`skills-only` 仍是 PARTIAL（`codex` smoke timeout、`gemini_live` skip、部分 IDE host 还是 partial），不要把它理解成“全绿”。
 
 ![系统架构图](images/系统架构图.png)
 

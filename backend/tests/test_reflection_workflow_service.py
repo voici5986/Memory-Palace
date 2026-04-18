@@ -212,6 +212,70 @@ async def test_reflection_execute_can_be_rolled_back(
 
 
 @pytest.mark.asyncio
+async def test_reflection_execute_exposes_review_snapshot_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_calls: list[dict[str, object]] = []
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "import_learn_tracker",
+        ImportLearnAuditTracker(),
+    )
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker("Session compaction notes:\n- track review rollback metadata"),
+    )
+
+    async def _snapshot_path_create(
+        uri: str,
+        memory_id: int,
+        operation_type: str = "create",
+        target_uri: str | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> bool:
+        snapshot_calls.append(
+            {
+                "uri": uri,
+                "memory_id": memory_id,
+                "operation_type": operation_type,
+                "target_uri": target_uri,
+                "session_id": session_id,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _snapshot_path_create)
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="execute",
+        source="session_summary",
+        reason="track review rollback metadata",
+        session_id="s-reflection-review",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is True
+    assert payload["executed"] is True
+    assert payload["review_snapshot"] == {
+        "session_id": "s-reflection-review",
+        "resource_id": payload["created_memory"]["uri"],
+        "resource_type": "path",
+    }
+    assert snapshot_calls == [
+        {
+            "uri": payload["created_memory"]["uri"],
+            "memory_id": payload["created_memory"]["id"],
+            "operation_type": "create",
+            "target_uri": None,
+            "session_id": "s-reflection-review",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_reflection_execute_routes_write_lane_through_explicit_session_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

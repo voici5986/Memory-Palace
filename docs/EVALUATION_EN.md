@@ -8,10 +8,11 @@ machine-specific raw benchmark logs, one-off gate drafts, periodic re-test
 records, and some metric JSONs are typically for development or local use only.
 
 > Status Note (2026-04): This page keeps the 2026-02 public baseline tables,
-> while also folding the latest 2026-04-17 real A/B/C/D verification into the
-> current public-facing conclusion. For the current default interaction
-> profile, the explicit deep-retrieval profiles, and the new public gate items,
-> start with Sections 3 and 4 on this page.
+> folds the 2026-04-17 real A/B/C/D verification into the current public-facing
+> conclusion, and also records a narrower 2026-04-18 maintenance rerun from
+> this session. For the current default interaction profile, the explicit
+> deep-retrieval profiles, and the newest public-facing re-check notes, start
+> with Sections 3, 4, and 5 on this page.
 
 ---
 
@@ -26,7 +27,8 @@ records, and some metric JSONs are typically for development or local use only.
 | Release Comparison Summary | `docs/changelog/release_summary_vs_old_project_2026-03-06_EN.md` |
 
 > Data Generation Time: `2026-02-19T06:55:30+00:00` (early gate baseline) /
-> `2026-04-17T10:35:51+00:00` (current public verification)
+> `2026-04-17T10:35:51+00:00` (current public verification) /
+> `2026-04-18T06:31:05+00:00` (current-session maintenance rerun)
 
 ---
 
@@ -129,6 +131,9 @@ relevant document, with `200` extra distractor documents,
   to `Profile C` or `Profile D`.
 - `Profile C` and `Profile D` are not default recall tiers. They are deeper
   retrieval tiers that you opt into on purpose.
+- The narrower 2026-04-18 rerun below is useful as a fresh maintenance
+  snapshot, but it does **not** replace the wider 2026-04-17 public baseline
+  above.
 
 After averaging the two datasets, the public summary for this run is:
 
@@ -138,6 +143,36 @@ After averaging the two datasets, the public summary for this run is:
 | B | 0.188 | 0.156 | 0.164 | 0.188 | 48.5 |
 | C | 0.812 | 0.714 | 0.737 | 0.812 | 279.2 |
 | D | 0.875 | 0.776 | 0.799 | 0.875 | 3087.0 |
+
+### 3.2 Current 2026-04-18 rerun (public-facing summary)
+
+This session also reran a narrower current check with:
+
+- `dataset_scope=squad_v2_dev`
+- `sample_size=2`
+- `extra_distractors=20`
+- `candidate_multiplier=8`
+- `max_results=10`
+
+| Profile | Dataset | HR@10 | MRR | NDCG@10 | p95(ms) |
+|---|---|---:|---:|---:|---:|
+| A | SQuAD v2 Dev | 0.000 | 0.000 | 0.000 | 2.264 |
+| B | SQuAD v2 Dev | 1.000 | 0.571 | 0.667 | 6.687 |
+| C | SQuAD v2 Dev | 1.000 | 1.000 | 1.000 | 666.607 |
+| D | SQuAD v2 Dev | 1.000 | 1.000 | 1.000 | 1261.532 |
+
+In plain English:
+
+- `Profile B` still fits the default recommendation when you want the lowest
+  friction day-to-day setup.
+- `Profile C/D` again show the quality-first tier, but they still cost much
+  more latency than `Profile B`.
+- This same session also rechecked Docker Profiles A/B/C/D at the service/API
+  level (`/health`, frontend root, `/sse`, proxied `/api/browse/node`) and a
+  repo-local macOS `Profile B` browser path (`backend + SSE + Vite + i18n
+  persistence`).
+- Native Windows and native Linux host runtime paths were **not** rerun in
+  this round, so this page does not claim a fresh host-runtime pass there.
 
 ## 3.5 Old vs Current Version (Same-Metric Summary)
 
@@ -361,6 +396,19 @@ If you need deeper reproduction, the current repository already includes the
 benchmark helpers and test cases under `backend/tests/benchmark/`; only
 one-off maintenance artifacts and temporary gate scripts are not part of the
 main public docs entry.
+
+If you want to reproduce the narrower 2026-04-18 maintenance rerun used in this
+session, this is the command shape:
+
+```bash
+cd backend
+.venv/bin/python tests/benchmark/run_profile_abcd_real.py \
+  --sample-size 2 \
+  --datasets squad_v2_dev \
+  --extra-distractors 20 \
+  --max-results 10 \
+  --candidate-multiplier 8
+```
 
 ---
 

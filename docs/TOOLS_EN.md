@@ -346,11 +346,14 @@ search_memory(
 | `results` | List of search results; the returned order now matches the exposed `results[].score` field |
 | `results[].score` | The visible ranking score; `results` are returned in descending order of this field by default |
 | `degrade_reasons` | Degradation reasons (if any) |
+| `session_first_metrics` | Session-first merge and path-revalidation counters such as `stale_result_dropped`, `session_queue_refreshed`, and `revalidate_lookup_failed` |
 
 **Practical Note:**
 
 - The default is `verbose=true`, which keeps debug-heavy fields such as `query_preprocess`, `intent_profile`, `session_first_metrics`, and `backend_metadata`
 - If you only care about the final results, scores, and degrade reasons, pass `verbose=false` to keep the response shorter and more MCP-context-friendly
+- If the final path-state revalidation itself hits a lookup error, the current implementation drops that result and appends `path_revalidation_lookup_failed` to `degrade_reasons`; it no longer fail-opens by returning a stale URI as if it were still current
+- `candidate_multiplier` is still only a hint about how far you want the first-round pool to expand; the real applied cap is `candidate_limit_applied`, and the fast interaction tier no longer gets widened again later by backend intent heuristics
 
 **Usage Examples:**
 
@@ -560,6 +563,7 @@ During writing, if a `write_guard_exception` occurs, the system fails-closed, re
 | `embedding_dim_mismatch_requires_reindex` | The vectors inside the current query scope do not match the active embedding dimension; reindex is required |
 | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | The current query scope contains mixed vector dimensions, or that scope's vectors do not match the active config; reindex is required |
 | `reranker_request_failed` | Reranker request failed |
+| `path_revalidation_lookup_failed` | Final path-state revalidation failed; the affected result was dropped instead of being exposed fail-open under a stale URI |
 | `write_guard_exception` | Write Guard execution error; write rejected (fail-closed) |
 | `query_preprocess_failed` | Query preprocessing failed |
 | `index_enqueue_dropped` | Indexing task failed to queue |

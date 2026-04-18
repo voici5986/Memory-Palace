@@ -35,6 +35,23 @@ def test_load_project_dotenv_reads_repo_env_without_overriding_existing_values(
     assert os.getenv("MAIN_KEEP_EXISTING") == "already-set"
 
 
+def test_load_project_dotenv_records_preexisting_env_keys_before_loading_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MAIN_BOOTSTRAP_TEST=from-dotenv\n", encoding="utf-8")
+    marker_name = "MEMORY_PALACE_PRE_DOTENV_ENV_KEYS"
+
+    monkeypatch.delenv(marker_name, raising=False)
+    monkeypatch.setenv("MAIN_KEEP_EXISTING", "already-set")
+
+    main._load_project_dotenv(tmp_path)
+
+    marker_payload = json.loads(os.getenv(marker_name) or "[]")
+    assert "MAIN_KEEP_EXISTING" in marker_payload
+
+
 def test_resolve_cors_uses_restricted_default_origins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CORS_ALLOW_ORIGINS", raising=False)
     monkeypatch.delenv("CORS_ALLOW_CREDENTIALS", raising=False)
@@ -206,6 +223,26 @@ def test_health_endpoint_returns_503_for_detailed_internal_errors(
     assert payload["index"]["reason"] == "internal_error"
     assert payload["index"]["error_type"] == "RuntimeError"
     assert "boom-secret-detail" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_api_docs_and_openapi_are_not_exposed_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _noop_initialize_backend_runtime(*, ensure_runtime_started: bool = True) -> None:
+        _ = ensure_runtime_started
+        return None
+
+    monkeypatch.setattr(main, "initialize_backend_runtime", _noop_initialize_backend_runtime)
+    monkeypatch.setattr(main, "_mount_embedded_sse_apps", lambda _app: None)
+
+    with TestClient(main.app) as client:
+        docs_response = client.get("/docs")
+        openapi_response = client.get("/openapi.json")
+        root_response = client.get("/")
+
+    assert docs_response.status_code == 404
+    assert openapi_response.status_code == 404
+    assert "docs" not in root_response.json()
 
 
 def test_health_endpoint_returns_shallow_payload_without_loopback_or_api_key(
