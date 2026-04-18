@@ -15,6 +15,7 @@ def _sqlite_url(db_path: Path) -> str:
 
 def _clear_embedding_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
+        "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS",
         "RETRIEVAL_EMBEDDING_API_BASE",
         "RETRIEVAL_EMBEDDING_BASE",
         "ROUTER_API_BASE",
@@ -220,6 +221,52 @@ async def test_invalid_link_local_embedding_base_is_ignored_at_runtime(
     assert len(embedding) == client._embedding_dim
     assert "embedding_config_missing" in degrade_reasons
     assert "embedding_fallback_hash" in degrade_reasons
+
+
+@pytest.mark.asyncio
+async def test_private_literal_embedding_base_is_ignored_without_allowlist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.88.1.144:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+    monkeypatch.delenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", raising=False)
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "embedding-private-base-blocked.db"))
+    await client.init_db()
+
+    degrade_reasons: list[str] = []
+    async with client.session() as session:
+        embedding = await client._get_embedding(
+            session,
+            "private embedding base fallback sample",
+            degrade_reasons=degrade_reasons,
+        )
+    await client.close()
+
+    assert client._embedding_api_base == ""
+    assert len(embedding) == client._embedding_dim
+    assert "embedding_config_missing" in degrade_reasons
+    assert "embedding_fallback_hash" in degrade_reasons
+
+
+@pytest.mark.asyncio
+async def test_private_literal_embedding_base_is_allowed_with_allowlist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.88.1.144:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.88.0.0/16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "embedding-private-base-allowed.db"))
+    await client.init_db()
+
+    assert client._embedding_api_base == "http://10.88.1.144:11435/v1"
+
+    await client.close()
 
 
 @pytest.mark.asyncio

@@ -169,7 +169,7 @@ Authorization: Bearer <MCP_API_KEY>
 - 如果服务端 Dashboard 鉴权已经生效，前端不会只因为浏览器本地还没保存 Dashboard key 就自动弹出首启配置向导；这样能减少在 proxy-held key 部署里把真实 `MCP_API_KEY` 再存进浏览器的误操作。
 - 向导切档时，当前已经隐藏掉的旧字段会跟着本次保存一起清掉，减少把上一档残留的 router/API 字段继续带进本次提交的风险。
 - 切到远端 embedding backend 时，setup 保存会显式写入 `RETRIEVAL_EMBEDDING_DIM`；`/setup/config` 现在也支持 `openai` embedding backend。
-- provider API base 字段现在会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉；格式不对、带凭证、或指到 link-local 的地址会直接拒绝。
+- provider API base 字段现在会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉；格式不对、带凭证、或指到 link-local 的地址会直接拒绝。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意指到其它 private IP 字面量，还要通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。
 - 当前运行时如果读到无效的 `chat / embedding / reranker` API base，也会按 fail-closed 处理：直接忽略这条配置并走降级/回退，不会继续拿这类地址发请求。
 - Memory 页在确认弹窗不可用时也会保持同样的 fail-closed 边界：不会继续执行删除或跳转，而是直接拦下动作并给出页内提示。
 

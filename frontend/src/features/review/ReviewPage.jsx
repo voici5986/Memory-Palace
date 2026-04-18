@@ -112,6 +112,8 @@ function ReviewPage() {
       );
       if (hasActiveSession) return;
       if (list.length === 0) {
+        setSnapshots([]);
+        setDiffData(null);
         setSelectedSnapshot(null);
         setCurrentSessionId(null);
         return;

@@ -262,6 +262,32 @@ describe('ReviewPage', () => {
     });
   });
 
+  it('clears stale snapshots after clearing the last session', async () => {
+    const user = userEvent.setup();
+    api.getSessions
+      .mockResolvedValueOnce([DEFAULT_SESSION])
+      .mockResolvedValueOnce([]);
+
+    render(<ReviewPage />);
+
+    await screen.findByRole('button', { name: 'res-1' });
+
+    const integrateAllButton = await screen.findByRole('button', {
+      name: i18n.t('review.integrateAll'),
+    });
+    await user.click(integrateAllButton);
+
+    await waitFor(() => {
+      expect(api.clearSession).toHaveBeenCalledWith('session-a');
+      expect(screen.queryByRole('button', { name: 'res-1' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: i18n.t('review.integrateAll') })
+      ).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText(i18n.t('common.states.awaitingInput'))).toBeInTheDocument();
+  });
+
   it('clears stale diff error when switching to a session with no snapshots (404)', async () => {
     const user = userEvent.setup();
     const sessionA = { session_id: 'session-a' };

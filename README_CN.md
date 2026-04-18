@@ -54,10 +54,13 @@
 - **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
 - **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
 - **repo-local wrapper 现在会更一致地拦住 Docker sqlite 容器路径**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`，所以像 `sqlite+aiosqlite://///app/data/...` 这类值不会再被误放过。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `974 passed, 22 skipped`；前端 `167 passed`；前端 `npm run test:bundle-budget`、`npm run build` 和 `npm run typecheck` 都通过；repo-local live MCP e2e 也通过（`14/14`）。这一轮还实际复核了 Docker `Profile B` smoke，并用本地测试专用 provider 重跑了真实 A/B/C/D benchmark。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
+- **Docker 基础镜像现在也收得更紧了**：仓库自带的 Dockerfile 现在把基础镜像 digest 一起锁住了，后面重建时不容易再因为上游 tag 漂了而悄悄变样。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `984 passed, 22 skipped`；前端 `168 passed`；前端 `npm run build` 和 `npm run typecheck` 都通过；repo-local live MCP e2e 也通过（`14/14`）。这一轮还补跑了 A/B/C/D 路径的小样本本地 benchmark spot-check。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
+- **private provider 字面量地址现在不会再被默认信任**：像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认可用；其它 private IP 字面量现在必须通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式 allowlist 才能继续使用。link-local 和格式错误地址仍然会 fail-close。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection 后台清理现在更收口了**：同一个 session、source、reason、content 的并发 `prepare` 请求，仍然会复用同一个 prepared review；如果最后一个等待方先走掉了，后端现在也会把这条已经没人等的后台 prepare 一起取消，不再让它自己继续跑完。
 - **前端类型检查现在更容易复现，也更不容易在 CI 里漏掉了**：`frontend/package.json` 现在已经补上正式的 `npm run typecheck`，Docker publish 的校验工作流也会在发布前跑同一条检查。
+- **Review 页清空最后一个 session 后不再残留旧快照列表了**：现在一旦最后一个审查 session 被清空，页面会一起把旧的 snapshot 列表和底部动作区收掉，不会再留下一组看起来还能点的旧控件。
 - **Setup Assistant 和 Dashboard 的本地保存现在更严格了**：带鉴权的非 loopback 请求仍然可以查看 setup 当前状态，但本地 `.env` 写入依旧只保留给“直连回环地址 + 当前项目内 `.env*` 文件”这条路径，所以保存按钮现在会直接禁用并显示原因，不会再看起来能点、点完再失败。如果后端本身已经带着 `MCP_API_KEY` 在跑，这条 loopback 写入路径现在也必须带上同一把有效 key。第一次往本地 `.env` 保存时，现在还要求 `Dashboard API key` 不能为空，不会再把“空 key 首次落盘”当成默认自举路径。现在就算 setup 状态回来的比较晚，没碰过的检索字段也会按真实状态补齐；先输入 Dashboard key，不会再把已有的 router / reranker 配置偷偷重置回 `hash` / `false`。像 `http://127.0.0.1:8001/v1` 这种真实本地 router 地址仍然可以用，但示例 model id 仍然会被当成占位值拦下；如果你切到直连 `api` / `openai` embedding 路径，本地 `.env` 保存前还必须填一个真实的正整数维度。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀现在会自动归一化；格式不对或指到 link-local 的 provider base 会直接拦下，不会再原样写进 `.env`。`Review` / `Maintenance` 在当前运行环境缺少 `confirm` / `prompt` / `alert` 时，也会 fail-close 并改成页内提示。
 - **Maintenance 里的孤儿记忆清理现在更顺手了**：孤儿记忆卡片现在可以直接用键盘聚焦，并用 `Enter` / `Space` 展开；批量删除也会并行发出少量请求，同时继续保留逐条失败和部分成功的提示。
 - **真实 benchmark 产物现在更诚实地记录降级了**：真实 A/B/C/D runner 现在会同时记录查询阶段和建索引阶段的降级信息；对 D 档位来说，`reranker` 配置缺失或响应无效都不会再被算成“干净通过”。
@@ -149,7 +152,7 @@ Embedding 维度不匹配的检查现在会跟着**当前查询作用域**走（
 
 Observability 搜索和活力清理确认这类更容易跑久一点的操作，现在前端也会给更长的等待时间。对本地数据量更大的场景来说，这样更不容易出现“后端还在处理，浏览器先报超时”的错觉。
 
-当浏览器里既没有已保存的 Dashboard 鉴权，也没有运行时注入的 Dashboard 鉴权时，前端会自动打开首启配置向导。它可以把 Dashboard `MCP_API_KEY` 保存到当前浏览器会话里，并且在应用直接连本地 checkout 时，把常见本地运行参数写进 `.env`，不需要手动编辑文件。这条写入路径现在只会指向当前项目里的 `.env*` 文件。现在向导里也会把 `Profile A` 直接标出来，不再让它只作为空表单的隐含默认态；这条默认基线仍然就是 `keyword + none`。如果你走的是“保存到本地 `.env`”这条路径，第一次本地保存现在还要求 `Dashboard API key` 不能为空；留空时，后端会直接拒绝这次写入，而不会当成匿名自举。如果你走的是“保存到本地 `.env`”这条路径，并且同时填写了 Dashboard key，向导仍然需要浏览器会话存储来记住这把 key；如果浏览器拦住了这条存储路径，页面现在会明确提示保存失败，不再假装整套配置都已经成功。对带鉴权的非 loopback 请求，向导现在仍可显示当前 setup 状态，但本地 `.env` 写入会继续保持禁用，并明确提示原因。这条路径仍然只允许直连回环地址；如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是 loopback 写入，也还要带上同一把有效 key。向导还会自动归一化 `/embeddings`、`/rerank`、`/chat/completions` 这类常见 provider API 后缀；格式不对或指到 link-local 的地址会在写入前直接拦下。涉及后端运行链路的改动仍然需要重启服务。
+当浏览器里既没有已保存的 Dashboard 鉴权，也没有运行时注入的 Dashboard 鉴权时，前端会自动打开首启配置向导。它可以把 Dashboard `MCP_API_KEY` 保存到当前浏览器会话里，并且在应用直接连本地 checkout 时，把常见本地运行参数写进 `.env`，不需要手动编辑文件。这条写入路径现在只会指向当前项目里的 `.env*` 文件。现在向导里也会把 `Profile A` 直接标出来，不再让它只作为空表单的隐含默认态；这条默认基线仍然就是 `keyword + none`。如果你走的是“保存到本地 `.env`”这条路径，第一次本地保存现在还要求 `Dashboard API key` 不能为空；留空时，后端会直接拒绝这次写入，而不会当成匿名自举。如果你走的是“保存到本地 `.env`”这条路径，并且同时填写了 Dashboard key，向导仍然需要浏览器会话存储来记住这把 key；如果浏览器拦住了这条存储路径，页面现在会明确提示保存失败，不再假装整套配置都已经成功。对带鉴权的非 loopback 请求，向导现在仍可显示当前 setup 状态，但本地 `.env` 写入会继续保持禁用，并明确提示原因。这条路径仍然只允许直连回环地址；如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是 loopback 写入，也还要带上同一把有效 key。向导还会自动归一化 `/embeddings`、`/rerank`、`/chat/completions` 这类常见 provider API 后缀；格式不对或指到 link-local 的地址会在写入前直接拦下。像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意把 provider base 直连到其它 private IP 字面量，现在还要先通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。涉及后端运行链路的改动仍然需要重启服务。
 
 如果你想看一份按页面拆开的使用说明，可以直接打开 [中文仪表盘使用指南](docs/DASHBOARD_GUIDE_CN.md)。
 
@@ -531,7 +534,7 @@ curl -s "http://127.0.0.1:8000/browse/node?domain=core&path=" | python -m json.t
 >
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`）打开首启向导；你可以只把同一把 key 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”的场景下，把常见运行参数一起写进 `.env`。这条本地写入路径现在只会写当前项目里的 `.env*` 文件。如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，直连本机回环地址（`127.0.0.1` / `::1` / `localhost`，且不带 forwarded headers）的请求可直接访问这些受保护数据请求，但这条“免手动输 key”的 loopback 读放宽并不会放开本地 `.env` 写入门槛。如果你是通过带鉴权的非 loopback 路径看的页面，向导仍然能显示当前状态，但本地 `.env` 写入会继续保持禁用，这是现在明确写死的安全边界。如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。
 >
-> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。当前端发现旧版遗留在 `localStorage` 里的 Dashboard key 时，仍然只会迁移一次，但现在只有在确认没有被别的标签页替换掉时，才会删除那份旧值。现在就算 setup 状态回来的比较晚，没碰过的检索字段也会按真实状态补齐；先输入 Dashboard key，不会再把已有的 router / reranker 配置偷偷重置回 `hash` / `false`。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；但只靠预设本身已经不能直接保存了，真正落地前仍要把必填远端字段换成真实值。像 `http://127.0.0.1:8001/v1` 这种真实本地 router 地址仍然可以用，但示例 model id 仍然会被当成占位值拦下。对直连 `api` / `openai` embedding 路径来说，现在本地 `.env` 保存前还会继续要求一个真实的正整数维度。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障。
+> 如果你选择的是“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。当前端发现旧版遗留在 `localStorage` 里的 Dashboard key 时，仍然只会迁移一次，但现在只有在确认没有被别的标签页替换掉时，才会删除那份旧值。现在就算 setup 状态回来的比较晚，没碰过的检索字段也会按真实状态补齐；先输入 Dashboard key，不会再把已有的 router / reranker 配置偷偷重置回 `hash` / `false`。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在已经按文档口径走 `router + reranker` 路线；但只靠预设本身已经不能直接保存了，真正落地前仍要把必填远端字段换成真实值。像 `http://127.0.0.1:8001/v1` 这种真实本地 router 地址仍然可以用，但示例 model id 仍然会被当成占位值拦下。对直连 `api` / `openai` embedding 路径来说，现在本地 `.env` 保存前还会继续要求一个真实的正整数维度。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你本机确实要直连其它 private IP 字面量，还要额外补上 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障。
 >
 > 如果你选择的是“保存到本地 `.env`”，并且同时填了 Dashboard key，要记住 `.env` 写入和浏览器 key 持久化是两步。现在只要浏览器本地存储失败，向导就会直接报保存失败，不再给出误导性的成功提示。实际使用时，这通常意味着 `.env` 可能已经写进去了，但浏览器侧鉴权还没准备好；先看右上角状态，再决定是否重试。
 >
@@ -1096,7 +1099,7 @@ curl -fsS http://127.0.0.1:8000/health
 - Docker 一键部署默认通过服务端代理转发鉴权头，浏览器页面不会直接拿到真实 `MCP_API_KEY`
 - 本地绕过需显式启用：`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`（仅限回环地址）
 - 但 Setup Assistant 的本地 `.env` 写入边界更严格：它只允许写项目内的 `.env*` 文件，而且仍然只接受直连 loopback；第一次本地保存还要求 `Dashboard API key` 非空；只要后端已经配置了 `MCP_API_KEY`，就算是 loopback 写入也必须带有效 key
-- 通过向导写入的 provider API base 会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions` 这类常见后缀会自动去掉，格式不对或指到 link-local 的地址会直接拦下
+- 通过向导写入的 provider API base 会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions` 这类常见后缀会自动去掉，格式不对或指到 link-local 的地址会直接拦下；`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许，其它 private IP 字面量则要通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行
 
 详情：[SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md)
 

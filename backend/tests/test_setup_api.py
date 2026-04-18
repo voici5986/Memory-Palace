@@ -949,6 +949,77 @@ def test_setup_config_normalizes_provider_suffixes_before_writing(
     assert "RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:9200/v1" in written
 
 
+def test_setup_config_rejects_private_literal_provider_base_without_allowlist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "local-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "api",
+                "embedding_api_base": "http://10.88.1.144:11435/v1",
+                "embedding_model": "local-embedding-model",
+                "embedding_dim": 1024,
+            },
+        )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert detail["reason"] == "invalid_api_base_url"
+    assert detail["field"] == "embedding_api_base"
+    assert not target_env.exists()
+
+
+def test_setup_config_allows_private_literal_provider_base_with_allowlist(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.88.0.0/16")
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "local-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "api",
+                "embedding_api_base": "http://10.88.1.144:11435/v1",
+                "embedding_model": "local-embedding-model",
+                "embedding_dim": 1024,
+            },
+        )
+
+    assert response.status_code == 200
+    written = target_env.read_text(encoding="utf-8")
+    assert "RETRIEVAL_EMBEDDING_API_BASE=http://10.88.1.144:11435/v1" in written
+
+
 def test_setup_config_rejects_example_router_model_ids(
     monkeypatch, tmp_path: Path
 ) -> None:

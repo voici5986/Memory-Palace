@@ -589,6 +589,8 @@ If this command can normally output the version number, starting `mcp_server.py`
    # There is no RETRIEVAL_RERANKER_BACKEND for reranker; to force local reranker API usage,
    # please explicitly set RETRIEVAL_RERANKER_ENABLED=true and RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL.
    # Note: RETRIEVAL_*_API_BASE may already include /v1, avoid manually appending /v1 again.
+   # If the app config uses a non-loopback private IP literal as provider base, also set
+   # MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS=<that IP or CIDR> first.
    # It is more accurate to do a health check using the actual call endpoint:
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
      -H "Content-Type: application/json" \

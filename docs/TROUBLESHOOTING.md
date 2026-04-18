@@ -580,6 +580,8 @@ cd backend
    # reranker 不存在 RETRIEVAL_RERANKER_BACKEND；如需本地强制走自有 reranker API，
    # 请显式设置 RETRIEVAL_RERANKER_ENABLED=true 与 RETRIEVAL_RERANKER_API_BASE/API_KEY/MODEL。
    # 注意：RETRIEVAL_*_API_BASE 可能已包含 /v1，避免再手动拼接 /v1
+   # 如果应用里配置的是非 loopback 的 private IP 字面量 provider base，还要先补
+   # MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS=<该 IP 或 CIDR>
    # 用实际调用端点做健康检查更准确：
    curl -fsS -X POST <RETRIEVAL_EMBEDDING_API_BASE>/embeddings \
      -H "Content-Type: application/json" \

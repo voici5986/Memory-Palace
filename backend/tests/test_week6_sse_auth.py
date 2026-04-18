@@ -302,7 +302,58 @@ def test_create_sse_app_initializes_runtime_in_lifespan_when_enabled(
     assert events == ["startup", "drain", "shutdown", "close"]
 
 
-def test_embedded_sse_message_mounts_accept_both_message_paths(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("path", "headers", "expected_status", "expected_text"),
+    [
+        (
+            "/messages",
+            {
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "text/plain",
+                "Origin": "http://127.0.0.1:5173",
+                "Host": "127.0.0.1:8000",
+            },
+            400,
+            "Invalid Content-Type header",
+        ),
+        (
+            "/messages",
+            {
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "application/json",
+                "Origin": "https://evil.example",
+                "Host": "127.0.0.1:8000",
+            },
+            403,
+            "Invalid Origin header",
+        ),
+        (
+            "/messages",
+            {
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "application/json",
+                "Origin": "http://127.0.0.1:5173",
+                "Host": "127.0.0.1:8000",
+            },
+            400,
+            "session_id is required",
+        ),
+        (
+            "/sse/messages/",
+            {
+                "X-MCP-API-Key": "week6-sse-secret",
+                "Content-Type": "application/json",
+                "Origin": "http://127.0.0.1:5173",
+                "Host": "127.0.0.1:8000",
+            },
+            400,
+            "session_id is required",
+        ),
+    ],
+)
+def test_embedded_sse_message_mounts_enforce_transport_security_before_session_lookup(
+    monkeypatch, path: str, headers: dict[str, str], expected_status: int, expected_text: str
+) -> None:
     monkeypatch.setenv("MCP_API_KEY", "week6-sse-secret")
     monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
     stream_app, message_app = create_embedded_sse_apps()
@@ -312,27 +363,10 @@ def test_embedded_sse_message_mounts_accept_both_message_paths(monkeypatch) -> N
     app.mount("/sse", stream_app)
 
     with TestClient(app) as client:
-        direct_response = client.post(
-            "/messages",
-            headers={
-                "X-MCP-API-Key": "week6-sse-secret",
-                "Content-Type": "application/json",
-                "Host": "127.0.0.1:8000",
-            },
-        )
-        prefixed_response = client.post(
-            "/sse/messages/",
-            headers={
-                "X-MCP-API-Key": "week6-sse-secret",
-                "Content-Type": "application/json",
-                "Host": "127.0.0.1:8000",
-            },
-        )
+        response = client.post(path, headers=headers)
 
-    assert direct_response.status_code == 400
-    assert direct_response.text == "session_id is required"
-    assert prefixed_response.status_code == 400
-    assert prefixed_response.text == "session_id is required"
+    assert response.status_code == expected_status
+    assert response.text == expected_text
 
 
 def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:

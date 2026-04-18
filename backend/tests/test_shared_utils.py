@@ -4,6 +4,8 @@ import pytest
 
 import mcp_server
 from shared_utils import (
+    PRIVATE_PROVIDER_TARGETS_ENV,
+    allowed_private_provider_targets,
     env_bool,
     env_int,
     is_loopback_hostname,
@@ -65,9 +67,27 @@ def test_normalize_http_api_base_rejects_link_local_metadata_addresses() -> None
         normalize_http_api_base("http://169.254.169.254/v1")
 
 
-def test_normalize_http_api_base_allows_loopback_and_private_network_hosts() -> None:
+def test_allowed_private_provider_targets_keeps_loopback_defaults(monkeypatch) -> None:
+    monkeypatch.delenv(PRIVATE_PROVIDER_TARGETS_ENV, raising=False)
+    assert {"127.0.0.1", "::1", "localhost"} <= allowed_private_provider_targets()
+
+
+def test_normalize_http_api_base_allows_loopback_hosts_by_default() -> None:
     assert normalize_http_api_base("http://127.0.0.1:8318/v1") == "http://127.0.0.1:8318/v1"
+
+
+def test_normalize_http_api_base_rejects_private_ip_literals_without_allowlist(monkeypatch) -> None:
+    monkeypatch.delenv(PRIVATE_PROVIDER_TARGETS_ENV, raising=False)
+    with pytest.raises(ValueError, match="private IP literal"):
+        normalize_http_api_base("http://10.88.1.144:11435/v1")
+
+
+def test_normalize_http_api_base_allows_private_ip_literals_when_allowlisted(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(PRIVATE_PROVIDER_TARGETS_ENV, "10.88.0.0/16,fc00::/7")
     assert normalize_http_api_base("http://10.88.1.144:11435/v1") == "http://10.88.1.144:11435/v1"
+    assert normalize_http_api_base("http://[fc00::1]/v1") == "http://[fc00::1]/v1"
 
 
 def test_utc_iso_now_returns_utc_z_suffix() -> None:

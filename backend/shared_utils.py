@@ -1,7 +1,7 @@
 import os
 import math
 from datetime import datetime, timezone
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DEFAULT_INTERACTION_TIERS = frozenset({"fast", "deep"})
+PRIVATE_PROVIDER_TARGETS_ENV = "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS"
 
 
 def env_bool(
@@ -119,9 +120,46 @@ def is_loopback_hostname(
         return False
 
 
+def allowed_private_provider_targets(
+    raw_value: Optional[str] = None,
+) -> frozenset[str]:
+    value = raw_value if raw_value is not None else os.getenv(PRIVATE_PROVIDER_TARGETS_ENV)
+    targets = set(LOOPBACK_HOSTS)
+    for item in str(value or "").split(","):
+        normalized = item.strip().lower()
+        if normalized:
+            targets.add(normalized)
+    return frozenset(targets)
+
+
+def _private_provider_target_matches(
+    *,
+    hostname: str,
+    host_ip: Any,
+    targets: Iterable[str],
+) -> bool:
+    normalized_hostname = str(hostname or "").strip().lower()
+    for raw_target in targets:
+        normalized_target = str(raw_target or "").strip().lower()
+        if not normalized_target:
+            continue
+        if normalized_target == normalized_hostname:
+            return True
+        try:
+            network = ip_network(normalized_target, strict=False)
+        except ValueError:
+            continue
+        if host_ip.version != network.version:
+            continue
+        if host_ip in network:
+            return True
+    return False
+
+
 def normalize_http_api_base(
     value: Optional[str],
     *,
+    private_target_allowlist: Optional[Iterable[str]] = None,
     trim_suffixes: Optional[Iterable[str]] = None,
 ) -> str:
     normalized = str(value or "").strip().rstrip("/")
@@ -149,6 +187,23 @@ def normalize_http_api_base(
         raise ValueError(
             "API base URL cannot point to an unspecified, multicast, or link-local address."
         )
+    if host_ip is not None and host_ip.is_private and not host_ip.is_loopback:
+        private_targets = allowed_private_provider_targets()
+        if private_target_allowlist is not None:
+            private_targets = frozenset(
+                str(item or "").strip().lower()
+                for item in private_target_allowlist
+                if str(item or "").strip()
+            ) | LOOPBACK_HOSTS
+        if not _private_provider_target_matches(
+            hostname=str(parsed.hostname or ""),
+            host_ip=host_ip,
+            targets=private_targets,
+        ):
+            raise ValueError(
+                "API base URL cannot point to a private IP literal unless it is explicitly "
+                f"allowlisted via {PRIVATE_PROVIDER_TARGETS_ENV}."
+            )
 
     path = str(parsed.path or "").rstrip("/")
     for suffix in trim_suffixes or ():

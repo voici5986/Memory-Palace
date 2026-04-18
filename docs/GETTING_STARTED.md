@@ -154,6 +154,7 @@ bash scripts/apply_profile.sh macos b
 | `RETRIEVAL_RERANKER_API_KEY` | Reranker API 密钥 | 空 |
 | `RETRIEVAL_RERANKER_MODEL` | Reranker 模型名 | `your-reranker-model-id` |
 | `RETRIEVAL_REMOTE_TIMEOUT_SEC` | 远程 embedding / reranker / LLM 请求超时（秒） | `8` |
+| `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` | 显式放行的 private provider IP 字面量或 CIDR；`127.0.0.1` / `::1` 这类 loopback IP 和 `localhost` 默认已允许 | 空 |
 | `INTENT_LLM_ENABLED` | 实验性意图 LLM 开关 | `false` |
 | `RETRIEVAL_MMR_ENABLED` | hybrid 检索下的去重 / 多样性重排 | `false` |
 | `RETRIEVAL_SQLITE_VEC_ENABLED` | sqlite-vec rollout 开关 | `false` |
@@ -264,7 +265,7 @@ VITE v7.x.x  ready in xxx ms
 
 > 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。这条写入路径现在只会写当前项目里的 `.env*` 文件。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。当前状态有时会晚一点返回，但你已经自己输入过的字段不会再被后到的状态覆盖，没碰过的检索字段会继续按当前 setup 状态补齐。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` 只会放宽直连回环地址的读请求，不会放开这条本地写入门槛。第 5 节会继续说明本地验证方式。
 >
-> 这轮还有一个更收口的边界：第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；留空会被后端直接拒绝，不再把“空 key 首次落盘”当成默认自举路径。向导还会自动归一化 `/embeddings`、`/rerank`、`/chat/completions` 这类常见 provider API 后缀；格式不对或指到 link-local 的地址会在保存前直接拦下。
+> 这轮还有一个更收口的边界：第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；留空会被后端直接拒绝，不再把“空 key 首次落盘”当成默认自举路径。向导还会自动归一化 `/embeddings`、`/rerank`、`/chat/completions` 这类常见 provider API 后缀；格式不对或指到 link-local 的地址会在保存前直接拦下。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意把 provider base 指到其它 private IP 字面量，还要先通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。
 >
 > 如果你走的是标准 Docker 代理这类 proxy-held auth 路径，服务端鉴权已经生效时，首启配置向导现在不会只因为浏览器本地没保存 key 就一上来自动弹出；右上角按钮还可能在，但这时只有你手动点进去才会进入向导。
 >
@@ -275,7 +276,7 @@ VITE v7.x.x  ready in xxx ms
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
-> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。`Profile C` 预填的 `http://127.0.0.1:8001/v1` 是允许直接保存的真实本地 router 地址；真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。现在真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为点了 C/D 预设就把表单伪装成已经可保存。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都会继续要求一个真实的正整数 `embedding_dim`。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的 base/model 补齐，或者先把 reranker 关掉。如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
+> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。`Profile C` 预填的 `http://127.0.0.1:8001/v1` 是允许直接保存的真实本地 router 地址；真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。现在真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为点了 C/D 预设就把表单伪装成已经可保存。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都会继续要求一个真实的正整数 `embedding_dim`。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你本机确实要直连其它 private IP 字面量，还要额外补上 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的 base/model 补齐，或者先把 reranker 关掉。如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
 >
 > 现在向导在 `hash / api / router / openai` 之间来回切时，也会把已经隐藏掉的旧字段一起清掉；如果你切到远端 embedding backend，保存时只会写入你明确提供的 `RETRIEVAL_EMBEDDING_DIM`。这能减少“看起来已经切档，实际还带着上一档残留字段”的情况，但它不等于自动替你验证 provider 一定可达。
 >
@@ -527,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `966 passed, 20 skipped`；frontend `165 passed`；`npm run typecheck` 通过；前端 build 通过；repo-local live MCP e2e 也已通过。本轮也实际复核了 repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `984 passed, 22 skipped`；frontend `168 passed`；`npm run typecheck` 通过；前端 build 通过；repo-local live MCP e2e 也已通过。本轮还补跑了 A/B/C/D 路径的小样本本地 benchmark spot-check。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
