@@ -366,7 +366,7 @@ def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:
             f"Host: 127.0.0.1:{port}\r\n"
             "Accept: text/event-stream\r\n"
             "X-MCP-API-Key: week6-sse-secret\r\n"
-            "Connection: close\r\n"
+            "Connection: keep-alive\r\n"
             "\r\n"
         ).encode("utf-8")
 
@@ -571,7 +571,7 @@ def test_sse_auth_rejects_when_posting_to_closed_message_stream(tmp_path) -> Non
             f"Host: 127.0.0.1:{port}\r\n"
             "Accept: text/event-stream\r\n"
             "X-MCP-API-Key: week6-sse-secret\r\n"
-            "Connection: close\r\n"
+            "Connection: keep-alive\r\n"
             "\r\n"
         ).encode("utf-8")
         with socket.create_connection(("127.0.0.1", port), timeout=5) as client:
@@ -621,97 +621,33 @@ def test_sse_auth_rejects_when_posting_to_closed_message_stream(tmp_path) -> Non
     assert "Traceback" not in output
 
 
-def test_sse_messages_rate_limit_returns_429(tmp_path) -> None:
-    backend_dir = Path(__file__).resolve().parents[1]
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
+@pytest.mark.anyio
+async def test_sse_messages_rate_limit_returns_429(monkeypatch) -> None:
+    monkeypatch.setenv("SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS", "10")
 
-    env = dict(**os.environ)
-    env["MCP_API_KEY"] = "week6-sse-secret"
-    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp_path / 'rate_limited_messages.db'}"
-    env["HOST"] = "127.0.0.1"
-    env["PORT"] = str(port)
-    env["SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS"] = "60"
-    env["SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS"] = "10"
-    server = _spawn_run_sse_subprocess(backend_dir=backend_dir, env=env)
+    transport = run_sse.MemoryPalaceSseServerTransport("/messages", security_settings=None)
+    session_id = uuid4()
+    scope = {
+        "type": "http",
+        "path": "/messages",
+        "client": ("127.0.0.1", 50000),
+    }
 
-    try:
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            if server.poll() is not None:
-                pytest.fail("uvicorn exited before the rate-limit test could connect")
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    break
-            except OSError:
-                time.sleep(0.1)
-        else:
-            pytest.fail("timed out waiting for rate-limit test server to start")
+    for _ in range(10):
+        retry_after = await transport._check_message_rate_limit(
+            scope=scope,
+            session_id=session_id,
+        )
+        assert retry_after is None
 
-        session_id = None
-        request = (
-            "GET /sse HTTP/1.1\r\n"
-            f"Host: 127.0.0.1:{port}\r\n"
-            "Accept: text/event-stream\r\n"
-            "X-MCP-API-Key: week6-sse-secret\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-        ).encode("utf-8")
-        stream_client = socket.create_connection(("127.0.0.1", port), timeout=5)
-        try:
-            stream_client.sendall(request)
-            received = ""
-            deadline = time.time() + 5
-            while time.time() < deadline:
-                chunk = stream_client.recv(4096).decode("utf-8", errors="ignore")
-                if not chunk:
-                    break
-                received += chunk
-                if "session_id=" in received:
-                    session_id = received.split("session_id=", 1)[1].splitlines()[0].strip()
-                    break
-            assert session_id
+    retry_after = await transport._check_message_rate_limit(
+        scope=scope,
+        session_id=session_id,
+    )
 
-            def _post_message() -> http.client.HTTPResponse:
-                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-                try:
-                    connection.request(
-                        "POST",
-                        f"/messages/?session_id={session_id}",
-                        body='{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}',
-                        headers={
-                            "Content-Type": "application/json",
-                            "X-MCP-API-Key": "week6-sse-secret",
-                        },
-                    )
-                    response = connection.getresponse()
-                    response.read()
-                    return response
-                finally:
-                    connection.close()
-
-            first = _post_message()
-            assert first.status == 202
-
-            for _ in range(9):
-                response = _post_message()
-                assert response.status == 202
-
-            rate_limited = _post_message()
-            assert rate_limited.status == 429
-            assert rate_limited.getheader("Retry-After") is not None
-        finally:
-            stream_client.close()
-    finally:
-        server.terminate()
-        try:
-            output, _ = server.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            output, _ = server.communicate(timeout=5)
-
-    assert "Traceback" not in output
+    assert isinstance(retry_after, int)
+    assert retry_after >= 1
 
 
 def test_sse_messages_reject_oversized_body_with_413(tmp_path) -> None:

@@ -31,6 +31,7 @@ import threading
 import time
 import unicodedata
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from urllib.parse import unquote
@@ -46,6 +47,8 @@ DEFAULT_SNAPSHOT_DIR = os.path.join(
 
 _SQLITE_URL_PREFIXES = ("sqlite+aiosqlite:///", "sqlite:///")
 _SESSION_LOCK_WAIT_SECONDS = 5.0
+_SNAPSHOT_RETENTION_MAX_AGE_DAYS = 90
+_SNAPSHOT_RETENTION_MAX_SESSIONS = 64
 logger = logging.getLogger(__name__)
 _SCOPE_MARKER_FILENAME = ".scope.json"
 
@@ -58,6 +61,34 @@ def _get_ctypes_module():
 
 def _is_windows_host() -> bool:
     return os.name == "nt"
+
+
+def _read_non_negative_int_env(name: str, default: int) -> int:
+    raw_value = str(os.getenv(name) or "").strip()
+    if not raw_value:
+        return default
+    try:
+        return max(int(raw_value), 0)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid %s=%r; expected a non-negative integer",
+            name,
+            raw_value,
+        )
+        return default
+
+
+def _parse_snapshot_timestamp(raw_value: Any) -> Optional[datetime]:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _resolve_current_database_scope() -> Dict[str, str]:
@@ -311,6 +342,94 @@ class SnapshotManager:
             raise TimeoutError(
                 f"Timed out waiting for snapshot session lock: {session_id}"
             ) from exc
+
+    @contextmanager
+    def _try_session_write_lock(self, session_id: str):
+        """Try to acquire a session lock without waiting."""
+        self._ensure_dir_exists(os.path.join(self.snapshot_dir, ".locks"))
+        lock = FileLock(self._get_session_lock_path(session_id), timeout=0)
+        acquired = False
+        try:
+            lock.acquire(timeout=0)
+            acquired = True
+            yield True
+        except FileLockTimeout:
+            yield False
+        finally:
+            if acquired:
+                lock.release()
+
+    @staticmethod
+    def _retention_max_age_days() -> int:
+        return _read_non_negative_int_env(
+            "SNAPSHOT_RETENTION_MAX_AGE_DAYS",
+            _SNAPSHOT_RETENTION_MAX_AGE_DAYS,
+        )
+
+    @staticmethod
+    def _retention_max_sessions() -> int:
+        return _read_non_negative_int_env(
+            "SNAPSHOT_RETENTION_MAX_SESSIONS",
+            _SNAPSHOT_RETENTION_MAX_SESSIONS,
+        )
+
+    def _garbage_collect_sessions(self, *, current_session_id: str) -> None:
+        """
+        Opportunistically prune old snapshot sessions in the current DB scope.
+
+        GC is conservative:
+        - only whole sessions are removed;
+        - the caller's current session is never touched;
+        - sessions with a busy write lock are skipped;
+        - both age/count policies can be disabled via env by setting 0.
+        """
+        max_age_days = self._retention_max_age_days()
+        max_sessions = self._retention_max_sessions()
+        if max_age_days <= 0 and max_sessions <= 0:
+            return
+
+        sessions = self.list_sessions()
+        if not sessions:
+            return
+
+        protected_session_ids = {current_session_id}
+        prune_session_ids: set[str] = set()
+
+        if max_age_days > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+            for session in sessions:
+                session_id = str(session.get("session_id") or "").strip()
+                if not session_id or session_id in protected_session_ids:
+                    continue
+                created_at = _parse_snapshot_timestamp(session.get("created_at"))
+                if created_at is None or created_at >= cutoff:
+                    continue
+                prune_session_ids.add(session_id)
+
+        if max_sessions > 0:
+            retained_session_ids = set(protected_session_ids)
+            for session in sessions:
+                session_id = str(session.get("session_id") or "").strip()
+                if not session_id or session_id in retained_session_ids:
+                    continue
+                if len(retained_session_ids) >= max_sessions:
+                    break
+                retained_session_ids.add(session_id)
+            for session in sessions:
+                session_id = str(session.get("session_id") or "").strip()
+                if session_id and session_id not in retained_session_ids:
+                    prune_session_ids.add(session_id)
+
+        for session in reversed(sessions):
+            session_id = str(session.get("session_id") or "").strip()
+            if not session_id or session_id in protected_session_ids:
+                continue
+            if session_id not in prune_session_ids:
+                continue
+            with self._try_session_write_lock(session_id) as acquired:
+                if not acquired:
+                    continue
+                self._clear_session_unlocked(session_id)
 
     @staticmethod
     def _build_manifest_payload(
@@ -686,6 +805,7 @@ class SnapshotManager:
                 "uri": snapshot_data.get("uri"),
             }
             self._save_manifest(session_id, manifest)
+            self._garbage_collect_sessions(current_session_id=session_id)
             return True
     
     def get_snapshot(self, session_id: str, resource_id: str) -> Optional[Dict[str, Any]]:

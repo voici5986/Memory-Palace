@@ -59,6 +59,9 @@ jobs:
       - name: Run frontend tests
         run: cd frontend && npm test
 
+      - name: Run frontend typecheck
+        run: cd frontend && npm run typecheck
+
       - name: Build frontend
         run: cd frontend && npm run build
 

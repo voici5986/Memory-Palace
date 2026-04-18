@@ -19,6 +19,7 @@ import re
 import sys
 import uuid
 import json
+import copy
 import inspect
 import hashlib
 from contextlib import asynccontextmanager
@@ -41,7 +42,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from db.sqlite_client import SQLiteClient, get_sqlite_client
-from db.snapshot import get_snapshot_manager
+from db.snapshot import SnapshotManager, get_snapshot_manager
 from runtime_state import runtime_state
 from runtime_bootstrap import initialize_backend_runtime
 
@@ -265,6 +266,8 @@ def _auto_learn_allowed_domains() -> List[str]:
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
 _IMPORT_LEARN_META_PERSIST_LOCKS: Dict[int, asyncio.Lock] = {}
 _IMPORT_LEARN_META_PERSIST_LOCKS_GUARD = threading.Lock()
+_REFLECTION_PREPARE_IN_FLIGHT: Dict[str, asyncio.Task[Dict[str, Any]]] = {}
+_REFLECTION_PREPARE_IN_FLIGHT_LOCK = asyncio.Lock()
 
 # Session ID for this MCP server instance
 _SESSION_ID = f"mcp_{_utc_now_naive().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -303,6 +306,26 @@ def _get_import_learn_meta_persist_lock() -> asyncio.Lock:
             lock = asyncio.Lock()
             _IMPORT_LEARN_META_PERSIST_LOCKS[loop_id] = lock
         return lock
+
+
+async def _run_deduped_reflection_prepare(
+    dedup_key: str,
+    task_factory,
+) -> Dict[str, Any]:
+    async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
+        task = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
+        if task is None or task.done():
+            task = asyncio.create_task(task_factory())
+            _REFLECTION_PREPARE_IN_FLIGHT[dedup_key] = task
+
+    try:
+        result = await asyncio.shield(task)
+    finally:
+        async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
+            if _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key) is task:
+                _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
+
+    return copy.deepcopy(result)
 
 
 def _validate_priority_value(
@@ -909,9 +932,9 @@ def _safe_non_negative_int(value: Any) -> int:
         return 0
 
 
-def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+def _import_learn_summary_core(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
-        return None
+        payload = {}
     return {
         "window_size": _safe_non_negative_int(payload.get("window_size")),
         "total_events": _safe_non_negative_int(payload.get("total_events")),
@@ -936,9 +959,114 @@ def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
         "recent_events": payload.get("recent_events")
         if isinstance(payload.get("recent_events"), list)
         else [],
-        "persistence_runtime_id": str(payload.get("persistence_runtime_id") or "").strip()
-        or None,
     }
+
+
+def _normalize_persistence_runtime_ids(payload: Any) -> List[str]:
+    if not isinstance(payload, list):
+        return []
+    runtime_ids: List[str] = []
+    for item in payload:
+        runtime_id = str(item or "").strip()
+        if runtime_id and runtime_id not in runtime_ids:
+            runtime_ids.append(runtime_id)
+    return runtime_ids
+
+
+def _sanitize_runtime_summary_contributions(payload: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return {}
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for raw_runtime_id, raw_summary in payload.items():
+        runtime_id = str(raw_runtime_id or "").strip()
+        if not runtime_id:
+            continue
+        normalized[runtime_id] = _import_learn_summary_core(raw_summary)
+    return normalized
+
+
+def _aggregate_runtime_summary_contributions(
+    contributions: Dict[str, Dict[str, Any]],
+    runtime_order: List[str],
+) -> Dict[str, Any]:
+    ordered_summaries = [
+        contributions[runtime_id]
+        for runtime_id in runtime_order
+        if runtime_id in contributions
+    ]
+    if not ordered_summaries:
+        return _import_learn_summary_core({})
+
+    last_event_at = max(
+        [
+            candidate
+            for summary in ordered_summaries
+            for candidate in [str(summary.get("last_event_at") or "").strip()]
+            if candidate
+        ],
+        default=None,
+    )
+    return {
+        "window_size": max(
+            _safe_non_negative_int(summary.get("window_size"))
+            for summary in ordered_summaries
+        ),
+        "total_events": sum(
+            _safe_non_negative_int(summary.get("total_events"))
+            for summary in ordered_summaries
+        ),
+        "event_type_breakdown": _merge_counter_payloads(
+            *[summary.get("event_type_breakdown") for summary in ordered_summaries]
+        ),
+        "operation_breakdown": _merge_counter_payloads(
+            *[summary.get("operation_breakdown") for summary in ordered_summaries]
+        ),
+        "decision_breakdown": _merge_counter_payloads(
+            *[summary.get("decision_breakdown") for summary in ordered_summaries]
+        ),
+        "operation_decision_breakdown": _merge_counter_payloads(
+            *[
+                summary.get("operation_decision_breakdown")
+                for summary in ordered_summaries
+            ]
+        ),
+        "rejected_events": sum(
+            _safe_non_negative_int(summary.get("rejected_events"))
+            for summary in ordered_summaries
+        ),
+        "rollback_events": sum(
+            _safe_non_negative_int(summary.get("rollback_events"))
+            for summary in ordered_summaries
+        ),
+        "top_reasons": _merge_reason_payloads(
+            *[summary.get("top_reasons") for summary in ordered_summaries]
+        ),
+        "last_event_at": last_event_at,
+        "recent_events": _merge_recent_events(
+            *[summary.get("recent_events") for summary in ordered_summaries]
+        ),
+    }
+
+
+def _sanitize_import_learn_summary(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    sanitized = _import_learn_summary_core(payload)
+    runtime_id = str(payload.get("persistence_runtime_id") or "").strip() or None
+    runtime_ids = _normalize_persistence_runtime_ids(
+        payload.get("persistence_runtime_ids")
+    )
+    contributions = _sanitize_runtime_summary_contributions(
+        payload.get("persistence_runtime_summaries")
+    )
+    if runtime_id and runtime_id not in runtime_ids:
+        runtime_ids.append(runtime_id)
+    if runtime_id and runtime_id not in contributions:
+        contributions[runtime_id] = dict(sanitized)
+    sanitized["persistence_runtime_id"] = runtime_id
+    sanitized["persistence_runtime_ids"] = runtime_ids
+    sanitized["persistence_runtime_summaries"] = contributions
+    return sanitized
 
 
 async def _load_persisted_import_learn_summary(client: Any) -> Optional[Dict[str, Any]]:
@@ -1011,65 +1139,46 @@ def _prepare_persisted_import_learn_summary(
     persisted_summary: Optional[Dict[str, Any]],
     runtime_id: str,
 ) -> Dict[str, Any]:
-    if not isinstance(persisted_summary, dict):
-        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+    runtime_contribution = _import_learn_summary_core(runtime_summary)
+    runtime_order: List[str] = []
+    contributions: Dict[str, Dict[str, Any]] = {}
 
-    if str(persisted_summary.get("persistence_runtime_id") or "").strip() == runtime_id:
-        return {**runtime_summary, "persistence_runtime_id": runtime_id}
+    if isinstance(persisted_summary, dict):
+        runtime_order = _normalize_persistence_runtime_ids(
+            persisted_summary.get("persistence_runtime_ids")
+        )
+        contributions = _sanitize_runtime_summary_contributions(
+            persisted_summary.get("persistence_runtime_summaries")
+        )
+        persisted_runtime_id = str(
+            persisted_summary.get("persistence_runtime_id") or ""
+        ).strip()
+        if persisted_runtime_id:
+            if persisted_runtime_id not in runtime_order:
+                runtime_order.append(persisted_runtime_id)
+            if persisted_runtime_id not in contributions:
+                contributions[persisted_runtime_id] = _import_learn_summary_core(
+                    persisted_summary
+                )
+        elif not contributions:
+            legacy_runtime_id = "__legacy_persisted__"
+            runtime_order.append(legacy_runtime_id)
+            contributions[legacy_runtime_id] = _import_learn_summary_core(
+                persisted_summary
+            )
 
-    last_event_at = max(
-        [
-            candidate
-            for candidate in [
-                str(persisted_summary.get("last_event_at") or "").strip(),
-                str(runtime_summary.get("last_event_at") or "").strip(),
-            ]
-            if candidate
-        ],
-        default=None,
-    )
-    return {
-        "window_size": max(
-            _safe_non_negative_int(persisted_summary.get("window_size")),
-            _safe_non_negative_int(runtime_summary.get("window_size")),
-        ),
-        "total_events": _safe_non_negative_int(persisted_summary.get("total_events"))
-        + _safe_non_negative_int(runtime_summary.get("total_events")),
-        "event_type_breakdown": _merge_counter_payloads(
-            persisted_summary.get("event_type_breakdown"),
-            runtime_summary.get("event_type_breakdown"),
-        ),
-        "operation_breakdown": _merge_counter_payloads(
-            persisted_summary.get("operation_breakdown"),
-            runtime_summary.get("operation_breakdown"),
-        ),
-        "decision_breakdown": _merge_counter_payloads(
-            persisted_summary.get("decision_breakdown"),
-            runtime_summary.get("decision_breakdown"),
-        ),
-        "operation_decision_breakdown": _merge_counter_payloads(
-            persisted_summary.get("operation_decision_breakdown"),
-            runtime_summary.get("operation_decision_breakdown"),
-        ),
-        "rejected_events": _safe_non_negative_int(
-            persisted_summary.get("rejected_events")
-        )
-        + _safe_non_negative_int(runtime_summary.get("rejected_events")),
-        "rollback_events": _safe_non_negative_int(
-            persisted_summary.get("rollback_events")
-        )
-        + _safe_non_negative_int(runtime_summary.get("rollback_events")),
-        "top_reasons": _merge_reason_payloads(
-            persisted_summary.get("top_reasons"),
-            runtime_summary.get("top_reasons"),
-        ),
-        "last_event_at": last_event_at,
-        "recent_events": _merge_recent_events(
-            persisted_summary.get("recent_events"),
-            runtime_summary.get("recent_events"),
-        ),
-        "persistence_runtime_id": runtime_id,
-    }
+    for persisted_runtime_id in contributions:
+        if persisted_runtime_id not in runtime_order:
+            runtime_order.append(persisted_runtime_id)
+    if runtime_id not in runtime_order:
+        runtime_order.append(runtime_id)
+    contributions[runtime_id] = runtime_contribution
+
+    aggregated = _aggregate_runtime_summary_contributions(contributions, runtime_order)
+    aggregated["persistence_runtime_id"] = runtime_id
+    aggregated["persistence_runtime_ids"] = runtime_order
+    aggregated["persistence_runtime_summaries"] = contributions
+    return aggregated
 
 
 def _merge_import_learn_summaries(
@@ -1141,12 +1250,11 @@ async def run_explicit_learn_service(
     operation = "learn_explicit"
     normalized_source = str(source or "").strip()
     normalized_reason = str(reason or "").strip()
-    normalized_session_id = str(session_id or "").strip()
+    raw_session_id = str(session_id or "")
+    normalized_session_id = raw_session_id
     normalized_actor_id = (str(actor_id).strip() if actor_id is not None else None) or None
     normalized_domain = str(domain or "").strip().lower() or "notes"
     normalized_path_prefix = _normalize_path_prefix(path_prefix)
-    target_parent_path = f"{normalized_path_prefix}/{normalized_session_id}".strip("/")
-    target_parent_uri = make_uri(normalized_domain, target_parent_path)
 
     payload: Dict[str, Any] = {
         "ok": True,
@@ -1158,7 +1266,6 @@ async def run_explicit_learn_service(
         "actor_id": normalized_actor_id,
         "domain": normalized_domain,
         "path_prefix": normalized_path_prefix,
-        "target_parent_uri": target_parent_uri,
         "execute": bool(execute),
         "reason": "rejected",
     }
@@ -1216,6 +1323,28 @@ async def run_explicit_learn_service(
             actor_id=normalized_actor_id,
         )
         return payload
+
+    try:
+        normalized_session_id = SnapshotManager._validate_session_id(raw_session_id)
+    except ValueError as exc:
+        payload["reason"] = "session_id_invalid"
+        payload["validation_error"] = str(exc)
+        await _record_import_learn_event(
+            event_type="reject",
+            operation=operation,
+            decision="rejected",
+            reason="session_id_invalid",
+            source=normalized_source or "learn",
+            session_id=None,
+            actor_id=normalized_actor_id,
+            metadata={"error": str(exc)},
+        )
+        return payload
+
+    target_parent_path = f"{normalized_path_prefix}/{normalized_session_id}".strip("/")
+    target_parent_uri = make_uri(normalized_domain, target_parent_path)
+    payload["session_id"] = normalized_session_id
+    payload["target_parent_uri"] = target_parent_uri
 
     normalized_content = str(content or "").strip()
     if not normalized_content:
@@ -1496,7 +1625,24 @@ async def run_reflection_workflow_service(
     if normalized_mode not in {"prepare", "execute"}:
         raise ValueError("unsupported reflection workflow mode")
 
-    normalized_session_id = str(session_id or "").strip() or get_session_id()
+    raw_session_id = (
+        get_session_id()
+        if session_id is None
+        else str(session_id)
+    )
+    try:
+        normalized_session_id = SnapshotManager._validate_session_id(raw_session_id)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "mode": normalized_mode,
+            "source": str(source or "").strip() or "session_summary",
+            "reason": "session_id_invalid",
+            "validation_error": str(exc),
+            "prepared": False,
+            "executed": False,
+            "session_id": raw_session_id,
+        }
     normalized_source = str(source or "").strip() or "session_summary"
     normalized_reason = str(reason or "").strip()
 
@@ -1515,8 +1661,8 @@ async def run_reflection_workflow_service(
             "session_id": normalized_session_id,
         }
 
-    async def _run_reflection_task() -> Dict[str, Any]:
-        return await run_explicit_learn_service(
+    async def _run_reflection_payload() -> Dict[str, Any]:
+        result = await run_explicit_learn_service(
             content=str(content or ""),
             source=normalized_source,
             reason=normalized_reason,
@@ -1526,57 +1672,72 @@ async def run_reflection_workflow_service(
             client=client,
         )
 
+        review_id = str(result.get("batch_id") or "").strip()
+        created_memory = (
+            result.get("created_memory")
+            if isinstance(result.get("created_memory"), dict)
+            else {}
+        )
+        snapshot_id = _safe_int(created_memory.get("id"), default=0)
+        prepared = normalized_mode == "prepare" and bool(result.get("accepted"))
+        executed = normalized_mode == "execute" and bool(result.get("executed"))
+
+        if prepared or executed:
+            await _record_import_learn_event(
+                event_type="learn",
+                operation="reflection_workflow",
+                decision="executed" if executed else "accepted",
+                reason="executed" if executed else "prepared",
+                source=normalized_source,
+                session_id=normalized_session_id,
+                actor_id=actor_id,
+                batch_id=review_id or None,
+                metadata={
+                    "mode": normalized_mode,
+                    "review_id": review_id or None,
+                    "snapshot_id": snapshot_id if snapshot_id > 0 else None,
+                },
+            )
+
+        payload: Dict[str, Any] = {
+            "ok": prepared or executed,
+            "mode": normalized_mode,
+            "source": normalized_source,
+            "reason_text": normalized_reason,
+            "session_id": normalized_session_id,
+            "prepared": prepared,
+            "executed": executed,
+            "review_id": review_id or None,
+            "job_id": review_id or None,
+            "result": result,
+        }
+        if snapshot_id > 0:
+            payload["snapshot_id"] = snapshot_id
+        if isinstance(result.get("rollback"), dict):
+            payload["rollback"] = result.get("rollback")
+        return payload
+
     if normalized_mode == "execute":
-        result = await _run_write_lane(
+        return await _run_write_lane(
             "reflection_workflow.execute",
-            _run_reflection_task,
+            _run_reflection_payload,
             session_id=normalized_session_id,
         )
-    else:
-        result = await _run_reflection_task()
 
-    review_id = str(result.get("batch_id") or "").strip()
-    created_memory = (
-        result.get("created_memory") if isinstance(result.get("created_memory"), dict) else {}
+    dedup_key = _build_source_hash(
+        "\n".join(
+            [
+                normalized_session_id,
+                normalized_source,
+                normalized_reason,
+                str(content or ""),
+            ]
+        )
     )
-    snapshot_id = _safe_int(created_memory.get("id"), default=0)
-    prepared = normalized_mode == "prepare" and bool(result.get("accepted"))
-    executed = normalized_mode == "execute" and bool(result.get("executed"))
-
-    if prepared or executed:
-        await _record_import_learn_event(
-            event_type="learn",
-            operation="reflection_workflow",
-            decision="executed" if executed else "accepted",
-            reason="executed" if executed else "prepared",
-            source=normalized_source,
-            session_id=normalized_session_id,
-            actor_id=actor_id,
-            batch_id=review_id or None,
-            metadata={
-                "mode": normalized_mode,
-                "review_id": review_id or None,
-                "snapshot_id": snapshot_id if snapshot_id > 0 else None,
-            },
-        )
-
-    payload: Dict[str, Any] = {
-        "ok": prepared or executed,
-        "mode": normalized_mode,
-        "source": normalized_source,
-        "reason_text": normalized_reason,
-        "session_id": normalized_session_id,
-        "prepared": prepared,
-        "executed": executed,
-        "review_id": review_id or None,
-        "job_id": review_id or None,
-        "result": result,
-    }
-    if snapshot_id > 0:
-        payload["snapshot_id"] = snapshot_id
-    if isinstance(result.get("rollback"), dict):
-        payload["rollback"] = result.get("rollback")
-    return payload
+    return await _run_deduped_reflection_prepare(
+        dedup_key,
+        _run_reflection_payload,
+    )
 
 
 def _merge_session_global_results(
@@ -2496,6 +2657,8 @@ def _normalize_search_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, An
 
     max_priority = filters.get("max_priority")
     if max_priority is not None:
+        if isinstance(max_priority, bool) or isinstance(max_priority, float):
+            raise ValueError("filters.max_priority must be an integer.")
         try:
             normalized["max_priority"] = int(max_priority)
         except (TypeError, ValueError) as exc:

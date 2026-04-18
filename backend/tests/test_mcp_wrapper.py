@@ -74,6 +74,22 @@ def test_resolve_backend_python_prefers_windows_layout_on_msys_like_hosts(
     assert module.resolve_backend_python() == windows_python
 
 
+@pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        ("SQLITE+AIOSQLITE://////APP/data/memory_palace.db", True),
+        ("sqlite+aiosqlite://///DATA/memory_palace.db", True),
+        ("sqlite+aiosqlite:////Users/test/app/data/memory_palace.db", False),
+    ],
+)
+def test_is_docker_internal_database_url_normalizes_case_and_extra_slashes(
+    database_url: str, expected: bool
+) -> None:
+    module = _load_module()
+
+    assert module.is_docker_internal_database_url(database_url) is expected
+
+
 def test_build_runtime_env_rejects_docker_internal_database_url(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -81,6 +97,27 @@ def test_build_runtime_env_rejects_docker_internal_database_url(
     env_file = tmp_path / ".env"
     env_file.write_text(
         "DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    assert str(excinfo.value) == "1"
+
+
+def test_build_runtime_env_rejects_docker_internal_database_url_with_uppercase_and_extra_slashes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DATABASE_URL=SQLITE+AIOSQLITE://////APP/data/memory_palace.db\n",
         encoding="utf-8",
     )
 

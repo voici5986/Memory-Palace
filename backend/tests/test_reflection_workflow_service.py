@@ -139,6 +139,48 @@ async def test_reflection_prepare_returns_reviewable_plan(
 
 
 @pytest.mark.asyncio
+async def test_reflection_prepare_deduplicates_concurrent_same_session_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = ImportLearnAuditTracker()
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(mcp_server.runtime_state, "import_learn_tracker", tracker)
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker(
+            "Session compaction notes:\n- resolve duplicate preference memories"
+        ),
+    )
+
+    first, second = await asyncio.gather(
+        mcp_server.run_reflection_workflow_service(
+            mode="prepare",
+            source="session_summary",
+            reason="resolve duplicate preference memories",
+            session_id="s-reflection-prepare-dedup",
+            client=_ReflectionClient(),
+        ),
+        mcp_server.run_reflection_workflow_service(
+            mode="prepare",
+            source="session_summary",
+            reason="resolve duplicate preference memories",
+            session_id="s-reflection-prepare-dedup",
+            client=_ReflectionClient(),
+        ),
+    )
+
+    summary = await tracker.summary()
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first["prepared"] is True
+    assert second["prepared"] is True
+    assert first["review_id"] == second["review_id"]
+    assert summary["operation_decision_breakdown"]["reflection_workflow|accepted"] == 1
+
+
+@pytest.mark.asyncio
 async def test_reflection_execute_can_be_rolled_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -204,6 +246,72 @@ async def test_reflection_execute_routes_write_lane_through_explicit_session_id(
     assert payload["ok"] is True
     assert payload["executed"] is True
     assert lane_calls == [("explicit-session", "reflection_workflow.execute")]
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_service_rejects_invalid_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="reject invalid session id",
+        session_id="bad\u200bsession",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is False
+    assert payload["prepared"] is False
+    assert payload["executed"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert "invisible or control characters" in payload["validation_error"]
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_service_rejects_session_id_with_surrounding_whitespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="reject whitespace-padded session id",
+        session_id=" bad-session ",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is False
+    assert payload["prepared"] is False
+    assert payload["executed"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert "whitespace" in payload["validation_error"]
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_service_does_not_fallback_to_ambient_session_for_blank_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="reject blank session id",
+        session_id="   ",
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is False
+    assert payload["prepared"] is False
+    assert payload["executed"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert payload["session_id"] == "   "
+    assert "whitespace" in payload["validation_error"]
 
 
 @pytest.mark.asyncio

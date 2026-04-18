@@ -211,6 +211,43 @@ def test_repo_local_stdio_wrapper_rejects_data_prefixed_docker_internal_database
     assert "connect your client to the Docker /sse endpoint instead." in result.stderr
 
 
+def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url_with_uppercase_and_extra_slashes(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+
+    source_wrapper = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "")
+    with script_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source_wrapper)
+    script_path.chmod(0o755)
+
+    _write_shell_script(backend_python, "#!/usr/bin/env bash\nexit 0\n")
+
+    (project_root / ".env").write_text(
+        "DATABASE_URL=SQLITE+AIOSQLITE://////APP/data/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    result = _run_command(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        env={key: value for key, value in os.environ.items() if key != "DATABASE_URL"},
+    )
+
+    assert result.returncode == 1
+    assert "Docker-internal DATABASE_URL" in result.stderr
+    assert "connect your client to the Docker /sse endpoint instead." in result.stderr
+
+
 def test_repo_local_stdio_wrapper_exports_repo_database_url_when_runtime_value_is_empty(
     tmp_path: Path,
 ) -> None:
@@ -268,6 +305,20 @@ def test_repo_local_stdio_wrapper_exports_repo_database_url_when_runtime_value_i
 
     assert result.returncode == 0
     assert result.stdout == f"sqlite+aiosqlite:///{host_db.as_posix()}"
+
+
+def test_docker_publish_validate_job_runs_frontend_typecheck() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    workflow_text = (
+        project_root / ".github" / "workflows" / "docker-publish.yml"
+    ).read_text(encoding="utf-8")
+
+    install_idx = workflow_text.index("- name: Install frontend dependencies")
+    typecheck_idx = workflow_text.index("- name: Run frontend typecheck")
+    build_idx = workflow_text.index("- name: Build frontend")
+
+    assert install_idx < typecheck_idx < build_idx
+    assert "run: cd frontend && npm run typecheck" in workflow_text
 
 
 def test_check_gate_syntax_skips_when_post_check_script_is_missing(

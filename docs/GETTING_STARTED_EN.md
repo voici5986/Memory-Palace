@@ -235,10 +235,15 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```bash
 cd frontend
 npm install
+npm run typecheck
 npm run dev
 ```
 
 > Frontend i18n dependencies are already included in `frontend/package.json` and `frontend/package-lock.json`. A normal `npm install` is sufficient; you don't need to install `i18next`, `react-i18next`, or `i18next-browser-languagedetector` separately.
+>
+> `frontend/package.json` now also ships a first-class `npm run typecheck` entry, so you can repeat the same frontend typecheck path locally without depending on a temporary `npx -p typescript ...` command.
+>
+> The Docker publish validation workflow now also runs this same `npm run typecheck` step, so local checks and pre-publish checks use the same frontend typecheck path.
 
 Expected output:
 
@@ -261,6 +266,8 @@ If you wish to view the Dashboard buttons, fields, and typical operation flows p
 > If you enabled `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`, direct requests from the local loopback address can access these protected data interfaces.
 
 > If you choose **Save dashboard key only**, that key is stored in the current browser session (`sessionStorage`) until you clear it manually or that browser session ends. The assistant's `Profile B/C/D` presets and related retrieval toggles now clear hidden stale fields before save. `Profile C` keeps the real local/private router base `http://127.0.0.1:8001/v1`, while `Profile D` keeps the remote placeholder base `https://router.example.com/v1` and still expects you to replace it. The assistant also supports the `openai` embedding backend, and when you switch from local hash to a remote embedding backend it writes the matching `RETRIEVAL_EMBEDDING_DIM` instead of silently leaving the old `64`. The local `.env` save path also stays disabled until the required remote fields are real values, so choosing `Profile C/D` alone is no longer enough to make the form look save-ready. On direct `api` / `openai` embedding paths, local `.env` save now also requires a real positive-integer `embedding_dim`. These presets still do not prove that your router is reachable, that the embedding dimension is correct, or that any old index has already been migrated. If your local router is not ready yet, switch the retrieval fields manually to direct `api` / `openai` mode for debugging. If reranker stays enabled on that direct path, you still need to fill the direct reranker base/model fields or turn reranker off first. If you just changed embedding backend / model / dimension, remember to restart the backend and reindex when needed.
+>
+> That browser-only save now also takes effect immediately for protected Dashboard requests in the current page, even if a runtime-injected key was already active before. When the save succeeds, the success banner stays visible until you close the dialog yourself.
 >
 > If you are opening the page through an authenticated non-loopback path, the setup assistant can still show the current status, but **Save local `.env` settings** stays disabled on purpose. That path is still reserved for direct loopback requests only.
 
@@ -367,7 +374,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 
 > If you enable this kind of local joint debugging injection under `profile c/d`, the script will switch this run to an explicit API mode and additionally force `RETRIEVAL_EMBEDDING_BACKEND=api`. The current injection path also carries explicit `RETRIEVAL_EMBEDDING_*` (including `RETRIEVAL_EMBEDDING_DIM`), `RETRIEVAL_RERANKER_*`, and optional `INTENT_LLM_*` / `WRITE_GUARD_LLM_*` / `COMPACT_GIST_LLM_*` values. When `RETRIEVAL_EMBEDDING_API_*` / `RETRIEVAL_RERANKER_API_*` are not explicitly provided, it will prioritize reusing `ROUTER_API_BASE/ROUTER_API_KEY` from the current process as a fallback; if you also set `INTENT_LLM_*`, this chain will also be injected. This mode is more suitable for local troubleshooting and is not equivalent to verifying the final release `router` template.
 >
-> In the current validation path, `profile c/d + --allow-runtime-env-injection` was rechecked again. The script now defers the template placeholder check for that run until the injected runtime values have been written, and then still fail-closes if the required external settings remain missing.
+> On this path, `profile c/d + --allow-runtime-env-injection` now defers the template placeholder check until the injected runtime values have been written, and then still fail-closes if the required external settings remain missing.
 >
 > If you only want a fast smoke check first, hit the real `/embeddings` and `/rerank` endpoints with the same model and key you plan to use. That is usually quicker than starting from a full backend run.
 >
@@ -377,7 +384,7 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > Concurrent deployments under the same checkout will be serialized by a deployment lock; if another one-click deployment is already executing, subsequent processes will exit immediately with a prompt to retry later.
 >
-> On the macOS / Linux shell path, if you explicitly point `MEMORY_PALACE_DOCKER_ENV_FILE` at your own custom file, `docker_one_click.sh` now updates that file through temp files created in the same directory, so replacing it is less likely to degrade into a cross-filesystem copy when the file lives outside the default temp area.
+> If you explicitly set `MEMORY_PALACE_DOCKER_ENV_FILE`, both one-click scripts now resolve it to a stable absolute path before they regenerate the file or hand it to `docker compose`, so the run no longer depends on which directory you launched it from. On the macOS / Linux shell path, `docker_one_click.sh` still updates that custom file through temp files created in the same directory, so replacing it is less likely to degrade into a cross-filesystem copy when the file lives outside the default temp area.
 >
 > The local build path now also uses checkout-scoped stable image names. In practice, once this checkout has completed one successful build, `--no-build` can keep reusing those images even if you change `COMPOSE_PROJECT_NAME`; you only need `--build` again on the first run or after deleting the local images.
 >
@@ -386,6 +393,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > Currently, Docker Compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before treating the frontend as truly ready. In practice, when the container first shows `running`, the page may still take a few more seconds to become truly available, which is normal.
 >
 > The backend container-side check is no longer “HTTP 200 from `/health` is enough”. It also runs `deploy/docker/backend-healthcheck.py`, which requires the payload to report `status == "ok"`. If detailed `/health` is already degraded, Docker keeps the backend unhealthy; when the request fails, the JSON is invalid, or the status is not `ok`, the script now prints one short failure reason first, which makes container-side diagnosis less guessy.
+>
+> On both the shell and PowerShell one-click paths, the local readiness probes now also force a loopback `NO_PROXY` / `no_proxy` bypass for `127.0.0.1`, `localhost`, `::1`, and `host.docker.internal`. In practice, a host proxy is less likely to make a healthy local `/health` or proxied `/sse` probe look broken.
 >
 > If your environment starts slowly, you can also tune that probe timeout through `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC`; the helper currently defaults to `5` seconds.
 >
@@ -506,6 +515,8 @@ If you just cloned the GitHub repository, it is normal if you don't see these tw
 ## 5. Initial Validation
 
 > The checks here focus on "getting the system running"; if you need additional local Markdown validation summaries, run the validation scripts mentioned above.
+>
+> Current real verification snapshot for this repository session: backend non-benchmark tests `857 passed, 15 skipped`; frontend `149 passed`; `npm run typecheck` passed; frontend build passed. Live MCP e2e, the repo-local macOS Profile B real-browser path, and Docker one-click Profiles A/B/C/D were **not** rerun in this session and still keep explicit target-environment recheck boundaries.
 
 ### 5.1 Health Check
 
@@ -591,7 +602,7 @@ python mcp_server.py
 > - native Windows: `python backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL: `bash scripts/run_memory_palace_mcp_stdio.sh`
 >
-> These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db` or a `/data/...` variant, they refuse to start on purpose. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
+> These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, `sqlite+aiosqlite://///app/data/memory_palace.db`, an uppercase `/APP/...` form, or a `/data/...` variant, they refuse to start on purpose. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
 >
 > On the shell-wrapper path, `run_memory_palace_mcp_stdio.sh` also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before it starts Python. In plain language: a non-UTF-8 locale is less likely to break local stdio traffic.
 >
@@ -615,7 +626,7 @@ python run_sse.py
 >
 > The same SSE process also provides a lightweight `/health` endpoint, mainly for standalone local debugging; the truly open streaming entry point for MCP clients remains `/sse`.
 >
-> This local operator path was also rechecked in the current validation round: stopping `run_sse.py` while an `/sse` stream is still active now exits quietly instead of printing the previous ASGI shutdown traceback.
+> On this local operator path, stopping `run_sse.py` while an `/sse` stream is still active now exits quietly instead of printing the previous ASGI shutdown traceback.
 >
 > The command above deliberately binds to `127.0.0.1`, which is more suitable for local machine debugging. If you truly need to allow access from other machines, change `HOST` to `0.0.0.0` (or your actual listening address). This will allow remote clients to connect to the listening address, but API Key, reverse proxy, firewall, and transport layer security will still need to be completed by you.
 >

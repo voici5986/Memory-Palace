@@ -36,6 +36,7 @@ DOCKER_ENV_FILE = PROJECT_ROOT / ".env.docker"
 DEFAULT_DB_PATH = PROJECT_ROOT / "demo.db"
 WINDOWS_VENV_PYTHON = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
 POSIX_VENV_PYTHON = BACKEND_DIR / ".venv" / "bin" / "python"
+SQLITE_DATABASE_URL_SCHEME = "sqlite+aiosqlite:"
 DOCKER_INTERNAL_SQLITE_PREFIXES = ("/app/", "/data/")
 _LOCAL_NO_PROXY_HOSTS = ("localhost", "127.0.0.1", "::1", "host.docker.internal")
 
@@ -97,11 +98,23 @@ def _normalize_env_string_value(value: str | None) -> str:
     return normalized.strip()
 
 
+def _normalize_sqlite_database_url_path(value: str | None) -> str:
+    normalized = _normalize_env_string_value(value).replace("\\", "/")
+    if not normalized:
+        return ""
+
+    normalized = normalized.casefold()
+    if not normalized.startswith(SQLITE_DATABASE_URL_SCHEME):
+        return ""
+
+    path = normalized[len(SQLITE_DATABASE_URL_SCHEME) :]
+    return f"/{path.lstrip('/')}"
+
+
 def is_docker_internal_database_url(value: str | None) -> bool:
-    normalized = _normalize_env_string_value(value)
+    normalized_path = _normalize_sqlite_database_url_path(value)
     return any(
-        normalized.startswith(f"sqlite+aiosqlite:///{prefix}")
-        or normalized.startswith(f"sqlite+aiosqlite://{prefix}")
+        normalized_path.startswith(prefix)
         for prefix in DOCKER_INTERNAL_SQLITE_PREFIXES
     )
 

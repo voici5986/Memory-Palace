@@ -16,6 +16,56 @@ def _sqlite_url(db_path: Path) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
 
 
+def _write_snapshot_session(
+    snapshot_dir: Path,
+    *,
+    session_id: str,
+    created_at: str,
+    scope: dict[str, str],
+    resource_id: str | None = None,
+) -> None:
+    resource_uri = resource_id or f"notes://{session_id}"
+    session_dir = snapshot_dir / session_id
+    resources_dir = session_dir / "resources"
+    resources_dir.mkdir(parents=True, exist_ok=True)
+    resource_file = "snapshot.json"
+
+    (resources_dir / resource_file).write_text(
+        json.dumps(
+            {
+                "resource_id": resource_uri,
+                "resource_type": "path",
+                "snapshot_time": created_at,
+                "data": {
+                    "uri": resource_uri,
+                    "operation_type": "create",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "created_at": created_at,
+                "database_fingerprint": scope["database_fingerprint"],
+                "database_label": scope["database_label"],
+                "resources": {
+                    resource_uri: {
+                        "resource_type": "path",
+                        "snapshot_time": created_at,
+                        "operation_type": "create",
+                        "file": resource_file,
+                        "uri": resource_uri,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_get_snapshot_manager_uses_a_single_instance_under_thread_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -617,3 +667,89 @@ def test_snapshot_manager_list_sessions_skips_invalid_legacy_session_names(
     manager = SnapshotManager(str(snapshot_dir))
 
     assert manager.list_sessions() == []
+
+
+def test_snapshot_manager_age_gc_prunes_old_sessions_but_keeps_current_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    snapshot_dir = tmp_path / "snapshots"
+    manager = SnapshotManager(str(snapshot_dir))
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(tmp_path / "active.db"))
+    monkeypatch.setenv("SNAPSHOT_RETENTION_MAX_AGE_DAYS", "1")
+    monkeypatch.delenv("SNAPSHOT_RETENTION_MAX_SESSIONS", raising=False)
+
+    scope = snapshot_module._resolve_current_database_scope()
+    stale_timestamp = "2000-01-01T00:00:00+00:00"
+    _write_snapshot_session(
+        snapshot_dir,
+        session_id="stale-session",
+        created_at=stale_timestamp,
+        scope=scope,
+    )
+
+    monkeypatch.setattr(snapshot_module, "_utc_iso_now", lambda: stale_timestamp)
+
+    assert manager.create_snapshot(
+        "current-session",
+        "notes://current",
+        "path",
+        {"uri": "notes://current", "operation_type": "create"},
+    )
+
+    assert [item["session_id"] for item in manager.list_sessions()] == ["current-session"]
+    assert (snapshot_dir / "stale-session").exists() is False
+    assert (snapshot_dir / "current-session").exists() is True
+
+
+def test_snapshot_manager_count_gc_keeps_current_session_even_when_it_is_oldest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    snapshot_dir = tmp_path / "snapshots"
+    manager = SnapshotManager(str(snapshot_dir))
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(tmp_path / "active.db"))
+    monkeypatch.setenv("SNAPSHOT_RETENTION_MAX_AGE_DAYS", "0")
+    monkeypatch.setenv("SNAPSHOT_RETENTION_MAX_SESSIONS", "2")
+
+    scope = snapshot_module._resolve_current_database_scope()
+    _write_snapshot_session(
+        snapshot_dir,
+        session_id="recent-a",
+        created_at="2026-03-03T00:00:00+00:00",
+        scope=scope,
+    )
+    _write_snapshot_session(
+        snapshot_dir,
+        session_id="recent-b",
+        created_at="2026-03-02T00:00:00+00:00",
+        scope=scope,
+    )
+    _write_snapshot_session(
+        snapshot_dir,
+        session_id="stale-c",
+        created_at="2026-03-01T00:00:00+00:00",
+        scope=scope,
+    )
+
+    monkeypatch.setattr(
+        snapshot_module,
+        "_utc_iso_now",
+        lambda: "2026-02-01T00:00:00+00:00",
+    )
+
+    assert manager.create_snapshot(
+        "current-session",
+        "notes://current",
+        "path",
+        {"uri": "notes://current", "operation_type": "create"},
+    )
+
+    assert [item["session_id"] for item in manager.list_sessions()] == [
+        "recent-a",
+        "current-session",
+    ]
+    assert (snapshot_dir / "recent-b").exists() is False
+    assert (snapshot_dir / "stale-c").exists() is False

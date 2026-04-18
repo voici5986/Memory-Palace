@@ -42,9 +42,9 @@ The concrete manual examples now live in:
 - `Profile C` / `Profile D` are now described explicitly as **deep retrieval
   tiers**. Enable them only when you intentionally want higher recall and
   ranking quality.
-- The launcher paths did not change in this round:
+- In this verification round, the repo-local launcher rule is now aligned across the same three paths: `install_skill.py`, `render_ide_host_config.py`, and `evaluate_memory_palace_mcp_e2e.py` all pick from the same boundary:
   - Native Windows: `backend/mcp_wrapper.py`
-  - macOS / Linux / `Git Bash` / `WSL`:
+  - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin:
     `scripts/run_memory_palace_mcp_stdio.sh`
 - This guide keeps only public-safe conclusions. It does not write local
   benchmark endpoints, API keys, or model IDs into the repository.
@@ -65,7 +65,7 @@ One more thing to avoid pitfalls:
 
 - This wrapper prioritizes reusing the `DATABASE_URL` from the current repository's `.env`.
 - If a client passes `DATABASE_URL` as an empty string, it still treats that as “not set” and continues to use the valid value from the current repository `.env`.
-- If that `.env` still points to Docker `/app/...` or `/data/...` container paths, the wrapper also refuses to start on purpose.
+- If that `.env` still points to Docker `/app/...` or `/data/...` container paths after normalizing common slash and case variants, the wrapper also refuses to start on purpose.
 - In other words, as long as you don't manually mess up the client commands, the Dashboard / HTTP API / MCP will default to the same database.
 
 Call it **truly configured** only when both checks are true:
@@ -73,7 +73,7 @@ Call it **truly configured** only when both checks are true:
 1. The current CLI can actually discover the `memory-palace` skill in its repo-local or user-scope location.
 2. The current CLI's MCP binding resolves to this checkout's repo-local launcher rather than a stale path from another repository.
    - Native Windows: `backend/mcp_wrapper.py`
-   - macOS / Linux / `Git Bash` / `WSL`: `scripts/run_memory_palace_mcp_stdio.sh`
+   - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin: `scripts/run_memory_palace_mcp_stdio.sh`
 
 ## Current Local Baseline After Sync / Install
 
@@ -104,7 +104,9 @@ docs/skills/memory-palace/
 > - The repo-local MCP launch path is now split in two.
 > - Native Windows now defaults to `backend/mcp_wrapper.py`.
 > - On Windows, `install_skill.py` now writes that native path for Claude / Codex / Gemini / OpenCode.
-> - `Git Bash` / `WSL` are still valid, but only when you intentionally follow the POSIX `bash` wrapper route.
+> - `Git Bash` / `WSL` / MSYS / Cygwin are still valid, but only when you intentionally follow the POSIX `bash` wrapper route.
+> - In other words, launcher selection is now based on the actual host boundary, not just "am I somewhere on Windows": native Windows gets `backend/mcp_wrapper.py`, while `Git Bash` / `WSL` / MSYS / Cygwin stay on `scripts/run_memory_palace_mcp_stdio.sh`.
+> - The same split now applies when you install CLI bindings, render IDE-host snippets, or run the repo-local MCP e2e check.
 > - So on native Windows, do not start by copying the `/bin/zsh` / `bash` examples. First inspect the command that the script actually generated.
 > - If you use `pwsh-in-docker`, `docker_one_click.ps1` now falls back to `ss` when `Get-NetTCPConnection` is unavailable; if the environment has neither, specify ports explicitly or re-run on the target Windows host.
 > - These repo-local launchers still prioritize the `DATABASE_URL` from the current repository's `.env`, preventing you from accidentally connecting to a second SQLite database on the client side.
@@ -184,6 +186,8 @@ python scripts/install_skill.py \
   --check
 ```
 
+If this `claude,gemini` `workspace --with-mcp --check` path passes, you can read it as: the current repository's workspace-level skill + MCP entrypoints are aligned. This does not change the public boundary for `Codex/OpenCode`: they still stay on the user-scope MCP path by default.
+
 For workspace-local MCP, `install_skill.py` only manages stable repo-local bindings for `Claude Code` and `Gemini CLI`. Keep `Codex/OpenCode` on the user-scope MCP path.
 
 If `workspace --check` has passed, but `user --check` is still reporting `SKILL FAIL / mismatch`, first suspect that old mirrors or old MCP configurations remain in your home directory. Usually, rerunning the same `--scope user --with-mcp --force` is enough; the script will now generate `*.bak` first and won't silently overwrite the original files.
@@ -252,7 +256,7 @@ Conclusion:
 - **The more stable default is still to start with `--scope user --with-mcp`.**
 - If you also want a workspace entry in this repository, add a workspace install afterward.
 - If you see `Policy file warning in memory-palace-overrides.toml`, rerun the same `--scope user --with-mcp --force` install first.
-- When documenting for others, it's suggested to state: "smoke has passed, but `gemini_live` has not yet fully passed."
+- When documenting it for others, the safer wording is: "regular smoke can be rerun separately, while `gemini_live` remains an explicit opt-in live verification path."
 
 ### Codex CLI
 
@@ -267,8 +271,7 @@ Conclusion:
 - The accurate statement is:
   - Skill can be auto-discovered repo-locally.
   - MCP is still recommended to be registered to the current repository via `--scope user --with-mcp`.
-- In the current verification round, Codex skill discovery is still usable,
-  but `mcp_bindings` / smoke should still be treated as `PARTIAL`:
+- The safer public wording for `Codex` is: the skill is still repo-locally auto-discoverable, MCP is still recommended through `--scope user --with-mcp`, and unless you have just rerun smoke on the target machine, do not describe it as "fully passed on this machine." In the current implementation, `mcp_bindings` / smoke should still be treated as `PARTIAL`:
   - the user-scope MCP binding is aligned to the current repository
   - `codex exec` smoke can still stop at `PARTIAL` because of timeout or
     missing structured output
@@ -298,7 +301,7 @@ Unified stance:
 - **skill projection entry**: repo-root `AGENTS.md`
 - **execution entry**: local MCP config pointing at the current repository's repo-local launcher
   - native Windows defaults to `backend/mcp_wrapper.py`
-  - POSIX shell paths default to `scripts/run_memory_palace_mcp_stdio.sh`
+  - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin default to `scripts/run_memory_palace_mcp_stdio.sh`
 - **host differences**: handled as small compatibility layers when needed, instead of maintaining full live-smoke workflows per IDE
 
 In practice:
@@ -396,7 +399,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 These two reports are mainly used for supplemental verification and are not intended as primary entry documentation. They are local products that "appear only after running" by default, so it's normal if they aren't in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 `MCP_LIVE_E2E_REPORT.md` defaults to using an isolated temporary database and won't touch your official database; however, upon failure, it might still include stderr, logs, or temporary directory paths in the report, so it's also recommended to review the content yourself before forwarding.
-This live e2e now follows the same repo-local wrapper path that users actually connect to. In the current verified path, it also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory.
+This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. In this session, the rerun baseline only covers backend non-benchmark tests (`857 passed, 15 skipped`), frontend tests (`149 passed`), `frontend npm run typecheck`, and frontend build; live MCP e2e, real-browser verification, and Docker profiles were not rerun in this round.
 
 ## Positive / Negative Prompts
 

@@ -39,7 +39,7 @@ backend/
 ├── db/
 │   ├── __init__.py        # 客户端工厂（get_sqlite_client / close_sqlite_client）
 │   ├── sqlite_client.py   # 核心数据库层（CRUD、检索、write_guard、gist、vitality、embedding、rerank）
-│   ├── snapshot.py        # 快照管理器（按 session 记录写操作的前置状态、串行化同一 session 的快照写入，并按当前数据库过滤 Review 可见会话）
+│   ├── snapshot.py        # 快照管理器（按 session 记录写操作的前置状态、串行化同一 session 的快照写入，并做保守的 session 级 retention/GC：按 age/count 清理旧 session、保护当前 session、对拿不到锁的旧 session 先跳过；Review 可见会话仍按当前数据库过滤）
 │   ├── migration_runner.py# 自动数据库迁移执行器
 │   └── migrations/        # SQL 迁移脚本目录
 ├── models/
@@ -51,10 +51,11 @@ backend/
 
 ### 核心模块说明
 
-- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复、退出前 best-effort drain pending auto-flush summary）、CORS 配置、路由注册（`review`、`browse`、`maintenance`、`setup`）和健康检查。当前 `/health` 对本机 loopback 或带有效 `MCP_API_KEY` 的请求会返回索引状态、write lane 与 index worker 的详细运行时信息；未鉴权的远端探活只返回浅健康结果，避免把内部状态直接暴露出去。如果这类详细健康检查已经进入降级态，HTTP 状态码也会直接变成 `503`，方便 Docker healthcheck 和运维探活按“未就绪”处理。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。
+- **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复、退出前 best-effort drain pending auto-flush summary）、CORS 配置、路由注册（`review`、`browse`、`maintenance`、`setup`）和健康检查。当前 `/health` 对本机 loopback 或带有效 `MCP_API_KEY` 的请求会返回索引状态、write lane 与 index worker 的详细运行时信息；未鉴权的远端探活只返回浅健康结果，避免把内部状态直接暴露出去。如果这类详细健康检查已经进入降级态，HTTP 状态码也会直接变成 `503`，方便 Docker healthcheck 和运维探活按“未就绪”处理。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。启动阶段在 `load_dotenv(..., override=False)` 之前，还会先记下当时进程里原本就存在的 env key，给 setup 模块后续判断“这是不是进程显式覆盖”用。
 - **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。最终结果回包前的 path 状态复核，现在也会优先走批量查询，减少结果较多时逐条回查 SQLite 的额外开销。`create_memory` 在 write guard 临时异常或降级导致 fail-closed 时，当前返回里也会明确标出 `retryable` / `retry_hint`，避免调用方把“临时不可用”误读成“永远不能创建”。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。当前 session-first 检索缓存与 flush tracker 都采用“**单 session 限长 + 总 session 数上限**”的进程内边界，避免长时间运行后按 session 数无限增长；session-first 命中缓存还会惰性清理过期条目，避免旧命中长期占着容量。
 - **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。它现在还会在受信代理链路下优先按 `X-Forwarded-For` / `X-Real-IP` 识别真实客户端地址来做 `/messages` burst limit，并默认发送 15 秒 heartbeat ping。传输层的 host/origin 校验现在默认保留本机回环 allowlist；如果你确实需要远程 hostname / origin 通过校验，可以显式补 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是依赖非回环监听地址去“自动放开”。仓库当前保留两种使用方式：本地可独立运行 `run_sse.py` 做 standalone 调试；Docker 默认路径则把同一套 SSE 入口直接挂进 `main.py` 的 backend 进程，通过前端代理暴露。
+- **`setup.py`**：首启配置与本地 `.env` 写入口。当前 `/setup/status` 和 `/setup/config` 在判断 setup 管理变量时，会把“真正的进程显式覆盖”和“服务启动时只是从 `.env` 读进来的值”分开看；所以 status/save 不会再把 `.env` 启动值误判成 process override，本地保存后也能把当前进程里的 setup 管理配置刷新到新值。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。
 - **`db/migration_runner.py`**：负责发现和执行 SQL migration，并记录版本与 checksum。当前 checksum 归一化不仅会处理 `CRLF/LF`，也会剥离 UTF-8 BOM，所以同一份 migration 只是被 Windows/Notepad 改了文件头，不会被误判成 schema drift。
 
@@ -99,7 +100,7 @@ backend/
 
 - snapshot 文件仍然位于仓库级 `snapshots/` 目录；
 - 但会话列表、快照列表和快照读取会按**当前数据库作用域**过滤，避免你在同一 checkout 下切换 `DATABASE_URL`、临时 SQLite 文件或 Docker 数据卷后，把另一份库的 rollback 会话混进当前审查列表；
-- 同一个 `session_id` 下的 snapshot 写路径现在会串行化，`manifest.json` 和单个快照 JSON 文件也会通过原子替换落盘；所以多个本地进程共用同一个 checkout 时，同一条 Review session 的快照元数据更不容易丢条目，也不容易出现半写入 JSON；
+- 同一个 `session_id` 下的 snapshot 写路径现在会串行化，`manifest.json` 和单个快照 JSON 文件也会通过原子替换落盘；同一套快照目录还会做保守的 session 级 retention/GC：按 age/count 清理旧 session、保护当前 session、对拿不到锁的旧 session 先跳过；所以多个本地进程共用同一个 checkout 时，活跃 session 不会为了抢锁被误删，快照元数据也更不容易丢条目或出现半写入 JSON；
 - 如果 `manifest.json` 损坏，后端现在会优先使用 session 侧记录的数据库作用域去重建；只有在能保住原始作用域时才会把重建结果写回。拿不到可靠作用域时，这条会话会先保持隐藏，也不会被一次只读的会话列表请求自动删掉；
 - 没有数据库作用域标记的 legacy snapshot 会话，默认不会继续暴露在当前 Review 列表里；当前实现还会对这类“被隐藏的老会话”补一条一次性 warning，避免升级后看起来像快照凭空消失。
 - 如果同一个 URI 已经在另一条 Review session 里留下了更晚的**内容快照**，旧快照的 rollback 现在会直接返回 `409`，避免把较新的内容改动默默回滚掉。
@@ -167,7 +168,9 @@ backend/
 和这轮 reflection 修复直接相关的边界也补一句：
 
 - `POST /maintenance/learn/reflection` 的 `prepare` 仍然只是准备态；真正会落库的 `execute` 现在会进入同一条 write lane，和其他写操作保持一致的串行化语义
+- 如果同一个 `session_id`、`source`、`reason`、`content` 被并发 `prepare`，现在会复用同一个 prepared review，而不是为同一批内容生成多个 review ID
 - `/maintenance/observability/summary` 里的 `reflection_workflow` 统计现在会合并持久化 summary，重启后 summary 计数口径稳定；这里说的是 summary 稳定，不是把所有明细事件都永久保留下来
+- 如果调用方显式传了空白或只含空格的 `session_id`，reflection workflow 现在会直接按 `session_id_invalid` fail-closed；只有真的没传 `session_id` 时，才会回退到 ambient session
 
 完整 API 文档可启动后端后访问 `http://127.0.0.1:8000/docs`（Swagger UI）。
 
@@ -239,8 +242,9 @@ frontend/src/
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
 - 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
 - 如果服务端 Dashboard 鉴权已经生效，尤其是标准 Docker proxy-held key 路径，首启配置向导现在不会只因为浏览器本地还没保存 key 就自己误弹
-- 浏览器里保存的 Dashboard 鉴权现在走当前浏览器会话的 `sessionStorage`；若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但只会在确认 `localStorage` 里还是那份旧值时才删除它，避免多标签页同时迁移时误删新值
+- 浏览器里保存的 Dashboard 鉴权现在走当前浏览器会话的 `sessionStorage`；若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但只会在确认 `localStorage` 里还是那份旧值时才删除它，避免多标签页同时迁移时误删新值。通过 Setup Assistant 保存本地 `.env` 时，如果表单里带了当前 key，前端也会把这把 key 一并落到浏览器会话；如果这次保存把 key 清空，旧的浏览器侧保存值也会一起清掉
 - Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，保存还会一起写正确的 `RETRIEVAL_EMBEDDING_DIM`，并且 `/setup/config` 已支持 `openai` embedding backend
+- `Maintenance` 页的 vitality cleanup confirm 现在不是“失败就一律把 prepared review 清空”；像 `401`、超时、网络错误这类更像临时失败的情况，会保留当前 prepared review，方便修完鉴权或网络后直接重试
 - Memory 页的“离开未保存编辑”和“删除路径”现在都走 fail-closed 确认逻辑；如果宿主环境不支持原生 `confirm()`，动作会被直接拦下，并给出页内错误提示，而不是静默继续
 
 ---
@@ -264,15 +268,17 @@ frontend/src/
 >
 > 代码参考：`frontend/src/lib/api.js` 中的 `readWindowRuntimeMaintenanceAuth()` 与 `getMaintenanceAuthState()`。
 >
-> 说人话就是：前端优先读运行时注入的 key；如果没有，再读当前浏览器会话里的已保存 key。旧版遗留在 `localStorage` 里的 Dashboard key 只会做一次迁移；只有在那份旧值没有被别的标签页改写时，当前标签页才会把它删掉。
+> 说人话就是：默认情况下，前端优先读运行时注入的 key；如果没有，再读当前浏览器会话里的已保存 key。只有一个额外例外：如果你刚在 Setup Assistant 里手动保存了一把浏览器侧 Dashboard key，前端会明确让这把新 key 在当前会话里优先于 runtime key。旧版遗留在 `localStorage` 里的 Dashboard key 只会做一次迁移；只有在那份旧值没有被别的标签页改写时，当前标签页才会把它删掉。
 >
 > 说人话就是：前端把鉴权做成了“运行时再决定”，所以你可以在页面顶部直接补 key，也可以由部署脚本在页面加载前注入。
 >
 > 如果这把鉴权已经在服务端代理层生效，前端现在也不会只因为浏览器本地没有保存 Dashboard key 就自己弹出首启向导。
 >
+> 还有一个当前代码已经补齐的小细节：如果你把 `maintenanceApiKeyMode` 从 `header` 切到 `bearer`（或反过来），请求拦截器会先删掉旧的相反 header，再按当前模式补新的那一个，避免同一个请求同时带两套鉴权头。
+>
 > 再补一个当前代码已经对齐的小边界：如果你给前端显式配置了 `VITE_API_BASE_URL`，无论它是同源下的带前缀路径，还是你自己的跨源 API 地址，前端现在都会按这个 API base 去识别 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求，并继续附加浏览器里保存的 Dashboard key；但它仍然不会把这把 key 发到无关第三方绝对 URL。
 >
-> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它也会继续复用这个值；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起；如果 `.env` 或显式 `DATABASE_URL` 仍写成 `/app/...` 或 `/data/...` 这类容器路径，它也会直接拒绝启动。对 shell wrapper 这条路径，它还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，减少非 UTF-8 locale 下的本地 stdio 编码问题；同时也会合并已有的 `NO_PROXY` / `no_proxy` 并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`，让 repo-local stdio 更不容易被宿主机代理误伤本机模型调用。
+> `run_memory_palace_mcp_stdio.sh` 这层 wrapper 的额外价值不是“修复本来就会读错库的 mcp_server.py”，而是给 CLI/本地配置一个更稳的默认入口：优先复用仓库 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它也会继续复用这个值；只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才回退到仓库里的默认 SQLite 路径。如果只存在 `.env.docker`，wrapper 会明确拒绝回退到 `demo.db`，避免把本地 stdio 和 Docker 容器数据混在一起；如果 `.env` 或显式 `DATABASE_URL` 在把常见斜杠和大小写变体归一化后，仍写成 `/app/...` 或 `/data/...` 这类容器路径（例如 `sqlite+aiosqlite://///app/data/...` 或大写 `/APP/...` 变体），它也会直接拒绝启动。对 shell wrapper 这条路径，它还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`，减少非 UTF-8 locale 下的本地 stdio 编码问题；同时也会合并已有的 `NO_PROXY` / `no_proxy` 并补上 `localhost`、`127.0.0.1`、`::1`、`host.docker.internal`，让 repo-local stdio 更不容易被宿主机代理误伤本机模型调用。
 
 > Docker 一键部署走的是第三种方式：不把 key 注入页面，而是在前端代理层自动转发。
 
@@ -287,6 +293,7 @@ frontend/src/
    - write_guard 支持三级判定链：语义匹配 → 关键词匹配 → LLM 决策（可选）。
 3. 生成 **snapshot** 与版本变更（按 `path` 和 `memory` 两维度分别记录；MCP 工具写入和 Dashboard `/browse/node` 写入都遵循这套语义；同一 session 的快照写入现在通过文件锁串行化）。
    - 对 Dashboard `/browse/node` 来说，成功写入后现在还会补上 reflection workflow 可复用的 session summary 输入。
+   - 每次 snapshot 成功写入后，后端现在还会按 age/count 做保守的 session 级 retention；当前 session 会被保护，拿不到锁的旧 session 会先跳过。
 4. 入队 **索引任务**（队列满会返回 `index_dropped` / `queue_full`；真正写库的索引任务也会经过同一条 write lane，而不是直接和前台写入抢同一个 SQLite 文件）。
 
 ### 检索路径
@@ -338,13 +345,15 @@ Docker 端口环境变量：
 
 相关文件：
 
-- Compose 文件：`docker-compose.yml`
+- Compose 文件：`docker-compose.yml`（frontend healthcheck 在探测 `127.0.0.1:8080` 前会先显式 unset `http_proxy/https_proxy/all_proxy/no_proxy` 这一组环境变量，避免容器继承宿主代理后把本机探活误导到代理链路）
 - 镜像定义：`deploy/docker/Dockerfile.backend`（基于 `python:3.11-slim`）、`deploy/docker/Dockerfile.frontend`（构建阶段 `node:22-alpine`，运行阶段 `nginxinc/nginx-unprivileged:1.27-alpine`）
 - Backend 健康检查脚本：`deploy/docker/backend-healthcheck.py`（容器内对 `/health` 做二次检查，要求返回 payload 的 `status == "ok"`；默认超时 `5` 秒，可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整）
 - Nginx 配置模板：`deploy/docker/nginx.conf.template`（仅对受保护的 Dashboard API 路径和 `/sse` / `/messages` 注入 `X-MCP-API-Key`，并对 `/index.html` 返回 no-store/no-cache/must-revalidate，减少前端更新后继续命中旧入口页面；前端入口脚本会先对代理持有的 key 做一次特殊字符转义，并拒绝剩余 ASCII 控制字符，再生成最终 Nginx 配置）
 - 入口脚本：`deploy/docker/backend-entrypoint.sh`、`deploy/docker/frontend-entrypoint.sh`（后端入口脚本在 root 场景下如果找不到 `gosu` 会直接 fail-closed）
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`
+
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend 非 benchmark `857 passed, 15 skipped`、frontend `149 passed`，前端 typecheck 和 build 通过，但 live MCP e2e、真实浏览器路径与 Docker profile 这一轮没有重跑。
 
 ---
 

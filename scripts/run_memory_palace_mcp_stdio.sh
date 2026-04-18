@@ -316,16 +316,29 @@ format_sqlite_absolute_url() {
   printf 'sqlite+aiosqlite:////%s' "${absolute_path}"
 }
 
-is_docker_internal_database_url() {
+normalize_sqlite_database_url_path() {
   local value
   value="$(normalize_env_value "${1:-}")"
+  value="$(normalize_path_slashes "${value}")"
+  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${value}" != sqlite+aiosqlite:* ]]; then
+    printf '%s' ""
+    return 0
+  fi
+
+  value="${value#sqlite+aiosqlite:}"
+  while [[ "${value}" == /* ]]; do
+    value="${value#/}"
+  done
+  printf '/%s' "${value}"
+}
+
+is_docker_internal_database_url() {
+  local normalized_path
+  normalized_path="$(normalize_sqlite_database_url_path "${1:-}")"
   local prefix
   for prefix in "${DOCKER_INTERNAL_SQLITE_PREFIXES[@]}"; do
-    case "${value}" in
-      "sqlite+aiosqlite:///${prefix}"*|"sqlite+aiosqlite://${prefix}"*)
-        return 0
-        ;;
-    esac
+    [[ "${normalized_path}" == "${prefix}"* ]] && return 0
   done
   return 1
 }
@@ -385,7 +398,7 @@ if [[ -z "${runtime_remote_timeout}" && -f "${ENV_FILE}" ]]; then
   runtime_remote_timeout="$(normalize_env_value "$(read_env_value "${ENV_FILE}" "RETRIEVAL_REMOTE_TIMEOUT_SEC")")"
 fi
 if [[ -n "${runtime_remote_timeout}" ]]; then
-export RETRIEVAL_REMOTE_TIMEOUT_SEC="${runtime_remote_timeout}"
+  export RETRIEVAL_REMOTE_TIMEOUT_SEC="${runtime_remote_timeout}"
 else
   export RETRIEVAL_REMOTE_TIMEOUT_SEC="8"
 fi

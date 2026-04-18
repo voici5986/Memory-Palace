@@ -40,9 +40,9 @@
 
 - `Profile B` 仍然是推荐默认档，适合 CLI / IDE 的日常 memory recall。
 - `Profile C` / `Profile D` 现在明确按**深检索档**来描述，只在你主动追求更高召回和排序质量时显式启用。
-- 这轮公开复核里，launcher 路径没有变化：
+- 当前代码和仓库脚本已经统一到同一套 repo-local launcher 口径：`install_skill.py`、`render_ide_host_config.py`、`evaluate_memory_palace_mcp_e2e.py` 都按下面选路径：
   - 原生 Windows：`backend/mcp_wrapper.py`
-  - macOS / Linux / `Git Bash` / `WSL`：`scripts/run_memory_palace_mcp_stdio.sh`
+  - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin：`scripts/run_memory_palace_mcp_stdio.sh`
 - 本文档只保留公开结论，不会把本地 benchmark 用的 endpoint、API key 或 model id 写进仓库。
 
 ## 先分清两层
@@ -62,13 +62,13 @@
 - skill 能被当前 CLI 发现
 - MCP 确实指向当前仓库的 repo-local launcher
   - 原生 Windows：`backend/mcp_wrapper.py`
-  - macOS / Linux / `Git Bash` / `WSL`：`scripts/run_memory_palace_mcp_stdio.sh`
+  - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin：`scripts/run_memory_palace_mcp_stdio.sh`
 
 再补一句最容易踩坑的：
 
 - 这个 wrapper 会优先复用当前仓库 `.env` 里的 `DATABASE_URL`
 - 如果某个客户端把 `DATABASE_URL` 传成空字符串，它也会按“没设置”处理，继续回退到当前仓库 `.env` 的有效值
-- 如果那份 `.env` 还是 Docker 用的 `/app/...` 或 `/data/...` 容器路径，wrapper 也会直接拒绝启动
+- 如果那份 `.env` 在把常见斜杠和大小写变体归一化后，还是 Docker 用的 `/app/...` 或 `/data/...` 容器路径，wrapper 也会直接拒绝启动
 - 也就是说，只要你别手工乱改客户端命令，Dashboard / HTTP API / MCP 默认就是同一份数据库
 
 ## Current Local Baseline After Sync / Install
@@ -100,7 +100,8 @@ docs/skills/memory-palace/
 > - 当前 repo-local MCP 启动链路已经拆成两条
 > - 原生 Windows 默认走 `backend/mcp_wrapper.py`
 > - `install_skill.py` 现在会为 Claude / Codex / Gemini / OpenCode 在 Windows 上写入这条 native 路径
-> - `Git Bash` / `WSL` 仍然有用，但只是在你明确走 POSIX `bash` wrapper 时才是前提
+> - `Git Bash` / `WSL` / MSYS / Cygwin 仍然有用，但只是在你明确走 POSIX `bash` wrapper 时才是前提
+> - 这里现在也不是“只看操作系统名字”。如果你在 Windows 机器上是从 `Git Bash` / `WSL` / MSYS / Cygwin 里跑安装脚本，或生成 IDE host 配置，或跑 repo-local MCP e2e，它们都会继续走 `scripts/run_memory_palace_mcp_stdio.sh`，不会误切到 native Python wrapper
 > - 所以原生 Windows 不要先照抄 `/bin/zsh` / `bash` 版本的示例；先看脚本实际生成的命令
 > - 如果你走 `pwsh-in-docker`，`docker_one_click.ps1` 当前会在 `Get-NetTCPConnection` 不可用时自动回退到 `ss`；如果目标环境两者都没有，请显式指定端口或回到目标 Windows 主机复验
 > - 这些 repo-local launcher 都会优先复用当前仓库 `.env` 的 `DATABASE_URL`，避免你在客户端侧又另外接到第二份 SQLite 库
@@ -167,6 +168,8 @@ python scripts/install_skill.py \
   --with-mcp \
   --check
 ```
+
+如果这条 `workspace --with-mcp --check` 通过，可以把它理解成当前仓库的 workspace 级 skill + MCP 入口已经对齐；这里不顺带把 `Codex/OpenCode` 改写成 workspace 主路径，它们公开口径仍然以 user-scope MCP 为主。
 
 如果你要补 workspace 级 MCP，`install_skill.py` 当前只会为 `Claude Code` 和 `Gemini CLI` 写稳定的 repo-local 绑定；`Codex/OpenCode` 继续走 user-scope MCP 更稳。
 
@@ -251,7 +254,7 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库
-- 当前这轮实测里，`Codex` 的 skill 发现仍可用，但 `mcp_bindings` / smoke 仍应按 `PARTIAL` 理解：
+- 对 `Codex` 更稳的公开口径是：skill 仍可 repo-local 自动发现，MCP 仍建议通过 `--scope user --with-mcp` 注册到当前仓库；除非你刚在目标机上重跑过 smoke，否则不要写成“当前机器已完全通过”。当前实现下，`mcp_bindings` / smoke 仍更适合按 `PARTIAL` 理解：
   - user-scope MCP 绑定已对齐当前仓库
   - `codex exec` smoke 可能因为超时或缺少结构化输出而停在 `PARTIAL`
   - 所以公开口径应写成“已具备接线条件，但仍建议本机再做一次 user-scope 复核”，不要写成“当前机器已完全通过”
@@ -279,7 +282,7 @@ python scripts/install_skill.py \
 - **技能投影入口**：repo-root `AGENTS.md`
 - **执行入口**：本地 MCP 配置，指向当前仓库的 repo-local launcher
   - 原生 Windows 默认指向 `backend/mcp_wrapper.py`
-  - POSIX shell 路径默认指向 `scripts/run_memory_palace_mcp_stdio.sh`
+  - macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 默认指向 `scripts/run_memory_palace_mcp_stdio.sh`
 - **宿主差异**：只在必要时补一层兼容包装，而不是为每个 IDE 维护一整套 live smoke
 
 其中：
@@ -371,7 +374,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 `MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
-现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper。按当前验证链路，它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。
+现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper，而且 launcher 规则已经和 `install_skill.py`、`render_ide_host_config.py` 对齐：原生 Windows 走 `backend/mcp_wrapper.py`，macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 走 `scripts/run_memory_palace_mcp_stdio.sh`。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 真正补跑到的基线只有 backend 非 benchmark `857 passed, 15 skipped`、frontend `149 passed`、frontend `npm run typecheck` 通过、frontend build 通过；live MCP e2e、真实浏览器链路、Docker profile 还没有在这一轮重跑。
 
 ## 正向 / 反向 prompt
 

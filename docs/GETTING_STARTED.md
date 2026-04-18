@@ -240,6 +240,14 @@ npm run dev
 ```
 
 > 前端的 i18n 依赖已经写在 `frontend/package.json` 和 `frontend/package-lock.json` 里。正常执行一次 `npm install` 即可，不需要再单独安装 `i18next`、`react-i18next` 或 `i18next-browser-languagedetector`。
+>
+> 现在前端也补了一条单独的类型检查入口。如果你改了 Dashboard 页面、Setup Assistant 或 i18n 文案，想先做一轮静态检查，直接执行：
+>
+> ```bash
+> npm run typecheck
+> ```
+>
+> 仓库里的 Docker publish 校验工作流现在也会跑这条 `npm run typecheck`，所以本地和发布前看到的是同一条前端类型检查路径。
 
 预期输出：
 
@@ -257,6 +265,8 @@ VITE v7.x.x  ready in xxx ms
 > 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。当前状态有时会晚一点返回，但你已经自己输入过的字段不会再被后到的状态覆盖，没碰过的检索字段会继续按当前 setup 状态补齐。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
 >
 > 如果你走的是标准 Docker 代理这类 proxy-held auth 路径，服务端鉴权已经生效时，首启配置向导现在不会只因为浏览器本地没保存 key 就一上来自动弹出；右上角按钮还可能在，但这时只有你手动点进去才会进入向导。
+>
+> 如果你这里只是点“只保存 Dashboard 密钥”，这把 key 现在会立刻在当前页面生效，不需要刷新再试；成功提示也会继续留在弹窗里，直到你自己手动关闭。
 >
 > 再补一个这轮按代码实际行为复核过的小细节：如果向导里显示的占位文本本身带 `&` 或 `<...>` 这类字符，现在会按普通文本正常显示，不会再把 HTML 实体原样露给用户。
 
@@ -380,6 +390,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 >
 > 对 macOS / Linux 的 shell 路径来说，如果你显式把 `MEMORY_PALACE_DOCKER_ENV_FILE` 指到一份自定义文件，`docker_one_click.sh` 现在也会在那个文件同目录生成临时文件再替换回去，减少目标文件不在默认临时目录时出现跨文件系统替换问题的概率。
 >
+> 另外，如果你显式设置了 `MEMORY_PALACE_DOCKER_ENV_FILE`，`docker_one_click.sh/.ps1` 现在都会先把它解析成稳定路径，再交给 profile 脚本和后续 `docker compose` 共用。说人话就是：就算你从别的目录发命令，也不容易再出现“脚本写的是一份文件，compose 读的是另一份文件”。
+>
 > 当前本地 build 路径还会使用按 checkout 固定的本地镜像名。所以只要这个 checkout 里已经成功 build 过一次，即使你换了 `COMPOSE_PROJECT_NAME`，后续再跑 `--no-build` 也能继续复用这些镜像；只有第一次启动或你手动删掉本地镜像时，才需要重新 `--build`。
 >
 > 如果 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.*` 会自动生成一把本地 key。Docker 前端会在代理层自动带上这把 key，所以**按推荐的一键脚本路径启动时**，受保护请求通常已经能直接使用；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。即便看到了按钮，首启配置向导在 Docker 场景下也会明确停留在“说明模式”，不会伪装成已经持久化容器 env。
@@ -389,6 +401,8 @@ bash scripts/docker_one_click.sh --profile c --allow-runtime-env-injection
 > 当前 Docker Compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，才把 frontend 视为真正 ready。也就是说，容器刚显示 `running` 时，页面可能还会晚几秒才真正可用，这属于正常现象。
 >
 > backend 容器侧的检查现在也不再是“`/health` 只要回 `200` 就算好”，而是会继续执行 `deploy/docker/backend-healthcheck.py`，确认返回 payload 里的 `status == "ok"`。如果详细 `/health` 已经降级，Docker 也会把 backend 继续视为 unhealthy；若请求失败、返回了非法 JSON，或状态不是 `ok`，这个脚本还会先打印一条简短失败原因，排障时比单纯看 exit code 更直接。
+>
+> 本地 readiness / health probe 现在还会把已有的 `NO_PROXY` / `no_proxy` 和 `127.0.0.1`、`localhost`、`::1`、`host.docker.internal` 合并起来，再去探测 loopback 地址。这样即使宿主机本身开了代理，本机 `/health`、`/sse` 这类探活也不容易被误送去代理。
 >
 > 如果你的环境启动比较慢，还可以通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整这条探活请求的超时；当前脚本默认值是 `5` 秒。
 >
@@ -509,6 +523,8 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 ## 5. 首次验证
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
+>
+> 当前这轮真实验证快照：backend 非 benchmark 测试 `857 passed, 15 skipped`；frontend `149 passed`；`npm run typecheck` 通过；前端 build 通过。live MCP e2e、repo-local macOS Profile B 的真实浏览器链路、Docker one-click 的 A/B/C/D 这轮都没有重跑，仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
@@ -596,7 +612,7 @@ python mcp_server.py
 > - 原生 Windows：`python backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL：`bash scripts/run_memory_palace_mcp_stdio.sh`
 >
-> 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`，或你自己改成 `/data/...` 的变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
+> 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`、`sqlite+aiosqlite://///app/data/memory_palace.db`、大写 `/APP/...` 变体，或你自己改成 `/data/...` 的变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
 >
 > 对 shell wrapper 这条路径来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 不是 UTF-8 默认环境，本地 stdio 也更不容易因为编码问题出错。
 >
@@ -620,7 +636,7 @@ python run_sse.py
 >
 > 同一个 SSE 进程还会提供一个轻量级 `/health` 端点，主要给本地独立调试做就绪检查；真正对 MCP 客户端开放的流式入口仍然是 `/sse`。
 >
-> 这条本地 operator 路径在当前验证里也重新测过：即使 `/sse` 连接仍然活着，直接停止 `run_sse.py` 现在也会安静退出，不再额外打印之前那条 ASGI shutdown traceback。
+> 这条本地 operator 路径现在就算 `/sse` 连接仍然活着，直接停止 `run_sse.py` 也会安静退出，不再额外打印之前那条 ASGI shutdown traceback。
 >
 > 上面这条命令故意绑定到 `127.0.0.1`，更适合本机调试。如果你真的需要让其他机器访问，再把 `HOST` 改成 `0.0.0.0`（或你的实际监听地址）。这会让远程客户端可以连上监听地址，但 API Key、反向代理、防火墙和传输层安全仍然要你自己补齐。
 >
