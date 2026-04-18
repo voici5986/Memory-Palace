@@ -169,12 +169,11 @@ In plain English:
   more latency than `Profile B`.
 - This same session also reran the repo-local live MCP e2e, and it passed on
   the current code path.
-- This same session rechecked a repo-local macOS `Profile B` browser path
-  (`backend + frontend + real browser setup/maintenance smoke`) and a local
-  smoke pass covering the same retrieval / reranker / write-guard / gist paths
-  as `Profile C/D`.
-- Docker one-click `Profile C/D` was **not** rerun in this round, so this page
-  keeps that target-environment recheck boundary explicit.
+- This same session rechecked Docker `Profile B` smoke and reran the real
+  A/B/C/D benchmark against local test-only providers.
+- Docker one-click `Profile C/D` was **not** rerun as a separate compose/script
+  matrix in this round, so this page keeps that target-environment recheck
+  boundary explicit.
 - Native Windows and native Linux host runtime paths were **not** rerun in
   this round, so this page does not claim a fresh host-runtime pass there.
 

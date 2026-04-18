@@ -54,7 +54,7 @@
 - **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
 - **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
 - **repo-local wrapper 现在会更一致地拦住 Docker sqlite 容器路径**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`，所以像 `sqlite+aiosqlite://///app/data/...` 这类值不会再被误放过。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `957 passed, 20 skipped`；前端 `164 passed`；前端 `npm run build` 和 `npm run typecheck` 都通过。这一轮也实际复核了 repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`），以及一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D`、原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `974 passed, 22 skipped`；前端 `167 passed`；前端 `npm run test:bundle-budget`、`npm run build` 和 `npm run typecheck` 都通过；repo-local live MCP e2e 也通过（`14/14`）。这一轮还实际复核了 Docker `Profile B` smoke，并用本地测试专用 provider 重跑了真实 A/B/C/D benchmark。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection 后台清理现在更收口了**：同一个 session、source、reason、content 的并发 `prepare` 请求，仍然会复用同一个 prepared review；如果最后一个等待方先走掉了，后端现在也会把这条已经没人等的后台 prepare 一起取消，不再让它自己继续跑完。
 - **前端类型检查现在更容易复现，也更不容易在 CI 里漏掉了**：`frontend/package.json` 现在已经补上正式的 `npm run typecheck`，Docker publish 的校验工作流也会在发布前跑同一条检查。

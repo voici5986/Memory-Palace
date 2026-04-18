@@ -308,12 +308,12 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`966 passed / 20 skipped`
-- Frontend 全量：`165 passed`
+- Backend 非 benchmark 全量：`974 passed / 22 skipped`
+- Frontend 全量：`167 passed`
 - Frontend `typecheck` / `build`：通过
 - repo-local live MCP e2e：通过
-- repo-local `Profile B`：backend + frontend + 真实浏览器 setup/maintenance smoke 通过
-- 本地 smoke：补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的验证
+- Docker `Profile B` smoke：通过
+- 真实 A/B/C/D benchmark：本轮已重跑
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界
 - `skills+MCP` / `single-MCP`：本轮未重跑，这里不追加新结论
 
