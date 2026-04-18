@@ -143,7 +143,7 @@ const zhCN = {
       embeddingDimLabel: 'Embedding 维度',
       embeddingDimHint:
         '远端 embedding 后端必须填写这个值，并且要和你的实际 provider 输出维度保持一致。',
-      embeddingDimPlaceholder: '1024',
+      embeddingDimPlaceholder: '例如 1024',
       embeddingApiKeyLabel: 'Embedding API 密钥',
       embeddingApiKeyPlaceholder: '可选 API key',
       optionalApiKeyHint:

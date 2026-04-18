@@ -49,6 +49,18 @@ The concrete manual examples now live in:
 - This guide keeps only public-safe conclusions. It does not write local
   benchmark endpoints, API keys, or model IDs into the repository.
 
+## Reflection And C/D Config Boundary
+
+- The public `reflection workflow` surface is now described as `prepare ->
+  execute -> rollback`; when you actually need rollback, follow the rollback
+  endpoint returned by the current result instead of assuming a hidden
+  auto-undo path.
+- The public `Profile C/D` templates no longer publish a guessed embedding
+  dimension. `RETRIEVAL_EMBEDDING_DIM` must be filled with the provider's real
+  vector dimension by the user.
+- This guide stays public-safe. It does not freeze local benchmark endpoints,
+  API keys, or model IDs into repository docs.
+
 ## Distinguish the Two Layers
 
 The `memory-palace` link is divided into two layers:
@@ -401,7 +413,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 These two reports are mainly used for supplemental verification and are not intended as primary entry documentation. They are local products that "appear only after running" by default, so it's normal if they aren't in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 `MCP_LIVE_E2E_REPORT.md` defaults to using an isolated temporary database and won't touch your official database; however, upon failure, it might still include stderr, logs, or temporary directory paths in the report, so it's also recommended to review the content yourself before forwarding.
-This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification baseline for this session is: backend tests (`957 passed, 20 skipped`), frontend tests (`164 passed`), passing `frontend npm run build`, and passing `frontend npm run typecheck`; repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`) and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D` were also rerun. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
+This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification baseline for this session is: backend tests (`966 passed, 20 skipped`), frontend tests (`165 passed`), passing `frontend npm run build`, passing `frontend npm run typecheck`, and a passing repo-local live MCP e2e; repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`) and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D` were also rerun. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
 
 ## Positive / Negative Prompts
 

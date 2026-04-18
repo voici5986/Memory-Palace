@@ -325,6 +325,136 @@ def test_reflection_invalid_mode_returns_422(monkeypatch: pytest.MonkeyPatch) ->
     detail = response.json()["detail"]
     assert detail["error"] == "reflection_workflow_invalid_mode"
     assert detail["reason"] == "unsupported_reflection_mode"
+    assert detail["allowed_modes"] == ["prepare", "execute", "rollback"]
+
+
+def test_reflection_prepare_requires_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = {"X-MCP-API-Key": "reflection-secret"}
+    monkeypatch.setenv("MCP_API_KEY", "reflection-secret")
+
+    async def _service(**kwargs):
+        raise AssertionError("service should not be called without session_id")
+
+    monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", _service)
+
+    with _build_client(raise_server_exceptions=False) as client:
+        response = client.post(
+            "/maintenance/learn/reflection",
+            headers=headers,
+            json={
+                "mode": "prepare",
+                "source": "session_summary",
+                "reason": "missing session id",
+            },
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["error"] == "reflection_workflow_invalid_request"
+    assert detail["reason"] == "session_id_required"
+    assert detail["mode"] == "prepare"
+
+
+def test_reflection_rollback_requires_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = {"X-MCP-API-Key": "reflection-secret"}
+    monkeypatch.setenv("MCP_API_KEY", "reflection-secret")
+
+    async def _service(**kwargs):
+        raise AssertionError("service should not be called without job_id")
+
+    monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", _service)
+
+    with _build_client(raise_server_exceptions=False) as client:
+        response = client.post(
+            "/maintenance/learn/reflection",
+            headers=headers,
+            json={
+                "mode": "rollback",
+                "reason": "missing job id",
+            },
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["error"] == "reflection_workflow_invalid_request"
+    assert detail["reason"] == "job_id_required"
+    assert detail["mode"] == "rollback"
+
+
+def test_reflection_mode_rollback_delegates_to_learn_job_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = {"X-MCP-API-Key": "reflection-secret"}
+    monkeypatch.setenv("MCP_API_KEY", "reflection-secret")
+
+    calls: list[dict[str, str | None]] = []
+
+    async def _service(**kwargs):
+        calls.append(
+            {
+                "mode": str(kwargs.get("mode")),
+                "job_id": str(kwargs.get("job_id")),
+                "reason": str(kwargs.get("reason")),
+                "session_id": str(kwargs.get("session_id") or ""),
+            }
+        )
+        handler = kwargs["rollback_handler"]
+        return await handler(
+            job_id=str(kwargs.get("job_id") or ""),
+            reason_text=str(kwargs.get("reason") or ""),
+            session_id=str(kwargs.get("session_id") or "") or None,
+            actor_id=None,
+        )
+
+    monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", _service)
+    monkeypatch.setattr(
+        maintenance_api,
+        "_rollback_job",
+        lambda job_id, payload, prefer_learn, allow_fallback, not_found_error: asyncio.sleep(
+            0,
+            result={
+                "ok": True,
+                "status": "rolled_back",
+                "job_id": job_id,
+                "job_type": "learn",
+                "reason": payload.reason,
+                "prefer_learn": prefer_learn,
+                "allow_fallback": allow_fallback,
+                "not_found_error": not_found_error,
+            },
+        ),
+    )
+
+    with _build_client() as client:
+        response = client.post(
+            "/maintenance/learn/reflection",
+            headers=headers,
+            json={
+                "mode": "rollback",
+                "reason": "rollback reflection workflow",
+                "job_id": "reflect-job-execute",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "status": "rolled_back",
+        "job_id": "reflect-job-execute",
+        "job_type": "learn",
+        "reason": "rollback reflection workflow",
+        "prefer_learn": True,
+        "allow_fallback": False,
+        "not_found_error": "learn_job_not_found",
+    }
+    assert calls == [
+        {
+            "mode": "rollback",
+            "job_id": "reflect-job-execute",
+            "reason": "rollback reflection workflow",
+            "session_id": "",
+        }
+    ]
 
 
 def test_learn_trigger_execute_routes_through_write_lane(

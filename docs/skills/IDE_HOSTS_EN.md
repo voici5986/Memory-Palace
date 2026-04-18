@@ -33,6 +33,18 @@ So in `Memory-Palace`, the primary IDE-host path is no longer hidden `SKILL.md` 
   - native Windows: `backend/mcp_wrapper.py`
   - macOS / Linux: `scripts/run_memory_palace_mcp_stdio.sh`
 
+## Reflection And C/D Config Boundary
+
+- On the IDE-host side, the public `reflection workflow` wording also follows
+  `prepare -> execute -> rollback`; rollback should use the review/maintenance
+  endpoint returned by the current result instead of relying on implicit host
+  state.
+- When IDE hosts move to `Profile C/D`, `RETRIEVAL_EMBEDDING_DIM` must still be
+  filled by the user with the provider's real vector dimension; the public
+  templates no longer guess `4096` or `1024`.
+- This verification round did not change the IDE-host main path: it is still
+  `AGENTS.md + MCP snippet + user-supplied runtime config`.
+
 ---
 
 ## Core Positioning

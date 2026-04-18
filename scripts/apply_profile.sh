@@ -573,7 +573,7 @@ validate_profile_placeholders() {
   while IFS= read -r line; do
     normalized_line="${line%$'\r'}"
     if [[ "${normalized_line}" =~ ^[[:space:]]*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)[[:space:]]*=[[:space:]]*.*:PORT/ ]] \
-      || [[ "${normalized_line}" =~ =[[:space:]]*(replace-with-your-key|your-embedding-model-id|your-reranker-model-id)([[:space:]]+#.*)?[[:space:]]*$ ]] \
+      || [[ "${normalized_line}" =~ =[[:space:]]*(replace-with-your-key|replace-with-your-embedding-dim|your-embedding-model-id|your-reranker-model-id|<provider-vector-dim>)([[:space:]]+#.*)?[[:space:]]*$ ]] \
       || [[ "${normalized_line}" =~ =[[:space:]]*https://router\.example\.com/ ]]; then
       unresolved_lines+=("${line}")
     fi

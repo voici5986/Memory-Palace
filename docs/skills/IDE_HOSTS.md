@@ -30,6 +30,12 @@
   - 原生 Windows：`backend/mcp_wrapper.py`
   - macOS / Linux：`scripts/run_memory_palace_mcp_stdio.sh`
 
+## Reflection And C/D Config Boundary
+
+- IDE hosts 侧的 `reflection workflow` 公开口径同样是 `prepare -> execute -> rollback`；rollback 走执行结果里给出的 review/maintenance endpoint，而不是依赖宿主里的隐式状态。
+- IDE hosts 要切到 `Profile C/D` 时，也必须由用户自己填写 `RETRIEVAL_EMBEDDING_DIM`；仓库公开模板不再猜一个 `4096` 或 `1024` 默认值。
+- 这轮公开复核没有改变 IDE hosts 的主路径：仍然是 `AGENTS.md + MCP snippet + user-supplied runtime config`。
+
 ---
 
 ## 核心口径

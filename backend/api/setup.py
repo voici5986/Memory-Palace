@@ -282,28 +282,12 @@ def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
     if payload.embedding_dim is not None:
         return str(int(payload.embedding_dim))
 
-    current_backend = (
-        _read_optional_env("RETRIEVAL_EMBEDDING_BACKEND") or "hash"
-    ).strip().lower()
-    current_dim = _read_optional_env("RETRIEVAL_EMBEDDING_DIM")
     if payload.embedding_backend == "hash":
         return "64"
 
     if payload.embedding_backend == "none":
         return ""
 
-    if (
-        current_dim
-        and current_backend in {"api", "router", "openai"}
-        and payload.embedding_backend in {"api", "router", "openai"}
-    ):
-        return current_dim
-
-    if payload.embedding_backend in {"api", "router", "openai"}:
-        # Profile C/D default to 1024 unless the caller provides a provider-specific
-        # dimension. This avoids silently keeping hash-mode 64-d vectors after
-        # switching the setup flow to a remote embedding backend.
-        return "1024"
     return None
 
 
@@ -535,6 +519,12 @@ def _validate_setup_payload(payload: SetupConfigRequest) -> None:
     if payload.reranker_enabled and payload.embedding_backend != "router":
         _require_setup_text_field(payload, "reranker_api_base", missing_fields, placeholder_fields)
         _require_setup_text_field(payload, "reranker_model", missing_fields, placeholder_fields)
+
+    if (
+        payload.embedding_backend in _REMOTE_EMBEDDING_BACKENDS
+        and _resolve_embedding_dim_update(payload) is None
+    ):
+        missing_fields.append("embedding_dim")
 
     if payload.write_guard_llm_enabled:
         _require_setup_text_field(

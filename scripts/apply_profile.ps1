@@ -360,6 +360,8 @@ function Assert-ResolvedProfilePlaceholders {
         if (
             $line -match '^\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\s*=\s*.*:PORT/' `
             -or $line -match '=\s*replace-with-your-key(\s+#.*)?\s*$' `
+            -or $line -match '=\s*replace-with-your-embedding-dim(\s+#.*)?\s*$' `
+            -or $line -match '=\s*<provider-vector-dim>(\s+#.*)?\s*$' `
             -or $line -match '=\s*your-embedding-model-id(\s+#.*)?\s*$' `
             -or $line -match '=\s*your-reranker-model-id(\s+#.*)?\s*$' `
             -or $line -match '=\s*https://router\.example\.com/'

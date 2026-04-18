@@ -167,6 +167,8 @@ In plain English:
   friction day-to-day setup.
 - `Profile C/D` again show the quality-first tier, but they still cost much
   more latency than `Profile B`.
+- This same session also reran the repo-local live MCP e2e, and it passed on
+  the current code path.
 - This same session rechecked a repo-local macOS `Profile B` browser path
   (`backend + frontend + real browser setup/maintenance smoke`) and a local
   smoke pass covering the same retrieval / reranker / write-guard / gist paths

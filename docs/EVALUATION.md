@@ -80,6 +80,7 @@
 > - `Profile C` 是**显式深检索档**：质量明显高于 B，p95 仍在百毫秒级。
 > - `Profile D` 仍然是**最高质量档**：质量最高，但 p95 已到秒级，只适合“质量优先于时延”的场景。
 > - C/D 为真实外部 embedding + reranker 链路调用，延迟显著高于本地 keyword/hash 档位。
+> - 这轮 C/D 指标是基于**运行时注入的、用户显式提供的 embedding 维度**得到的；公开模板现在不再发布 `4096` 这类猜测默认值。
 > - 当前 real runner 还会把**查询阶段**与**建索引阶段**的降级一起记进公开门禁口径；如果 reranker 缺配置、响应无效，或索引阶段已经 fallback，这轮结果不会再被写成“干净 PASS”。
 > - 这轮结果是在**当前档位的有效 embedding 维度已经对齐**的前提下得到的，不表示你可以把 B 的旧向量和 C/D 的旧向量拿来直接混用；如果切档后维度不一致，当前运行时会返回 `embedding_dim_mismatch_requires_reindex` / `vector_dim_mismatch_requires_reindex`，需要重建索引或分开数据库。
 > - 所有 Phase 6 Gate 均为 PASS，表明当前公开档位在这轮复核里没有出现失效或请求失败。
@@ -288,6 +289,7 @@
 
 - 关注点：反射 lane 在并发受限且获取超时时，是否仍然按预期返回 `reflection_lane_timeout` 并留下运行时指标。
 - 关键观测字段包括：`tasks_total`、`tasks_failed`、`wait_ms_p95`、`duration_ms_p95`。
+- 这条公开门禁覆盖的是反射的 `prepare/execute` 并发边界；真正的 rollback 路径仍以当前结果里返回的 endpoint 为准：prepare 阶段通常先给 `/maintenance/import/jobs/.../rollback`，执行后如果已经拿到 review snapshot，则会升级为 `/review/...`，同时保留 `/maintenance/learn/jobs/.../rollback` alias。
 
 ---
 
@@ -306,9 +308,10 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`957 passed / 20 skipped`
-- Frontend 全量：`164 passed`
+- Backend 非 benchmark 全量：`966 passed / 20 skipped`
+- Frontend 全量：`165 passed`
 - Frontend `typecheck` / `build`：通过
+- repo-local live MCP e2e：通过
 - repo-local `Profile B`：backend + frontend + 真实浏览器 setup/maintenance smoke 通过
 - 本地 smoke：补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的验证
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界

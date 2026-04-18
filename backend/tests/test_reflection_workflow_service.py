@@ -430,6 +430,83 @@ async def test_reflection_workflow_service_does_not_fallback_to_ambient_session_
 
 
 @pytest.mark.asyncio
+async def test_reflection_workflow_service_requires_explicit_session_id_for_prepare_execute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="prepare",
+        source="session_summary",
+        reason="reject ambient fallback for missing session id",
+        session_id=None,
+        client=_ReflectionClient(),
+    )
+
+    assert payload["ok"] is False
+    assert payload["prepared"] is False
+    assert payload["executed"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert payload["session_id"] == ""
+    assert payload["validation_error"] == "session_id is required"
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_service_delegates_rollback_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def _rollback_handler(
+        *,
+        job_id: str,
+        reason_text: str,
+        session_id: str | None,
+        actor_id: str | None,
+    ) -> dict[str, object]:
+        calls.append(
+            {
+                "job_id": job_id,
+                "reason_text": reason_text,
+                "session_id": session_id,
+                "actor_id": actor_id,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "rolled_back",
+            "job_id": job_id,
+        }
+
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="rollback",
+        source="session_summary",
+        reason="rollback reflection workflow",
+        session_id=None,
+        actor_id="reviewer-a",
+        job_id="reflect-job-1234",
+        rollback_handler=_rollback_handler,
+    )
+
+    assert payload == {
+        "ok": True,
+        "status": "rolled_back",
+        "job_id": "reflect-job-1234",
+    }
+    assert calls == [
+        {
+            "job_id": "reflect-job-1234",
+            "reason_text": "rollback reflection workflow",
+            "session_id": "ambient-session",
+            "actor_id": "reviewer-a",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_same_session_concurrent_reflection_and_explicit_learn_do_not_fail_on_namespace_uniqueness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

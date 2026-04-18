@@ -35,6 +35,8 @@ from shared_utils import (
     env_bool as _env_bool,
     env_int as _env_int,
     parse_iso_datetime as _parse_iso_datetime_shared,
+    resolve_interaction_tier as _resolve_interaction_tier,
+    should_try_intent_llm as _should_try_intent_llm,
     utc_iso_now as _utc_iso_now,
 )
 
@@ -1691,16 +1693,46 @@ async def run_reflection_workflow_service(
     session_id: Optional[str] = None,
     actor_id: Optional[str] = None,
     client: Optional[Any] = None,
+    job_id: Optional[str] = None,
+    rollback_handler: Optional[Any] = None,
 ) -> Dict[str, Any]:
     normalized_mode = str(mode or "").strip().lower()
-    if normalized_mode not in {"prepare", "execute"}:
+    if normalized_mode not in {"prepare", "execute", "rollback"}:
         raise ValueError("unsupported reflection workflow mode")
 
-    raw_session_id = (
-        get_session_id()
-        if session_id is None
-        else str(session_id)
-    )
+    normalized_reason = str(reason or "").strip()
+    if normalized_mode == "rollback":
+        raw_session_id = (
+            get_session_id()
+            if session_id is None
+            else str(session_id)
+        )
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id:
+            raise ValueError("reflection workflow rollback requires job_id")
+        if not callable(rollback_handler):
+            raise RuntimeError("reflection workflow rollback unavailable")
+        normalized_session_id = str(raw_session_id).strip() or None
+        return await rollback_handler(
+            job_id=normalized_job_id,
+            reason_text=normalized_reason or "manual_rollback",
+            session_id=normalized_session_id,
+            actor_id=actor_id,
+        )
+
+    raw_session_id = "" if session_id is None else str(session_id)
+    if not raw_session_id:
+        return {
+            "ok": False,
+            "mode": normalized_mode,
+            "source": str(source or "").strip() or "session_summary",
+            "reason": "session_id_invalid",
+            "validation_error": "session_id is required",
+            "prepared": False,
+            "executed": False,
+            "session_id": raw_session_id,
+        }
+
     try:
         normalized_session_id = SnapshotManager._validate_session_id(raw_session_id)
     except ValueError as exc:
@@ -1715,7 +1747,6 @@ async def run_reflection_workflow_service(
             "session_id": raw_session_id,
         }
     normalized_source = str(source or "").strip() or "session_summary"
-    normalized_reason = str(reason or "").strip()
 
     content, content_error = await _resolve_reflection_workflow_content(
         source=normalized_source,
@@ -2757,53 +2788,6 @@ def _normalize_search_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, An
             normalized["updated_after"] = parsed.isoformat()
 
     return normalized
-
-
-def _resolve_interaction_tier(
-    raw_filters: Optional[Dict[str, Any]],
-    *,
-    requested_tier: Optional[Any] = None,
-    requested_scope_hint: Optional[Any] = None,
-) -> Tuple[str, Optional[Dict[str, Any]], Optional[Any]]:
-    filters_copy: Optional[Dict[str, Any]] = raw_filters
-    raw_value = requested_tier
-    scope_hint_value = requested_scope_hint
-    if isinstance(filters_copy, dict):
-        filters_copy = dict(filters_copy)
-        if raw_value is None and "interaction_tier" in filters_copy:
-            raw_value = filters_copy.get("interaction_tier")
-        filters_copy.pop("interaction_tier", None)
-    if raw_value is None:
-        scope_hint_tier = str(scope_hint_value or "").strip().lower()
-        if scope_hint_tier in ALLOWED_INTERACTION_TIERS:
-            raw_value = scope_hint_tier
-            scope_hint_value = None
-
-    value = str(raw_value or "").strip().lower()
-    if value not in ALLOWED_INTERACTION_TIERS:
-        value = DEFAULT_INTERACTION_TIER
-    return value, filters_copy, scope_hint_value
-
-
-def _should_try_intent_llm(
-    client: Any, rule_payload: Optional[Dict[str, Any]]
-) -> bool:
-    helper = getattr(client, "should_use_intent_llm", None)
-    if callable(helper):
-        try:
-            return bool(helper(rule_payload))
-        except Exception:
-            pass
-
-    if not isinstance(rule_payload, dict) or not rule_payload:
-        return True
-
-    rule_intent = str(rule_payload.get("intent") or "").strip().lower()
-    try:
-        rule_confidence = float(rule_payload.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        rule_confidence = 0.0
-    return rule_intent == "unknown" or rule_confidence < 0.70
 
 
 def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:
@@ -5200,6 +5184,8 @@ async def search_memory(
         interaction_tier, raw_filters, scope_hint_value = _resolve_interaction_tier(
             raw_filters,
             requested_scope_hint=scope_hint_value,
+            allowed_tiers=ALLOWED_INTERACTION_TIERS,
+            default_tier=DEFAULT_INTERACTION_TIER,
         )
         default_candidate_multiplier = (
             FAST_INTERACTION_CANDIDATE_MULTIPLIER

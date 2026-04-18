@@ -744,8 +744,8 @@ pytest tests -k "test_search" -q
 
    再补几个当前 setup 流程已经对齐的小边界：
 
-   - 现在从 `Profile B` 切到远端 backend 时，保存会同步写入 `RETRIEVAL_EMBEDDING_DIM`，不再默认把旧的 `64` 维残留过去
-   - 如果你在向导里来回切 `Profile B/C/D` 或 `hash / api / router`，当前会把已经隐藏的旧字段一起清掉；如果结果看起来还像旧配置，更该优先怀疑后端没重启，或者读的不是你以为的 `.env`
+   - 现在从 `Profile B` 切到远端 backend 时，保存前会继续要求你填真实的 `RETRIEVAL_EMBEDDING_DIM`，不再默认把旧的 `64` 带过去，也不会替你猜一个 `1024`
+   - 如果你在向导里来回切 `Profile B/C/D` 或 `hash / api / router / openai`，当前会把已经隐藏的旧字段一起清掉；如果结果看起来还像旧配置，更该优先怀疑后端没重启，或者读的不是你以为的 `.env`
    - `openai` 也是当前支持的 embedding backend，但它不是单独的新 Profile；排障思路还是按远端 backend 的 `base / model / dim` 是否对齐来查
 
 3. **确认有记忆内容**：

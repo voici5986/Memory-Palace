@@ -400,6 +400,7 @@ def test_setup_config_writes_seeded_env_and_refreshes_process_env(
         "dashboard_api_key": "local-secret",
         "allow_insecure_local": True,
         "embedding_backend": "api",
+        "embedding_dim": "1024",
         "embedding_api_base": "http://127.0.0.1:9100/v1",
         "embedding_model": "local-embedding-model",
         "reranker_enabled": True,
@@ -432,6 +433,7 @@ def test_setup_config_writes_seeded_env_and_refreshes_process_env(
     assert "MCP_API_KEY=local-secret" in written
     assert "MCP_API_KEY_ALLOW_INSECURE_LOCAL=true" in written
     assert "RETRIEVAL_EMBEDDING_BACKEND=api" in written
+    assert "RETRIEVAL_EMBEDDING_DIM=1024" in written
     assert "RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:9100/v1" in written
     assert "RETRIEVAL_RERANKER_ENABLED=true" in written
     assert "WRITE_GUARD_LLM_ENABLED=true" in written
@@ -569,6 +571,7 @@ def test_setup_config_rejects_router_profile_without_required_remote_fields(
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert detail["error"] == "setup_validation_failed"
+    assert "embedding_dim" in detail["missing_fields"]
     assert "router_api_base" in detail["missing_fields"]
     assert "router_embedding_model" in detail["missing_fields"]
     assert "router_reranker_model" in detail["missing_fields"]
@@ -693,7 +696,7 @@ def test_setup_config_accepts_openai_backend_and_persists_embedding_dim(
     assert "RETRIEVAL_EMBEDDING_DIM=3072" in written
 
 
-def test_setup_config_accepts_openai_backend_without_embedding_dim_and_autofills_default(
+def test_setup_config_rejects_openai_backend_without_embedding_dim_when_no_remote_dim_exists(
     monkeypatch, tmp_path: Path
 ) -> None:
     env_example = tmp_path / ".env.example"
@@ -734,14 +737,106 @@ def test_setup_config_accepts_openai_backend_without_embedding_dim_and_autofills
     with _build_client() as client:
         response = client.post("/setup/config", json=payload)
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["ok"] is True
-    assert body["summary"]["embedding_backend"] == "openai"
-    assert body["summary"]["embedding_dim"] == 1024
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert "embedding_dim" in detail["missing_fields"]
+    assert not target_env.exists()
+
+
+def test_setup_config_requires_explicit_embedding_dim_when_switching_remote_backend(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "MCP_API_KEY_ALLOW_INSECURE_LOCAL=false",
+                "RETRIEVAL_EMBEDDING_BACKEND=router",
+                "RETRIEVAL_EMBEDDING_DIM=2048",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "WRITE_GUARD_LLM_ENABLED=false",
+                "INTENT_LLM_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+    target_env.write_text(env_example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    payload = {
+        "dashboard_api_key": "openai-secret",
+        "allow_insecure_local": False,
+        "embedding_backend": "openai",
+        "embedding_api_base": "https://api.openai.com/v1",
+        "embedding_api_key": "sk-test",
+        "embedding_model": "text-embedding-3-large",
+    }
+
+    with _build_client() as client:
+        response = client.post("/setup/config", json=payload)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert "embedding_dim" in detail["missing_fields"]
     written = target_env.read_text(encoding="utf-8")
-    assert "RETRIEVAL_EMBEDDING_BACKEND=openai" in written
-    assert "RETRIEVAL_EMBEDDING_DIM=1024" in written
+    assert "RETRIEVAL_EMBEDDING_BACKEND=router" in written
+    assert "RETRIEVAL_EMBEDDING_DIM=2048" in written
+
+
+def test_setup_config_rejects_invalid_existing_remote_embedding_dim_without_explicit_override(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "MCP_API_KEY_ALLOW_INSECURE_LOCAL=false",
+                "RETRIEVAL_EMBEDDING_BACKEND=router",
+                "RETRIEVAL_EMBEDDING_DIM=invalid",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "WRITE_GUARD_LLM_ENABLED=false",
+                "INTENT_LLM_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+    target_env.write_text(env_example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    payload = {
+        "dashboard_api_key": "openai-secret",
+        "allow_insecure_local": False,
+        "embedding_backend": "openai",
+        "embedding_api_base": "https://api.openai.com/v1",
+        "embedding_api_key": "sk-test",
+        "embedding_model": "text-embedding-3-large",
+    }
+
+    with _build_client() as client:
+        response = client.post("/setup/config", json=payload)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert "embedding_dim" in detail["missing_fields"]
 
 
 def test_setup_config_accepts_real_local_router_endpoint_with_real_models(

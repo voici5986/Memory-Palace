@@ -328,7 +328,7 @@ The frontend does not read maintenance keys from `VITE_*` build variables; it us
 > - For local development, the former is generally recommended because failures in the three links are usually independent, making it easier to confirm which model, endpoint, or set of keys has an issue.
 > - `router` is more suitable as a unified entry point for production/client environments: convenient for centralized authentication, rate limiting, auditing, model switching, and fallback orchestration.
 > - The Setup Assistant now keeps preset switching conservative: when you switch between Profile B / C / D or turn off router-backed fields, hidden stale router / API fields are cleared before save instead of being silently carried forward.
-> - The setup API now also accepts `openai` as an embedding backend and persists a matching `RETRIEVAL_EMBEDDING_DIM` for remote embedding backends, so switching away from hash mode does not accidentally keep the old `64`-dimension setting.
+> - The setup API now also accepts `openai` as an embedding backend. Once you switch to any remote embedding backend, it only saves `RETRIEVAL_EMBEDDING_DIM` when you explicitly provide the real provider dimension; it no longer keeps the old `64`, and it no longer guesses `1024` for you.
 
 ![Memory Write and Review Sequence Diagram](images/记忆写入与审查时序图.png)
 
@@ -360,7 +360,7 @@ Related files:
 - Backup scripts: `scripts/backup_memory.sh`, `scripts/backup_memory.ps1` (keep the latest `20` backups by default; adjust with `--keep` / `-Keep`; backup filenames use UTC timestamps so host/container runs sort consistently)
 - Pre-publishing check: `scripts/pre_publish_check.sh`
 
-The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the real reruns were backend `957 passed, 20 skipped`, frontend `164 passed`, passing frontend build/typecheck, repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`), and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D`. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths were not rerun in this round.
+The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the real reruns were backend `966 passed, 20 skipped`, frontend `165 passed`, passing frontend build/typecheck, a passing repo-local live MCP e2e, repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`), and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D`. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths were not rerun in this round.
 
 ---
 

@@ -161,12 +161,19 @@ def test_profile_external_settings_gate_checks_required_model_ids() -> None:
 
     for literal in (
         "your-embedding-model-id",
+        "replace-with-your-embedding-dim",
+        "<provider-vector-dim>",
         "your-reranker-model-id",
         "RETRIEVAL_EMBEDDING_MODEL",
+        "RETRIEVAL_EMBEDDING_DIM",
         "RETRIEVAL_RERANKER_MODEL",
     ):
         assert literal in shell_text
         assert literal in ps1_text
+
+    assert 'required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY" "RETRIEVAL_EMBEDDING_MODEL" "RETRIEVAL_EMBEDDING_DIM")' in shell_text
+    assert 'required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL" "RETRIEVAL_EMBEDDING_DIM")' in shell_text
+    assert "$requiredKeys.Add('RETRIEVAL_EMBEDDING_DIM')" in ps1_text
 
 
 def test_default_compose_project_name_uses_sha256_and_normalized_paths_in_both_scripts() -> None:

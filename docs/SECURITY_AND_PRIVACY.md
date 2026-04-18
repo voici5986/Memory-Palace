@@ -121,7 +121,7 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 - `backend/tests/test_reflection_workflow_service.py` — 验证 Dashboard `/browse` 写入可供 reflection workflow 继续使用，以及 `reflection execute` 进入 write lane 后的并发边界
 - `backend/tests/test_reflection_observability_summary.py` — 验证 `reflection_workflow` 统计在 summary 层是 restart-stable
-- `backend/tests/test_setup_api.py` — 验证 `openai` embedding backend 与 `RETRIEVAL_EMBEDDING_DIM` 写入
+- `backend/tests/test_setup_api.py` — 验证 `openai` embedding backend、远端 `RETRIEVAL_EMBEDDING_DIM` 显式必填，以及 setup fail-closed 边界
 - `frontend/src/App.test.jsx` — 验证 proxy-held auth 已生效时首启向导不误弹
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed
 
@@ -175,7 +175,7 @@ Authorization: Bearer <MCP_API_KEY>
 
 **新增测试锚点：**
 
-- `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、Docker fail-closed
+- `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填和 Docker fail-closed
 - `frontend/src/App.test.jsx` — 验证首启自动弹出、“只保存 Dashboard 密钥”交互，以及 proxy-held auth 已生效时不误弹
 - `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed

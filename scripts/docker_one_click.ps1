@@ -430,6 +430,8 @@ function Test-UnresolvedPlaceholder {
 
     return (
         $Value.Contains('replace-with-your-key') -or
+        $Value.Contains('replace-with-your-embedding-dim') -or
+        $Value.Contains('<provider-vector-dim>') -or
         $Value.Contains('<your-router-host>') -or
         $Value.Contains('host.docker.internal:PORT') -or
         $Value.Contains('your-embedding-model-id') -or
@@ -457,16 +459,19 @@ function Assert-ProfileExternalSettingsReady {
             $requiredKeys.Add('ROUTER_API_BASE')
             $requiredKeys.Add('ROUTER_API_KEY')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_DIM')
         }
         'api' {
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_DIM')
         }
         'openai' {
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
             $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
+            $requiredKeys.Add('RETRIEVAL_EMBEDDING_DIM')
         }
         'hash' { }
         'none' { }
@@ -475,6 +480,7 @@ function Assert-ProfileExternalSettingsReady {
                 $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_BASE')
                 $requiredKeys.Add('RETRIEVAL_EMBEDDING_API_KEY')
                 $requiredKeys.Add('RETRIEVAL_EMBEDDING_MODEL')
+                $requiredKeys.Add('RETRIEVAL_EMBEDDING_DIM')
             }
         }
     }

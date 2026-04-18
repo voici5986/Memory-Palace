@@ -626,7 +626,7 @@ RETRIEVAL_EMBEDDING_BACKEND=none      # Options: none / hash / router / api / op
 RETRIEVAL_EMBEDDING_API_BASE=         # API Base URL
 RETRIEVAL_EMBEDDING_API_KEY=          # API Key
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
-RETRIEVAL_EMBEDDING_DIM=4096            # Vector dimension
+RETRIEVAL_EMBEDDING_DIM=<provider-vector-dim>  # User-supplied real vector dimension
 
 # ── Reranker Config ──
 RETRIEVAL_RERANKER_ENABLED=false      # Enable Reranker

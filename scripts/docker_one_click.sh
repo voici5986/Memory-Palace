@@ -709,6 +709,8 @@ is_truthy() {
 value_has_unresolved_placeholder() {
   local value="$1"
   [[ "${value}" == *"replace-with-your-key"* ]] \
+    || [[ "${value}" == *"replace-with-your-embedding-dim"* ]] \
+    || [[ "${value}" == *"<provider-vector-dim>"* ]] \
     || [[ "${value}" == *"<your-router-host>"* ]] \
     || [[ "${value}" == *"host.docker.internal:PORT"* ]] \
     || [[ "${value}" == *"your-embedding-model-id"* ]] \
@@ -733,15 +735,15 @@ assert_profile_external_settings_ready() {
   local required_keys=()
   case "${embedding_backend}" in
     router)
-      required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
+      required_keys+=("ROUTER_API_BASE" "ROUTER_API_KEY" "RETRIEVAL_EMBEDDING_MODEL" "RETRIEVAL_EMBEDDING_DIM")
       ;;
     api|openai)
-      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL" "RETRIEVAL_EMBEDDING_DIM")
       ;;
     hash|none|"")
       ;;
     *)
-      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL")
+      required_keys+=("RETRIEVAL_EMBEDDING_API_BASE" "RETRIEVAL_EMBEDDING_API_KEY" "RETRIEVAL_EMBEDDING_MODEL" "RETRIEVAL_EMBEDDING_DIM")
       ;;
   esac
   if is_truthy "${reranker_enabled_raw}"; then

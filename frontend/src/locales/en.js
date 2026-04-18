@@ -143,7 +143,7 @@ const en = {
       embeddingDimLabel: 'Embedding dimension',
       embeddingDimHint:
         'Required for remote embedding backends. Keep it aligned with the provider output dimension your runtime really serves.',
-      embeddingDimPlaceholder: '1024',
+      embeddingDimPlaceholder: 'e.g. 1024',
       embeddingApiKeyLabel: 'Embedding API key',
       embeddingApiKeyPlaceholder: 'Optional API key',
       optionalApiKeyHint:

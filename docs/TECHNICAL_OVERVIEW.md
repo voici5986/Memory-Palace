@@ -248,7 +248,7 @@ frontend/src/
 - 按推荐的一键 Docker 路径启动时，受保护请求通常已经能直接使用：前端代理会在服务端自动转发同一把 `MCP_API_KEY`；但页面右上角仍可能继续显示 `设置 API 密钥`（英文模式下会显示 `Set API key`），因为浏览器页面本身并不知道代理层的真实 key。只有当受保护数据也一起 `401` 或空态时，才需要继续排查 env / 代理配置
 - 如果服务端 Dashboard 鉴权已经生效，尤其是标准 Docker proxy-held key 路径，首启配置向导现在不会只因为浏览器本地还没保存 key 就自己误弹
 - 浏览器里保存的 Dashboard 鉴权现在走当前浏览器会话的 `sessionStorage`；若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但只会在确认 `localStorage` 里还是那份旧值时才删除它，避免多标签页同时迁移时误删新值。通过 Setup Assistant 保存本地 `.env` 时，如果表单里带了当前 key，前端也会把这把 key 一并落到浏览器会话；如果这次保存把 key 清空，旧的浏览器侧保存值也会一起清掉
-- Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，保存还会一起写正确的 `RETRIEVAL_EMBEDDING_DIM`，并且 `/setup/config` 已支持 `openai` embedding backend
+- Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router / openai` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，只有你明确填写了真实的 `RETRIEVAL_EMBEDDING_DIM` 才会保存，不会再继续沿用旧 `64`，也不会替你猜一个 `1024`。`/setup/config` 也已经支持 `openai` embedding backend
 - Setup Assistant 现在也会把 `Profile A` 直接显示出来；它对应的还是默认 `keyword + none` 基线，不是新增的一条独立高阶配置档
 - Setup Assistant 现在一打开就会优先把焦点放到 Dashboard API key 输入框；`Escape` 可以直接关闭，`Tab/Shift+Tab` 会在弹窗内部循环，不会把键盘焦点甩到弹窗外面
 - 前端现在还额外抽出了一层轻量 `EventSource` helper（`frontend/src/lib/sse.js`）；repo-local Vite 的 `/sse` 代理继续保留，主要就是给本地同源 EventSource / MCP 调试复用
@@ -363,7 +363,7 @@ Docker 端口环境变量：
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`
 
-当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `957 passed, 20 skipped`、frontend `164 passed`，前端 typecheck 和 build 通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `966 passed, 20 skipped`、frontend `165 passed`，前端 typecheck 和 build 通过，repo-local live MCP e2e 也已通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
 
 ---
 

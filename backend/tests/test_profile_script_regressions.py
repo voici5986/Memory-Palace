@@ -285,6 +285,7 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
                 "ROUTER_API_BASE=http://127.0.0.1:PORT/v1",
                 "ROUTER_API_KEY=replace-with-your-key",
                 "ROUTER_EMBEDDING_MODEL=your-embedding-model-id",
+                "RETRIEVAL_EMBEDDING_DIM=replace-with-your-embedding-dim",
                 "RETRIEVAL_RERANKER_MODEL=your-reranker-model-id",
                 "",
             ]
@@ -304,6 +305,7 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders(
     assert "unresolved placeholders" in result.stderr
     assert "ROUTER_API_BASE=http://127.0.0.1:PORT/v1" in result.stderr
     assert "ROUTER_API_KEY=replace-with-your-key" in result.stderr
+    assert "RETRIEVAL_EMBEDDING_DIM=replace-with-your-embedding-dim" in result.stderr
 
 
 def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spacing_and_comment(
@@ -323,6 +325,7 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spac
                 "ROUTER_API_BASE = http://127.0.0.1:PORT/v1  # unresolved router endpoint",
                 "ROUTER_API_KEY = replace-with-your-key  # unresolved key",
                 "ROUTER_EMBEDDING_MODEL = your-embedding-model-id",
+                "RETRIEVAL_EMBEDDING_DIM = replace-with-your-embedding-dim  # unresolved dim",
                 "RETRIEVAL_RERANKER_MODEL = your-reranker-model-id  # unresolved model",
                 "",
             ]
@@ -342,6 +345,7 @@ def test_apply_profile_shell_rejects_unresolved_profile_c_placeholders_with_spac
     assert "unresolved placeholders" in result.stderr
     assert "ROUTER_API_BASE = http://127.0.0.1:PORT/v1  # unresolved router endpoint" in result.stderr
     assert "ROUTER_API_KEY = replace-with-your-key  # unresolved key" in result.stderr
+    assert "RETRIEVAL_EMBEDDING_DIM = replace-with-your-embedding-dim  # unresolved dim" in result.stderr
 
 
 def test_apply_profile_shell_can_defer_profile_placeholder_validation_to_caller(
@@ -361,6 +365,7 @@ def test_apply_profile_shell_can_defer_profile_placeholder_validation_to_caller(
                 "ROUTER_API_BASE=http://host.docker.internal:PORT/v1",
                 "ROUTER_API_KEY=replace-with-your-key",
                 "ROUTER_EMBEDDING_MODEL=your-embedding-model-id",
+                "RETRIEVAL_EMBEDDING_DIM=replace-with-your-embedding-dim",
                 "RETRIEVAL_RERANKER_MODEL=your-reranker-model-id",
                 "",
             ]
@@ -1327,6 +1332,8 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
     assert "$line -match '^\\s*(ROUTER_API_BASE|RETRIEVAL_EMBEDDING_API_BASE|RETRIEVAL_RERANKER_API_BASE)\\s*=\\s*.*:PORT/'" in script_text
     assert "$line -match '=\\s*replace-with-your-key(\\s+#.*)?\\s*$'" in script_text
     assert "$line -match '=\\s*your-embedding-model-id(\\s+#.*)?\\s*$'" in script_text
+    assert "$line -match '=\\s*replace-with-your-embedding-dim(\\s+#.*)?\\s*$'" in script_text
+    assert "$line -match '=\\s*<provider-vector-dim>(\\s+#.*)?\\s*$'" in script_text
     assert "$line -match '=\\s*your-reranker-model-id(\\s+#.*)?\\s*$'" in script_text
     assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:////(Users|home)/[^/]+/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text
     assert "$placeholderPattern = '^\\s*DATABASE_URL\\s*=\\s*sqlite\\+aiosqlite:///C:/memory_palace/agent_memory\\.db(\\s+#.*)?\\s*$'" in script_text
@@ -1378,3 +1385,12 @@ def test_profile_cd_templates_keep_auto_flush_enabled_for_local_platforms() -> N
                 PROJECT_ROOT / "deploy" / "profiles" / platform_name / profile_name
             ).read_text(encoding="utf-8")
             assert "RUNTIME_AUTO_FLUSH_ENABLED=true" in profile_text
+
+
+def test_profile_cd_templates_require_user_supplied_embedding_dim_placeholder() -> None:
+    for platform_name in ("macos", "linux", "windows", "docker"):
+        for profile_name in ("profile-c.env", "profile-d.env"):
+            profile_text = (
+                PROJECT_ROOT / "deploy" / "profiles" / platform_name / profile_name
+            ).read_text(encoding="utf-8")
+            assert "RETRIEVAL_EMBEDDING_DIM=replace-with-your-embedding-dim" in profile_text

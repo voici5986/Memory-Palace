@@ -199,14 +199,16 @@ def test_docs_keep_embedding_dim_codex_partial_and_profile_c_guidance_consistent
         PROJECT_ROOT / "docs" / "DEPLOYMENT_PROFILES_EN.md"
     ).read_text(encoding="utf-8")
 
-    assert "默认模板值；切到 API/router 时改成 provider 实际维度" in zh_getting_started
-    assert "default template value; switch it to the provider's real dimension" in en_getting_started
+    assert "默认模板值；切到远端 backend 时必须由你填写 provider 实际维度" in zh_getting_started
+    assert "default template value; you must provide the provider's real dimension for remote backends" in en_getting_started
     assert "`PARTIAL`" in quickstart_zh
     assert "`PARTIAL`" in quickstart_en
     assert "都能通过" not in quickstart_zh
     assert "both `mcp_bindings` and `Codex smoke` passed" not in quickstart_en
     assert "仓库自带的 `profile-c` 模板默认仍会把 Reranker 一起打开" in profiles_zh
     assert "the shipped `profile-c` template still enables the Reranker by default" in profiles_en
+    assert "不再默认替你补 `1024`" in zh_getting_started
+    assert "no longer auto-fills `1024` for you" in en_getting_started
 
 
 def test_docs_keep_report_override_guidance_consistent() -> None:

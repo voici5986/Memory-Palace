@@ -626,7 +626,7 @@ RETRIEVAL_EMBEDDING_BACKEND=none      # 可选: none / hash / router / api / ope
 RETRIEVAL_EMBEDDING_API_BASE=         # API 地址
 RETRIEVAL_EMBEDDING_API_KEY=          # API 密钥
 RETRIEVAL_EMBEDDING_MODEL=your-embedding-model-id
-RETRIEVAL_EMBEDDING_DIM=4096            # 向量维度
+RETRIEVAL_EMBEDDING_DIM=<provider-vector-dim>  # 由用户填写的真实向量维度
 
 # ── Reranker 配置 ──
 RETRIEVAL_RERANKER_ENABLED=false      # 是否启用 Reranker

@@ -2,12 +2,13 @@ import os
 import math
 from datetime import datetime, timezone
 from ipaddress import ip_address
-from typing import Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 
 TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+DEFAULT_INTERACTION_TIERS = frozenset({"fast", "deep"})
 
 
 def env_bool(
@@ -159,3 +160,64 @@ def normalize_http_api_base(
             break
 
     return urlunsplit((scheme, parsed.netloc, path, "", ""))
+
+
+def resolve_interaction_tier(
+    raw_filters: Optional[Dict[str, Any]],
+    *,
+    requested_tier: Optional[Any] = None,
+    requested_scope_hint: Optional[Any] = None,
+    allowed_tiers: Optional[Iterable[str]] = None,
+    default_tier: str = "fast",
+) -> Tuple[str, Optional[Dict[str, Any]], Optional[Any]]:
+    allowed = frozenset(
+        str(item).strip().lower()
+        for item in (allowed_tiers or DEFAULT_INTERACTION_TIERS)
+        if str(item).strip()
+    ) or DEFAULT_INTERACTION_TIERS
+
+    normalized_default = str(default_tier or "").strip().lower() or "fast"
+    if normalized_default not in allowed:
+        normalized_default = "fast"
+
+    filters_copy: Optional[Dict[str, Any]] = raw_filters
+    raw_value = requested_tier
+    scope_hint_value = requested_scope_hint
+    if isinstance(filters_copy, dict):
+        filters_copy = dict(filters_copy)
+        if raw_value is None and "interaction_tier" in filters_copy:
+            raw_value = filters_copy.get("interaction_tier")
+        filters_copy.pop("interaction_tier", None)
+
+    if raw_value is None:
+        scope_hint_tier = str(scope_hint_value or "").strip().lower()
+        if scope_hint_tier in allowed:
+            raw_value = scope_hint_tier
+            scope_hint_value = None
+
+    value = str(raw_value or "").strip().lower()
+    if value not in allowed:
+        value = normalized_default
+    return value, filters_copy, scope_hint_value
+
+
+def should_try_intent_llm(
+    client: Any,
+    rule_payload: Optional[Dict[str, Any]],
+) -> bool:
+    helper = getattr(client, "should_use_intent_llm", None)
+    if callable(helper):
+        try:
+            return bool(helper(rule_payload))
+        except Exception:
+            pass
+
+    if not isinstance(rule_payload, dict) or not rule_payload:
+        return True
+
+    rule_intent = str(rule_payload.get("intent") or "").strip().lower()
+    try:
+        rule_confidence = float(rule_payload.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        rule_confidence = 0.0
+    return rule_intent == "unknown" or rule_confidence < 0.70

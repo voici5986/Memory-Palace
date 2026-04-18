@@ -7,6 +7,10 @@ import pytest
 import mcp_server
 from api import maintenance as maintenance_api
 from db.sqlite_client import SQLiteClient
+from shared_utils import (
+    resolve_interaction_tier as _resolve_interaction_tier_shared,
+    should_try_intent_llm as _should_try_intent_llm_shared,
+)
 
 
 async def _noop_async(*_: Any, **__: Any) -> None:
@@ -254,6 +258,13 @@ async def test_search_memory_uses_preprocessed_query_and_returns_intent(
     assert payload["interaction_tier"] == "fast"
     assert payload["intent_llm_attempted"] is False
     assert payload["candidate_multiplier_applied"] == 4
+
+
+def test_interaction_tier_helpers_are_imported_from_shared_utils() -> None:
+    assert mcp_server._resolve_interaction_tier is _resolve_interaction_tier_shared
+    assert maintenance_api._resolve_interaction_tier is _resolve_interaction_tier_shared
+    assert mcp_server._should_try_intent_llm is _should_try_intent_llm_shared
+    assert maintenance_api._should_try_intent_llm is _should_try_intent_llm_shared
 
 
 @pytest.mark.asyncio

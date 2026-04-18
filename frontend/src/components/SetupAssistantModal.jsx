@@ -163,13 +163,11 @@ const ROUTER_PRESET_DEFAULTS = {
     router_api_base: 'http://127.0.0.1:8001/v1',
     router_embedding_model: '',
     router_reranker_model: '',
-    embedding_dim: '1024',
   },
   d: {
     router_api_base: 'https://router.example.com/v1',
     router_embedding_model: '',
     router_reranker_model: '',
-    embedding_dim: '1024',
   },
 };
 
@@ -213,6 +211,14 @@ const FOCUSABLE_DIALOG_SELECTOR = [
 const normalizeFieldValue = (value) => String(value ?? '').trim();
 /** @param {unknown} value */
 const isPositiveIntegerValue = (value) => /^[1-9]\d*$/.test(normalizeFieldValue(value));
+/** @param {unknown} value */
+const normalizeRemoteEmbeddingDimDraft = (value) => {
+  const normalized = normalizeFieldValue(value);
+  if (!normalized || normalized === '64') {
+    return '';
+  }
+  return normalized;
+};
 
 /** @param {SetupSummary} summary */
 const shouldHydrateRetrievalShape = (summary) => (
@@ -679,10 +685,7 @@ export default function SetupAssistantModal({
         && typeof value === 'string'
         && REMOTE_EMBEDDING_BACKENDS.has(value)
       ) {
-        const currentDim = normalizeFieldValue(next.embedding_dim);
-        if (!currentDim || currentDim === '64') {
-          next.embedding_dim = '1024';
-        }
+        next.embedding_dim = normalizeRemoteEmbeddingDimDraft(next.embedding_dim);
       }
       return clearHiddenRetrievalFields(next);
     });
@@ -747,6 +750,7 @@ export default function SetupAssistantModal({
           ...current,
           embedding_backend: 'router',
           reranker_enabled: true,
+          embedding_dim: normalizeRemoteEmbeddingDimDraft(current.embedding_dim),
           ...ROUTER_PRESET_DEFAULTS.c,
         });
       }
@@ -754,6 +758,7 @@ export default function SetupAssistantModal({
         ...current,
         embedding_backend: 'router',
         reranker_enabled: true,
+        embedding_dim: normalizeRemoteEmbeddingDimDraft(current.embedding_dim),
         ...ROUTER_PRESET_DEFAULTS.d,
       });
     });

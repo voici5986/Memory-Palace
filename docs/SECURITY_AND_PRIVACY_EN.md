@@ -167,7 +167,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 
 **New validation anchors:**
 
-- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, remote embedding dimension persistence, and Docker fail-closed behavior
+- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, explicit remote embedding-dimension requirements, and Docker fail-closed behavior
 - `frontend/src/App.test.jsx` — Verifies first-run auto-open behavior, including the browser-only Dashboard-key flow on the proxy-backed path
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — Verifies the Memory page blocks destructive actions when confirm is unavailable
 - `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path

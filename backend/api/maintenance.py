@@ -27,6 +27,8 @@ from shared_utils import (
     env_float as _shared_env_float,
     env_int as _shared_env_int,
     is_loopback_hostname as _is_loopback_hostname,
+    resolve_interaction_tier as _resolve_interaction_tier,
+    should_try_intent_llm as _should_try_intent_llm,
     utc_iso_now as _utc_iso_now,
 )
 from ._write_lane import run_write_lane as _run_api_write_lane
@@ -274,12 +276,15 @@ class ReflectionWorkflowRequest(BaseModel):
     mode: str = Field(default="prepare", min_length=1, max_length=32)
     source: str = Field(default="session_summary", min_length=1, max_length=128)
     reason: str = Field(default="", max_length=240)
-    session_id: str = Field(min_length=1, max_length=128)
+    session_id: Optional[str] = Field(default=None, max_length=128)
     actor_id: Optional[str] = Field(default=None, max_length=128)
+    job_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
 
     @field_validator("session_id")
     @classmethod
-    def _validate_session_id(cls, value: str) -> str:
+    def _validate_session_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         return SnapshotManager._validate_session_id(value)
 
 
@@ -2152,46 +2157,6 @@ def _normalize_search_filters(raw_filters: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _resolve_interaction_tier(
-    raw_filters: Optional[Dict[str, Any]],
-    *,
-    requested_tier: Optional[Any] = None,
-) -> Tuple[str, Optional[Dict[str, Any]]]:
-    filters_copy: Optional[Dict[str, Any]] = raw_filters
-    raw_value = requested_tier
-    if isinstance(filters_copy, dict):
-        filters_copy = dict(filters_copy)
-        if raw_value is None and "interaction_tier" in filters_copy:
-            raw_value = filters_copy.get("interaction_tier")
-        filters_copy.pop("interaction_tier", None)
-
-    value = str(raw_value or "").strip().lower()
-    if value not in _ALLOWED_INTERACTION_TIERS:
-        value = _DEFAULT_INTERACTION_TIER
-    return value, filters_copy
-
-
-def _should_try_intent_llm(
-    client: Any, rule_payload: Optional[Dict[str, Any]]
-) -> bool:
-    helper = getattr(client, "should_use_intent_llm", None)
-    if callable(helper):
-        try:
-            return bool(helper(rule_payload))
-        except Exception:
-            pass
-
-    if not isinstance(rule_payload, dict) or not rule_payload:
-        return True
-
-    rule_intent = str(rule_payload.get("intent") or "").strip().lower()
-    try:
-        rule_confidence = float(rule_payload.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        rule_confidence = 0.0
-    return rule_intent == "unknown" or rule_confidence < 0.70
-
-
 def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:
     if scope_hint is None:
         return {
@@ -3380,6 +3345,25 @@ async def _rollback_job(
     }
 
 
+async def _reflection_workflow_rollback_handler(
+    *,
+    job_id: str,
+    reason_text: str,
+    session_id: Optional[str],
+    actor_id: Optional[str],
+) -> Dict[str, Any]:
+    _ = session_id, actor_id
+    return await _rollback_job(
+        job_id=job_id,
+        payload=ImportRollbackRequest(
+            reason=str(reason_text or "").strip() or "manual_rollback"
+        ),
+        prefer_learn=True,
+        allow_fallback=False,
+        not_found_error="learn_job_not_found",
+    )
+
+
 @router.get("/import/jobs/{job_id}")
 async def get_external_import_job(job_id: str):
     payload, _ = await _load_job_from_pool(
@@ -3564,29 +3548,61 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
 async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
     reflection_workflow_service = await _resolve_reflection_workflow_service()
     normalized_mode = str(payload.mode or "").strip()
+    normalized_mode_lower = normalized_mode.lower()
     normalized_source = str(payload.source or "").strip() or "session_summary"
     normalized_reason = str(payload.reason or "").strip()
     normalized_session_id = str(payload.session_id or "").strip()
     normalized_actor_id = (
         str(payload.actor_id).strip() if payload.actor_id is not None else None
     ) or None
+    normalized_job_id = str(payload.job_id or "").strip()
+    if normalized_mode_lower in {"prepare", "execute"} and not normalized_session_id:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "reflection_workflow_invalid_request",
+                "reason": "session_id_required",
+                "mode": normalized_mode_lower,
+                "message": "session_id is required",
+            },
+        )
+    if normalized_mode_lower == "rollback" and not normalized_job_id:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "reflection_workflow_invalid_request",
+                "reason": "job_id_required",
+                "mode": normalized_mode_lower,
+                "message": "reflection workflow rollback requires job_id",
+            },
+        )
     try:
         result = await reflection_workflow_service(
             mode=normalized_mode,
             source=normalized_source,
             reason=normalized_reason,
-            session_id=normalized_session_id,
+            session_id=normalized_session_id or None,
             actor_id=normalized_actor_id,
             client=_LazySQLiteClientProxy(get_sqlite_client),
+            job_id=normalized_job_id or None,
+            rollback_handler=_reflection_workflow_rollback_handler,
         )
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "reflection_workflow_invalid_mode",
-                "reason": "unsupported_reflection_mode",
-                "allowed_modes": ["prepare", "execute"],
-                "mode": normalized_mode,
+                "error": (
+                    "reflection_workflow_invalid_request"
+                    if str(exc) == "reflection workflow rollback requires job_id"
+                    else "reflection_workflow_invalid_mode"
+                ),
+                "reason": (
+                    "job_id_required"
+                    if str(exc) == "reflection workflow rollback requires job_id"
+                    else "unsupported_reflection_mode"
+                ),
+                "allowed_modes": ["prepare", "execute", "rollback"],
+                "mode": normalized_mode_lower or normalized_mode,
                 "message": str(exc),
             },
         ) from exc
@@ -3595,7 +3611,7 @@ async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
             raise
         result = {
             "ok": False,
-            "mode": normalized_mode.lower(),
+            "mode": normalized_mode_lower,
             "source": normalized_source,
             "reason_text": normalized_reason,
             "session_id": normalized_session_id,
@@ -3611,12 +3627,16 @@ async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
             },
         }
 
+    if normalized_mode_lower == "rollback":
+        return result
+
+    resolved_session_id = str(result.get("session_id") or normalized_session_id).strip()
     accepted, batch_id, job_payload, response_payload = _build_reflection_learn_job_response(
         result=result,
         source=normalized_source,
         reason_text=normalized_reason,
         actor_id=normalized_actor_id,
-        session_id=normalized_session_id,
+        session_id=resolved_session_id,
     )
     await _put_learn_job(job_payload)
     if not accepted:
@@ -4217,9 +4237,11 @@ async def run_observability_search(payload: SearchConsoleRequest):
             detail="mode must be one of: keyword, semantic, hybrid",
         )
 
-    interaction_tier, raw_filters = _resolve_interaction_tier(
+    interaction_tier, raw_filters, _ = _resolve_interaction_tier(
         payload.filters,
         requested_tier=payload.interaction_tier,
+        allowed_tiers=_ALLOWED_INTERACTION_TIERS,
+        default_tier=_DEFAULT_INTERACTION_TIER,
     )
 
     try:

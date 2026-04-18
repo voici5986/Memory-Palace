@@ -801,7 +801,7 @@ describe('App routing', () => {
     expect(within(dialog).queryByPlaceholderText(i18n.t('setup.retrieval.rerankerApiBasePlaceholder'))).not.toBeInTheDocument();
     expect(
       within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel'))
-    ).toHaveValue(1024);
+    ).toHaveValue(null);
 
     await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.d') }));
     expect(embeddingBackend).toHaveValue('router');
@@ -809,6 +809,25 @@ describe('App routing', () => {
     expect(
       within(dialog).getByDisplayValue('https://router.example.com/v1')
     ).toBeInTheDocument();
+  });
+
+  it('does not auto-fill embedding dimensions when switching from hash to remote backends', async () => {
+    const user = userEvent.setup();
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.b') }));
+    await user.selectOptions(within(dialog).getByRole('combobox'), 'api');
+    let embeddingDimInput = within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel'));
+    expect(embeddingDimInput).toHaveValue(null);
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.c') }));
+    embeddingDimInput = within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel'));
+    expect(embeddingDimInput).toHaveValue(null);
   });
 
   it('blocks saving preset C until required remote retrieval fields are real values', async () => {
@@ -831,6 +850,12 @@ describe('App routing', () => {
     await user.type(
       within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
       'router-reranker-live'
+    );
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')),
+      '1024'
     );
 
     await waitFor(() => expect(saveButton).not.toBeDisabled());
@@ -1066,6 +1091,10 @@ describe('App routing', () => {
     await user.type(
       within(dialog).getByLabelText(i18n.t('setup.retrieval.routerRerankerModelLabel')),
       'local-router-rerank'
+    );
+    await user.type(
+      within(dialog).getByLabelText(i18n.t('setup.retrieval.embeddingDimLabel')),
+      '1024'
     );
 
     await waitFor(() => expect(saveButton).not.toBeDisabled());
