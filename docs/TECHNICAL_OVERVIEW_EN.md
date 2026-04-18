@@ -104,6 +104,7 @@ One implementation boundary to keep in mind:
 - if `manifest.json` is damaged, the backend now tries to rebuild it under the original session scope first; it only persists the rebuilt manifest when that original scope can still be trusted. If the scope cannot be recovered safely, the session stays hidden and is not auto-deleted by a read-only session listing;
 - legacy snapshot sessions that were created before scope metadata existed are hidden by default instead of being exposed under the wrong database context; the backend now also emits a one-time warning for those hidden legacy sessions so an upgrade does not look like snapshots vanished silently.
 - if the same URI already has a later **content snapshot** in another Review session, rolling back the older snapshot now re-checks that condition inside the actual write lane and returns `409` instead of silently undoing the newer content change.
+- metadata-only rollback now also follows a fail-closed path-state check inside the actual write lane: if the path disappeared before the write lands, the API now returns `404`; if the current path target or metadata already changed, it returns `409` instead of silently overwriting the newer state or bubbling out as a generic `500`.
 - for `create` rollbacks with many descendants, the current implementation now batches descendant path deletion, orphan cleanup, and current-node deletion inside one write-lane execution, reducing repeated lane round-trips on large trees.
 
 | Method | Path | Description |
@@ -202,6 +203,7 @@ For tool return conventions and degradation semantics, see: [TOOLS_EN.md](TOOLS_
 frontend/src/
 ├── App.jsx                                    # Routes and page skeleton
 ├── main.jsx                                   # React entry point
+├── RootErrorBoundary.jsx                      # Root-level fallback shell for unexpected render crashes
 ├── i18n.js                                    # react-i18next initialization, default language, and persistence
 ├── index.css                                  # Global styles (TailwindCSS)
 ├── locales/
@@ -238,6 +240,7 @@ Additional notes:
 
 - The current frontend restores the stored language first; if there is no stored choice yet, common Chinese browser locales (`zh`, `zh-TW`, `zh-HK`, and similar `zh-*`) are normalized to `zh-CN`, and other first-visit cases fall back to English. The application shell still provides a language switch entry and a unified authentication entry in the upper right corner.
 - Before React mounts, the current frontend also primes `document.lang` and the page title from that stored or detected language, so first paint is less likely to flash the wrong locale metadata.
+- The React root is now also wrapped in `RootErrorBoundary`. In plain language: if a component crashes during render, the dashboard falls back to a small recovery shell instead of tearing down the whole SPA with no explanation.
 - Language switching supports one-click switching between English and Chinese, results will be saved in the browser's `localStorage` as `memory-palace.locale`.
 - Common static copy, date/number formats, and common frontend-side error mappings will follow the current language switch.
 - If authentication is not yet configured, the page shell will still open, but protected data requests will show an authorization prompt, empty state, or `401`.
@@ -355,7 +358,7 @@ Related files:
 - Backup scripts: `scripts/backup_memory.sh`, `scripts/backup_memory.ps1` (keep the latest `20` backups by default; adjust with `--keep` / `-Keep`; backup filenames use UTC timestamps so host/container runs sort consistently)
 - Pre-publishing check: `scripts/pre_publish_check.sh`
 
-The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the real reruns were backend non-benchmark `868 passed, 15 skipped`, frontend `154 passed`, passing frontend typecheck/build, repo-local macOS `Profile B` (`backend + SSE + Vite + browser + i18n persistence`), and Docker Profiles A/B/C/D (`/health`, frontend root, `/sse`, proxied `/api/browse/node`). Native Windows and native Linux host runtime paths were not rerun in this round.
+The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the real reruns were backend `943 passed, 20 skipped`, frontend `159 passed`, passing frontend build/typecheck, repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`), and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D`. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths were not rerun in this round.
 
 ---
 
@@ -366,6 +369,7 @@ The current validate path now treats frontend `npm run typecheck` as a first-cla
 - Public HTTP endpoints include `/`, `/health`, and FastAPI's default documentation endpoints; `/health` stays public only for a shallow payload, while detailed runtime/index data is reserved for local loopback or authenticated requests. All other Browse / Review / Maintenance and SSE channels follow the same authentication logic.
 - Defaults to **fail-closed** (rejects requests) if `MCP_API_KEY` is empty.
 - Access is only allowed locally without a key if `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **and** the request is loopback (`127.0.0.1` / `::1` / `localhost`), and only for direct loopback requests without forwarding headers.
+- The local `/setup/config` write path is also fail-closed: it only targets project-local `.env*` files, still requires a direct loopback request, and if the backend already runs with `MCP_API_KEY`, that loopback write also requires the same valid key.
 - Docker containers run as non-root users by default:
   - Backend: Custom user `app` (UID `10001`, GID `10001`)
   - Frontend: Uses official `nginx-unprivileged` non-root image

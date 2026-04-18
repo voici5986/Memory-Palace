@@ -104,6 +104,7 @@ backend/
 - 如果 `manifest.json` 损坏，后端现在会优先使用 session 侧记录的数据库作用域去重建；只有在能保住原始作用域时才会把重建结果写回。拿不到可靠作用域时，这条会话会先保持隐藏，也不会被一次只读的会话列表请求自动删掉；
 - 没有数据库作用域标记的 legacy snapshot 会话，默认不会继续暴露在当前 Review 列表里；当前实现还会对这类“被隐藏的老会话”补一条一次性 warning，避免升级后看起来像快照凭空消失。
 - 如果同一个 URI 已经在另一条 Review session 里留下了更晚的**内容快照**，旧快照的 rollback 现在会在真正写入前再检查一次；发现内容已经变新，就会直接返回 `409`，避免把较新的内容改动默默回滚掉。
+- metadata-only rollback 现在也会在真正写入前按当前 path 状态 fail-close：如果 path 中途已经不存在，会直接返回 `404`；如果当前 path 指向或 metadata 已经先变了，会返回 `409`，不再默默覆盖较新的状态，也不会再冒一个笼统的 `500`。
 - 对 `create` 型 rollback，如果目标下面有很多后代节点，当前实现会把“删后代路径 + 清孤儿 memory + 删当前节点”收敛到一次 write-lane 执行里，减少大树回滚时反复进 lane 的开销。
 
 | 方法 | 路径 | 说明 |
@@ -203,6 +204,7 @@ backend/
 frontend/src/
 ├── App.jsx                                    # 路由与页面骨架
 ├── main.jsx                                   # React 入口
+├── RootErrorBoundary.jsx                      # 根级 render 崩溃兜底页
 ├── i18n.js                                    # react-i18next 初始化、默认语言与持久化
 ├── index.css                                  # 全局样式（TailwindCSS）
 ├── locales/
@@ -238,6 +240,7 @@ frontend/src/
 补充说明：
 
 - 当前版本的前端会先恢复浏览器里已保存的语言；如果没有保存值，常见中文浏览器语言（`zh`、`zh-TW`、`zh-HK` 和其他 `zh-*`）会统一归并到 `zh-CN`，其他首次访问场景则回退到英文。React 挂载前还会先把 `<html lang>` 和 `document.title` 同步到这次启动实际要用的语言，减少刷新后先闪回旧标题或旧语言的情况。应用壳层右上角同时提供语言切换入口与统一鉴权入口
+- React 根节点现在还会先包一层 `RootErrorBoundary`。说人话就是：如果某个组件在 render 阶段直接崩掉，Dashboard 会先退回一个最小兜底页，而不是把整个 SPA 直接卸掉又不给解释。
 - 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
@@ -358,7 +361,7 @@ Docker 端口环境变量：
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`
 
-当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend 非 benchmark `868 passed, 15 skipped`、frontend `154 passed`，前端 typecheck 和 build 通过。repo-local `Profile B` 这轮还实际跑了 backend + SSE + Vite + 真实浏览器页面 + 中英切换/刷新持久化；Docker `A/B/C/D` 也都重跑了 `health`、首页、`/sse` 和代理 `/api/browse/node`。`skills+MCP` 与 `single-MCP` 是 PASS；`skills-only` 仍是 PARTIAL（`codex` smoke timeout、`gemini_live` skip、部分 IDE host 还是 partial），这里不把它写成全绿。
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `943 passed, 20 skipped`、frontend `159 passed`，前端 typecheck 和 build 通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
 
 ---
 
@@ -369,6 +372,7 @@ Docker 端口环境变量：
 - 公开 HTTP 端点包括 `/`、`/health`，以及 FastAPI 默认文档端点；其中 `/health` 公开的是浅健康结果，详细 runtime/index 仍只对本机 loopback 或带有效 key 的请求开放。其余 Browse / Review / Maintenance 与 SSE 通道遵循同一鉴权逻辑。
 - `MCP_API_KEY` 为空时默认 **fail-closed**（拒绝请求）。
 - 仅在 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **且** loopback 请求（`127.0.0.1` / `::1` / `localhost`）时可本地放行，且仅限直连 loopback 且无 forwarding headers 的请求。
+- `/setup/config` 这条本地 `.env` 写入路径同样按 fail-closed 处理：它只会写当前项目里的 `.env*` 文件，仍然只允许直连 loopback 请求；如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。
 - Docker 容器默认以非 root 用户运行：
   - Backend：自定义用户 `app`（UID `10001`，GID `10001`）
   - Frontend：使用 `nginx-unprivileged` 官方非 root 镜像

@@ -16,6 +16,7 @@ const api = axios.create({
 const LONG_RUNNING_REQUEST_TIMEOUT_MS = 60000;
 
 const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
+const STORED_AUTH_RUNTIME_OVERRIDE_KEY = 'preferStoredOverRuntime';
 
 // Handle URI encoding for resource IDs which might contain special chars
 const encodeId = (id) => encodeURIComponent(id);
@@ -23,7 +24,9 @@ const encodeId = (id) => encodeURIComponent(id);
 const getBrowserStorage = (kind) => {
   if (typeof window === 'undefined') return null;
   try {
-    return window[kind] ?? null;
+    if (kind === 'sessionStorage') return window.sessionStorage;
+    if (kind === 'localStorage') return window.localStorage;
+    return null;
   } catch (_error) {
     return null;
   }
@@ -55,9 +58,14 @@ const readStoredMaintenanceAuthFrom = (storage) => {
   try {
     const raw = storage.getItem(DASHBOARD_AUTH_STORAGE_KEY);
     if (!raw) return null;
-    const auth = normalizeMaintenanceAuth(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    const auth = normalizeMaintenanceAuth(parsed);
     if (!auth) return null;
-    return { auth, raw };
+    return {
+      auth,
+      raw,
+      preferStoredOverRuntime: parsed?.[STORED_AUTH_RUNTIME_OVERRIDE_KEY] === true,
+    };
   } catch (_error) {
     return null;
   }
@@ -79,7 +87,7 @@ const readStoredMaintenanceAuth = () => {
 
   const sessionRecord = readStoredMaintenanceAuthFrom(sessionStorage);
   if (sessionRecord) {
-    return sessionRecord.auth;
+    return sessionRecord;
   }
 
   const legacyRecord = readStoredMaintenanceAuthFrom(localStorage);
@@ -95,6 +103,7 @@ const readStoredMaintenanceAuth = () => {
         JSON.stringify({
           maintenanceApiKey: legacyRecord.auth.key,
           maintenanceApiKeyMode: legacyRecord.auth.mode,
+          [STORED_AUTH_RUNTIME_OVERRIDE_KEY]: legacyRecord.preferStoredOverRuntime === true,
         })
       );
       if (localStorage?.getItem(DASHBOARD_AUTH_STORAGE_KEY) === legacyRecord.raw) {
@@ -105,18 +114,22 @@ const readStoredMaintenanceAuth = () => {
     }
   }
 
-  return legacyRecord.auth;
+  return legacyRecord;
 };
 
 export const getMaintenanceAuthState = () => {
+  const storedAuth = readStoredMaintenanceAuth();
+  if (storedAuth?.preferStoredOverRuntime) {
+    return { ...storedAuth.auth, source: 'stored' };
+  }
+
   const runtimeAuth = readWindowRuntimeMaintenanceAuth();
   if (runtimeAuth) {
     return { ...runtimeAuth, source: 'runtime' };
   }
 
-  const storedAuth = readStoredMaintenanceAuth();
   if (storedAuth) {
-    return { ...storedAuth, source: 'stored' };
+    return { ...storedAuth.auth, source: 'stored' };
   }
 
   return null;
@@ -136,6 +149,7 @@ export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
       JSON.stringify({
         maintenanceApiKey: normalized.key,
         maintenanceApiKeyMode: normalized.mode,
+        [STORED_AUTH_RUNTIME_OVERRIDE_KEY]: true,
       })
     );
     removeStoredMaintenanceAuthFrom(getBrowserStorage('localStorage'));
@@ -235,6 +249,29 @@ const resolveRequestUrl = (config) => {
   }
 };
 
+const deleteHeader = (headers, name) => {
+  if (!headers || typeof name !== 'string') return;
+  if (typeof headers.delete === 'function') {
+    headers.delete(name);
+    return;
+  }
+  const normalizedName = name.toLowerCase();
+  Object.keys(headers).forEach((key) => {
+    if (key.toLowerCase() === normalizedName) {
+      delete headers[key];
+    }
+  });
+};
+
+const setHeader = (headers, name, value) => {
+  if (!headers || typeof name !== 'string') return;
+  if (typeof headers.set === 'function') {
+    headers.set(name, value);
+    return;
+  }
+  headers[name] = value;
+};
+
 const isProtectedApiRequest = (config) => {
   if (typeof window === 'undefined') return false;
   const requestUrl = resolveRequestUrl(config);
@@ -263,13 +300,17 @@ api.interceptors.request.use((config) => {
     return config;
   }
 
-  const headers = config.headers || {};
+  const supportsSet = typeof config.headers?.set === 'function';
+  const headers = supportsSet ? config.headers : { ...(config.headers || {}) };
+  deleteHeader(headers, 'Authorization');
+  deleteHeader(headers, 'X-MCP-API-Key');
   if (runtimeAuth.mode === 'bearer') {
-    headers.Authorization = `Bearer ${runtimeAuth.key}`;
+    setHeader(headers, 'Authorization', `Bearer ${runtimeAuth.key}`);
   } else {
-    headers['X-MCP-API-Key'] = runtimeAuth.key;
+    setHeader(headers, 'X-MCP-API-Key', runtimeAuth.key);
   }
-  return { ...config, headers };
+  config.headers = /** @type {any} */ (headers);
+  return config;
 });
 
 const normalizeMemoryNode = (node) => {

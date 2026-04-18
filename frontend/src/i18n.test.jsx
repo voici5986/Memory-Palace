@@ -80,6 +80,23 @@ describe('i18n bootstrap', () => {
     expect(document.title).toBe('Memory Palace 控制台');
   });
 
+  it('primes document language and title from the stored locale before render', async () => {
+    window.localStorage.setItem('memory-palace.locale', 'zh-CN');
+    document.documentElement.lang = 'en';
+    document.title = 'Memory Palace Dashboard';
+
+    vi.resetModules();
+    const [{ primeDocumentLanguageFromBootstrap }] = await Promise.all([
+      import('./i18n'),
+    ]);
+
+    const primedLocale = primeDocumentLanguageFromBootstrap();
+
+    expect(primedLocale).toBe('zh-CN');
+    expect(document.documentElement.lang).toBe('zh-CN');
+    expect(document.title).toBe('Memory Palace 控制台');
+  });
+
   it('maps zh-TW navigator locale to zh-CN on fresh init when no stored locale exists', async () => {
     const originalLanguage = window.navigator.language;
     const originalLanguages = window.navigator.languages;

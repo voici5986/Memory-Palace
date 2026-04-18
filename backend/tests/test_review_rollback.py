@@ -939,6 +939,99 @@ async def test_rollback_resource_returns_409_when_newer_memory_snapshot_exists(
 
 
 @pytest.mark.asyncio
+async def test_rollback_resource_rechecks_newer_snapshot_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConflictSnapshotManager:
+        def __init__(self) -> None:
+            self.inject_conflict = False
+
+        def get_snapshot(self, session_id: str, resource_id: str):
+            _ = resource_id
+            assert session_id == "session-1"
+            return {
+                "resource_id": "memory:10",
+                "resource_type": "memory",
+                "snapshot_time": "2026-03-20T10:00:00",
+                "data": {
+                    "operation_type": "modify_content",
+                    "memory_id": 123,
+                    "path": "agent/node",
+                    "domain": "core",
+                    "uri": "core://agent/node",
+                    "all_paths": [],
+                },
+            }
+
+        def list_sessions(self):
+            return [
+                {"session_id": "session-2", "created_at": "2026-03-20T10:00:01"},
+                {"session_id": "session-1", "created_at": "2026-03-20T10:00:00"},
+            ]
+
+        def list_snapshots(self, session_id: str):
+            if session_id == "session-2" and self.inject_conflict:
+                return [
+                    {
+                        "resource_id": "memory:11",
+                        "resource_type": "memory",
+                        "snapshot_time": "2026-03-20T10:00:01",
+                        "uri": "core://agent/node",
+                    }
+                ]
+            return []
+
+    class _NoRollbackClient:
+        async def get_memory_version(self, memory_id: int):
+            if int(memory_id) == 123:
+                return {"id": 123, "migrated_to": 999}
+            if int(memory_id) == 999:
+                return {"id": 999, "migrated_to": None}
+            return None
+
+        async def get_memory_by_path(
+            self,
+            path: str,
+            domain: str,
+            reinforce_access: bool = False,
+        ):
+            _ = path, domain, reinforce_access
+            return {"id": 999, "content": "current"}
+
+        async def rollback_to_memory(
+            self,
+            path: str,
+            memory_id: int,
+            domain: str,
+            *,
+            expected_current_memory_id: int | None = None,
+        ):
+            _ = path, memory_id, domain, expected_current_memory_id
+            raise AssertionError("rollback_to_memory should not run after late conflict")
+
+    manager = _ConflictSnapshotManager()
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        manager.inject_conflict = True
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_snapshot_manager", lambda: manager)
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: _NoRollbackClient())
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api.rollback_resource(
+            "session-1",
+            "memory:10",
+            review_api.RollbackRequest(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "newer review snapshot exists" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_rollback_path_create_alias_routes_writes_through_write_lane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1549,6 +1642,117 @@ async def test_rollback_path_modify_meta_can_clear_disclosure(
 
 
 @pytest.mark.asyncio
+async def test_rollback_path_modify_meta_returns_409_when_metadata_changes_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-modify-meta-conflict.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="content",
+        priority=5,
+        title="node",
+        domain="core",
+        disclosure="old disclosure",
+    )
+    await client.restore_path_metadata(
+        path="node",
+        domain="core",
+        priority=8,
+        disclosure="current disclosure",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        await client.restore_path_metadata(
+            path="node",
+            domain="core",
+            priority=9,
+            disclosure="newer disclosure",
+        )
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "modify_meta",
+                "domain": "core",
+                "path": "node",
+                "uri": "core://node",
+                "priority": 5,
+                "disclosure": "old disclosure",
+            }
+        )
+
+    current = await client.get_memory_by_path("node", "core", reinforce_access=False)
+
+    assert exc_info.value.status_code == 409
+    assert "Cannot rollback 'core://node':" in str(exc_info.value.detail)
+    assert current is not None
+    assert current["priority"] == 9
+    assert current["disclosure"] == "newer disclosure"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_rollback_path_modify_meta_returns_404_when_path_disappears_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-modify-meta-missing.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    created = await client.create_memory(
+        parent_path="",
+        content="content",
+        priority=5,
+        title="node",
+        domain="core",
+        disclosure="old disclosure",
+    )
+    await client.restore_path_metadata(
+        path="node",
+        domain="core",
+        priority=8,
+        disclosure="current disclosure",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        await client.remove_path("node", "core")
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_path(
+            {
+                "operation_type": "modify_meta",
+                "domain": "core",
+                "path": "node",
+                "uri": "core://node",
+                "memory_id": created["id"],
+                "priority": 5,
+                "disclosure": "old disclosure",
+            }
+        )
+
+    assert exc_info.value.status_code == 404
+    assert "Cannot rollback 'core://node':" in str(exc_info.value.detail)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_rollback_path_create_returns_409_when_snapshot_memory_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1692,6 +1896,120 @@ async def test_rollback_legacy_modify_returns_409_for_cross_chain_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_rollback_legacy_modify_meta_only_returns_409_when_metadata_changes_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-legacy-meta-conflict.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="content",
+        priority=5,
+        title="node",
+        domain="core",
+        disclosure="old disclosure",
+    )
+    current = await client.get_memory_by_path("node", "core", reinforce_access=False)
+    assert current is not None
+    await client.restore_path_metadata(
+        path="node",
+        domain="core",
+        priority=8,
+        disclosure="current disclosure",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        await client.restore_path_metadata(
+            path="node",
+            domain="core",
+            priority=9,
+            disclosure="newer disclosure",
+        )
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_legacy_modify(
+            {
+                "memory_id": current["id"],
+                "path": "node",
+                "domain": "core",
+                "uri": "core://node",
+                "priority": 5,
+                "disclosure": "old disclosure",
+            },
+            lane_session_id="review.rollback:legacy-meta-conflict",
+        )
+
+    latest = await client.get_memory_by_path("node", "core", reinforce_access=False)
+
+    assert exc_info.value.status_code == 409
+    assert "Cannot rollback 'core://node':" in str(exc_info.value.detail)
+    assert latest is not None
+    assert latest["priority"] == 9
+    assert latest["disclosure"] == "newer disclosure"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_rollback_legacy_modify_meta_only_returns_404_when_path_disappears_inside_write_lane(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-rollback-legacy-meta-missing.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    created = await client.create_memory(
+        parent_path="",
+        content="content",
+        priority=5,
+        title="node",
+        domain="core",
+        disclosure="old disclosure",
+    )
+    await client.restore_path_metadata(
+        path="node",
+        domain="core",
+        priority=8,
+        disclosure="current disclosure",
+    )
+
+    async def _run_write_lane_stub(operation: str, task, *, session_id=None):
+        _ = operation, session_id
+        await client.remove_path("node", "core")
+        return await task()
+
+    monkeypatch.setattr(review_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(review_api, "_run_write_lane", _run_write_lane_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await review_api._rollback_legacy_modify(
+            {
+                "memory_id": created["id"],
+                "path": "node",
+                "domain": "core",
+                "uri": "core://node",
+                "priority": 5,
+                "disclosure": "old disclosure",
+            },
+            lane_session_id="review.rollback:legacy-meta-missing",
+        )
+
+    assert exc_info.value.status_code == 404
+    assert "Cannot rollback 'core://node':" in str(exc_info.value.detail)
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_sqlite_client_rollback_to_memory_restores_path_metadata(
     tmp_path: Path,
 ) -> None:
@@ -1730,6 +2048,88 @@ async def test_sqlite_client_rollback_to_memory_restores_path_metadata(
     assert current["id"] == original["id"]
     assert current["priority"] == 1
     assert current["disclosure"] == "old disclosure"
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_client_restore_path_metadata_rejects_expected_current_memory_id_mismatch(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-restore-meta-memory-mismatch.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    original = await client.create_memory(
+        parent_path="",
+        content="original content",
+        priority=1,
+        title="node",
+        domain="core",
+    )
+    await client.remove_path("node", "core")
+    replacement = await client.create_memory(
+        parent_path="",
+        content="replacement content",
+        priority=3,
+        title="node",
+        domain="core",
+    )
+
+    with pytest.raises(ValueError, match="expected memory_id"):
+        await client.restore_path_metadata(
+            path="node",
+            domain="core",
+            priority=7,
+            disclosure="replacement disclosure",
+            expected_current_memory_id=original["id"],
+        )
+
+    current = await client.get_memory_by_path("node", "core", reinforce_access=False)
+    assert current is not None
+    assert current["id"] == replacement["id"]
+    assert current["priority"] == 3
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_client_restore_path_metadata_rejects_expected_current_metadata_mismatch(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "review-restore-meta-state-mismatch.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="content",
+        priority=1,
+        title="node",
+        domain="core",
+        disclosure="old disclosure",
+    )
+    await client.restore_path_metadata(
+        path="node",
+        domain="core",
+        priority=5,
+        disclosure="current disclosure",
+    )
+
+    with pytest.raises(ValueError, match="expected priority"):
+        await client.restore_path_metadata(
+            path="node",
+            domain="core",
+            priority=7,
+            disclosure="replacement disclosure",
+            expected_current_priority=1,
+            expected_current_disclosure="old disclosure",
+        )
+
+    current = await client.get_memory_by_path("node", "core", reinforce_access=False)
+    assert current is not None
+    assert current["priority"] == 5
+    assert current["disclosure"] == "current disclosure"
 
     await client.close()
 

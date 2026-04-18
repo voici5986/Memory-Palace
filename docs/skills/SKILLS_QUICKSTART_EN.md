@@ -140,7 +140,7 @@ So:
 If you are integrating an IDE host, do not keep reading with a hidden-mirror mental model. Jump directly to:
 
 - `IDE_HOSTS_EN.md`
-- `python scripts/render_ide_host_config.py --host <cursor|windsurf|vscode|antigravity>`
+- `python scripts/render_ide_host_config.py --host <cursor|windsurf|vscode-host|antigravity>`
 
 ---
 
@@ -371,9 +371,11 @@ Recommended commands:
 ```bash
 python scripts/render_ide_host_config.py --host cursor
 python scripts/render_ide_host_config.py --host windsurf
-python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host vscode-host
 python scripts/render_ide_host_config.py --host antigravity
 ```
+
+Use `vscode-host` as the canonical flag so it matches the documented `VSCode-host` label. The legacy `--host vscode` spelling is still accepted as a compatibility alias.
 
 On Windows the default output is already `python-wrapper`. If a host on macOS / Linux has `stdin/stdout` or CRLF quirks, switch to:
 

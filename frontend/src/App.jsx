@@ -26,6 +26,70 @@ import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
 
 const ABSOLUTE_URL_PATTERN = /^([a-z][a-z\d+\-.]*:)?\/\//i;
 
+const getBrowserStorage = (kind) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (kind === 'sessionStorage') return window.sessionStorage;
+    if (kind === 'localStorage') return window.localStorage;
+  } catch (_error) {
+    return null;
+  }
+  return null;
+};
+
+const readSetupAssistantDismissedState = () => {
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  const localStorage = getBrowserStorage('localStorage');
+
+  const sessionValue = sessionStorage?.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+  if (sessionValue != null) {
+    return sessionValue;
+  }
+
+  const legacyValue = localStorage?.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+  if (legacyValue == null) {
+    return null;
+  }
+
+  if (sessionStorage) {
+    try {
+      sessionStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, legacyValue);
+      if (localStorage?.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY) === legacyValue) {
+        localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Keep the legacy dismissal readable for the current session when migration fails.
+    }
+  }
+
+  return legacyValue;
+};
+
+const persistSetupAssistantDismissedState = (value) => {
+  const sessionStorage = getBrowserStorage('sessionStorage');
+  const localStorage = getBrowserStorage('localStorage');
+
+  if (sessionStorage) {
+    try {
+      if (value) {
+        sessionStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
+      } else {
+        sessionStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+      }
+    } catch (_error) {
+      // Storage can be unavailable in private / restricted browser contexts.
+    }
+  }
+
+  if (localStorage) {
+    try {
+      localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
+    } catch (_error) {
+      // Storage can be unavailable in private / restricted browser contexts.
+    }
+  }
+};
+
 const normalizeBasePath = (value) => {
   if (typeof value !== 'string') return '/';
   const trimmed = value.trim();
@@ -250,34 +314,15 @@ function App() {
   const routerBasename = resolveAppBasename();
 
   const readDismissedState = React.useCallback(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      return window.localStorage.getItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
-    } catch (_error) {
-      return null;
-    }
+    return readSetupAssistantDismissedState();
   }, []);
 
   const clearDismissedState = React.useCallback(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
-    } catch (_error) {
-      // Storage can be unavailable in private / restricted browser contexts.
-    }
+    persistSetupAssistantDismissedState(false);
   }, []);
 
   const persistDismissedState = React.useCallback((value) => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (value) {
-        window.localStorage.setItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY, '1');
-      } else {
-        window.localStorage.removeItem(SETUP_ASSISTANT_DISMISSED_STORAGE_KEY);
-      }
-    } catch (_error) {
-      // Storage can be unavailable in private / restricted browser contexts.
-    }
+    persistSetupAssistantDismissedState(value);
   }, []);
 
   React.useEffect(() => {

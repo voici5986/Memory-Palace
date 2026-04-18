@@ -291,6 +291,68 @@ describe('api contract regression', () => {
     expect(config.headers['X-MCP-API-Key']).toBeUndefined();
   });
 
+  it('removes stale api-key headers when switching to bearer auth', () => {
+    const interceptor = interceptorRef.current;
+    window.__MEMORY_PALACE_RUNTIME__ = {
+      maintenanceApiKey: 'runtime-key',
+      maintenanceApiKeyMode: 'bearer',
+    };
+
+    const config = interceptor({
+      url: '/maintenance/orphans',
+      headers: {
+        'X-MCP-API-Key': 'stale-key',
+      },
+      method: 'get',
+    });
+
+    expect(config.headers.Authorization).toBe('Bearer runtime-key');
+    expect(config.headers['X-MCP-API-Key']).toBeUndefined();
+  });
+
+  it('removes stale bearer headers when switching back to header auth', () => {
+    const interceptor = interceptorRef.current;
+    window.__MEMORY_PALACE_RUNTIME__ = {
+      maintenanceApiKey: 'runtime-key',
+      maintenanceApiKeyMode: 'header',
+    };
+
+    const config = interceptor({
+      url: '/maintenance/orphans',
+      headers: {
+        authorization: 'Bearer stale-key',
+      },
+      method: 'get',
+    });
+
+    expect(config.headers['X-MCP-API-Key']).toBe('runtime-key');
+    expect(config.headers.Authorization).toBeUndefined();
+    expect(config.headers.authorization).toBeUndefined();
+  });
+
+  it('uses a newly browser-saved key for protected requests immediately, even when runtime auth exists', () => {
+    const interceptor = interceptorRef.current;
+    window.__MEMORY_PALACE_RUNTIME__ = {
+      maintenanceApiKey: 'runtime-key',
+      maintenanceApiKeyMode: 'bearer',
+    };
+
+    const saved = saveStoredMaintenanceAuth('stored-key', 'header');
+    const config = interceptor({
+      url: '/maintenance/orphans',
+      headers: {},
+      method: 'get',
+    });
+
+    expect(saved).toMatchObject({
+      key: 'stored-key',
+      mode: 'header',
+      source: 'stored',
+    });
+    expect(config.headers['X-MCP-API-Key']).toBe('stored-key');
+    expect(config.headers.Authorization).toBeUndefined();
+  });
+
   it('does not inject key to cross-origin URLs even with protected path', () => {
     const interceptor = interceptorRef.current;
     window.__MEMORY_PALACE_RUNTIME__ = {

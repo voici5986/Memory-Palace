@@ -76,6 +76,51 @@ describe('MaintenancePage', () => {
     });
   });
 
+  it('supports keyboard expand on orphan cards', async () => {
+    const user = userEvent.setup();
+    render(<MaintenancePage />);
+
+    const cardToggle = await screen.findByRole('button', { name: /orphan snippet/i });
+    cardToggle.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(api.getOrphanMemoryDetail).toHaveBeenCalledWith(1);
+    });
+    expect(await screen.findByText(/orphan full content/i)).toBeInTheDocument();
+  });
+
+  it('starts all batch delete requests before the first one resolves', async () => {
+    const user = userEvent.setup();
+    const pending = [];
+    api.listOrphanMemories.mockResolvedValue([
+      { id: 1, category: 'deprecated', created_at: '2026-01-01T00:00:00Z', content_snippet: 'orphan-1' },
+      { id: 2, category: 'deprecated', created_at: '2026-01-01T00:00:00Z', content_snippet: 'orphan-2' },
+      { id: 3, category: 'deprecated', created_at: '2026-01-01T00:00:00Z', content_snippet: 'orphan-3' },
+    ]);
+    api.deleteOrphanMemory.mockImplementation((id) => new Promise((resolve) => {
+      pending.push({ id, resolve });
+    }));
+
+    render(<MaintenancePage />);
+
+    await screen.findByText(/orphan-1/i);
+    await user.click(screen.getByTitle(i18n.t('maintenance.selectAll')));
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.deleteOrphans', { count: 3 }) }));
+
+    await waitFor(() => {
+      expect(api.deleteOrphanMemory).toHaveBeenCalledTimes(3);
+    });
+
+    pending.forEach(({ resolve }) => resolve({ ok: true }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/orphan-1/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/orphan-2/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/orphan-3/i)).not.toBeInTheDocument();
+    });
+  });
+
   it('fails closed with inline notice when native confirm dialog is unavailable', async () => {
     const user = userEvent.setup();
     window.confirm.mockImplementation(() => {
@@ -253,6 +298,133 @@ describe('MaintenancePage', () => {
     });
     expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
     expect(screen.getByText('confirmation phrase mismatch')).toBeInTheDocument();
+    expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps prepared review for retry when confirm fails with 401 auth rejection', async () => {
+    const user = userEvent.setup();
+    api.queryVitalityCleanupCandidates.mockResolvedValue({
+      status: 'ok',
+      items: [
+        {
+          memory_id: 101,
+          vitality_score: 0.12,
+          inactive_days: 30,
+          access_count: 0,
+          can_delete: true,
+          uri: 'core://agent/legacy',
+          content_snippet: 'legacy candidate',
+          state_hash: 'hash-101',
+        },
+      ],
+    });
+    api.prepareVitalityCleanup.mockResolvedValue({
+      review: {
+        review_id: 'review-1',
+        token: 'token-1',
+        confirmation_phrase: 'CONFIRM DELETE',
+        action: 'delete',
+        reviewer: 'maintenance_dashboard',
+      },
+    });
+    api.confirmVitalityCleanup.mockRejectedValue({
+      response: {
+        status: 401,
+        data: {
+          detail: {
+            error: 'maintenance_auth_failed',
+            reason: 'invalid_or_missing_api_key',
+          },
+        },
+      },
+    });
+    api.extractApiError.mockReturnValue('auth failed');
+    api.extractApiErrorCode.mockReturnValue('maintenance_auth_failed');
+    window.prompt.mockReturnValue('CONFIRM DELETE');
+
+    render(<MaintenancePage />);
+    await screen.findByText(/legacy candidate/i);
+
+    const selectAllButtons = screen.getAllByRole('button', { name: i18n.t('maintenance.selectAll') });
+    await user.click(selectAllButtons[selectAllButtons.length - 1]);
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 1 }) }));
+    await screen.findByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }));
+
+    await user.click(screen.getByRole('button', {
+      name: i18n.t('maintenance.vitality.confirmAction', {
+        action: i18n.t('maintenance.vitality.actionLabels.delete'),
+      }),
+    }));
+
+    await waitFor(() => {
+      expect(api.confirmVitalityCleanup).toHaveBeenCalledWith({
+        review_id: 'review-1',
+        token: 'token-1',
+        confirmation_phrase: 'CONFIRM DELETE',
+      });
+    });
+    expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
+    expect(screen.getByText('auth failed')).toBeInTheDocument();
+    expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps prepared review for retry when confirm times out before a response arrives', async () => {
+    const user = userEvent.setup();
+    api.queryVitalityCleanupCandidates.mockResolvedValue({
+      status: 'ok',
+      items: [
+        {
+          memory_id: 101,
+          vitality_score: 0.12,
+          inactive_days: 30,
+          access_count: 0,
+          can_delete: true,
+          uri: 'core://agent/legacy',
+          content_snippet: 'legacy candidate',
+          state_hash: 'hash-101',
+        },
+      ],
+    });
+    api.prepareVitalityCleanup.mockResolvedValue({
+      review: {
+        review_id: 'review-1',
+        token: 'token-1',
+        confirmation_phrase: 'CONFIRM DELETE',
+        action: 'delete',
+        reviewer: 'maintenance_dashboard',
+      },
+    });
+    api.confirmVitalityCleanup.mockRejectedValue({
+      code: 'ECONNABORTED',
+      message: 'timeout of 60000ms exceeded',
+    });
+    api.extractApiError.mockReturnValue('timeout exceeded');
+    api.extractApiErrorCode.mockReturnValue(null);
+    window.prompt.mockReturnValue('CONFIRM DELETE');
+
+    render(<MaintenancePage />);
+    await screen.findByText(/legacy candidate/i);
+
+    const selectAllButtons = screen.getAllByRole('button', { name: i18n.t('maintenance.selectAll') });
+    await user.click(selectAllButtons[selectAllButtons.length - 1]);
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.prepareDelete', { count: 1 }) }));
+    await screen.findByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }));
+
+    await user.click(screen.getByRole('button', {
+      name: i18n.t('maintenance.vitality.confirmAction', {
+        action: i18n.t('maintenance.vitality.actionLabels.delete'),
+      }),
+    }));
+
+    await waitFor(() => {
+      expect(api.confirmVitalityCleanup).toHaveBeenCalledWith({
+        review_id: 'review-1',
+        token: 'token-1',
+        confirmation_phrase: 'CONFIRM DELETE',
+      });
+    });
+    expect(screen.getByText(i18n.t('maintenance.vitality.reviewId', { value: 'review-1' }))).toBeInTheDocument();
+    expect(screen.getByText('timeout exceeded')).toBeInTheDocument();
     expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
   });
 

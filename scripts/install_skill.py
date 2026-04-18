@@ -380,8 +380,25 @@ def _normalized(value: object) -> str:
     return str(value).replace("\\", "/")
 
 
+def _is_windows_posix_shell_host() -> bool:
+    if os.name != "nt":
+        return False
+
+    for key in ("MSYSTEM", "CYGWIN", "WSL_DISTRO_NAME", "WSL_INTEROP"):
+        if str(os.getenv(key) or "").strip():
+            return True
+
+    ostype = str(os.getenv("OSTYPE") or "").strip().lower()
+    if any(marker in ostype for marker in ("msys", "cygwin")):
+        return True
+
+    return False
+
+
 def _default_mcp_launcher() -> str:
-    return "python-wrapper" if os.name == "nt" else "bash"
+    if os.name == "nt" and not _is_windows_posix_shell_host():
+        return "python-wrapper"
+    return "bash"
 
 
 def _python_command() -> str:

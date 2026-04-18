@@ -38,8 +38,11 @@ services:
       - "${MEMORY_PALACE_FRONTEND_PORT:-${NOCTURNE_FRONTEND_PORT:-3000}}:8080"
     security_opt:
       - no-new-privileges:true
+    # Fail closed and bypass inherited proxy env for the localhost probe.
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/"]
+      test:
+        - CMD-SHELL
+        - unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY && wget -q -O /dev/null http://127.0.0.1:8080/
       interval: 10s
       timeout: 5s
       retries: 10

@@ -38,7 +38,55 @@ const isAbortError = (error) =>
         error.name === 'CanceledError')
   );
 const CHILD_PAGE_SIZE = 50;
+const MotionButton = /** @type {import('react').ElementType} */ (motion.button);
 
+/**
+ * @typedef {{
+ *   path: string,
+ *   label?: string | null,
+ * }} MemoryBreadcrumb
+ *
+ * @typedef {{
+ *   domain?: string | null,
+ *   path: string,
+ *   name?: string | null,
+ *   priority?: number | null,
+ *   gist_text?: string | null,
+ *   content_snippet?: string | null,
+ * }} MemoryChild
+ *
+ * @typedef {{
+ *   path: string,
+ *   domain?: string | null,
+ *   uri?: string | null,
+ *   name?: string | null,
+ *   content?: string | null,
+ *   priority?: number | null,
+ *   disclosure?: string | null,
+ *   gist_text?: string | null,
+ *   gist_method?: string | null,
+ *   gist_quality?: number | string | null,
+ *   source_hash?: string | null,
+ * }} MemoryNode
+ *
+ * @typedef {{
+ *   node: MemoryNode | null,
+ *   children: MemoryChild[],
+ *   breadcrumbs: MemoryBreadcrumb[],
+ * }} MemoryNodeData
+ *
+ * @typedef {{
+ *   error: unknown,
+ *   fallbackKey: string,
+ * }} ErrorState
+ *
+ * @typedef {{
+ *   type: 'ok' | 'error',
+ *   text: import('react').ReactNode,
+ * }} FeedbackState
+ */
+
+/** @param {{ items: MemoryBreadcrumb[], onNavigate: (path: string) => void }} props */
 function CrumbBar({ items, onNavigate }) {
   const { t } = useTranslation();
 
@@ -72,12 +120,13 @@ function CrumbBar({ items, onNavigate }) {
   );
 }
 
+/** @param {{ child: MemoryChild, onOpen: () => void }} props */
 function ChildCard({ child, onOpen }) {
   const { t } = useTranslation();
   const preview = child.gist_text || child.content_snippet || t('common.states.noPreview');
   return (
     <GlassCard
-      as={motion.button}
+      as={MotionButton}
       onClick={onOpen}
       className="group w-full cursor-pointer p-5 text-left bg-white/40 hover:bg-white/60 border-white/40"
     >
@@ -101,14 +150,16 @@ function ChildCard({ child, onOpen }) {
 
 export default function MemoryBrowser() {
   const { t } = useTranslation();
-  const defaultConversation = t('memory.defaultConversation');
+  const defaultConversation = String(t('memory.defaultConversation'));
   const [searchParams, setSearchParams] = useSearchParams();
   const domain = searchParams.get('domain') || 'core';
   const path = searchParams.get('path') || '';
 
   const [loading, setLoading] = useState(true);
-  const [errorState, setErrorState] = useState(null);
-  const [data, setData] = useState({ node: null, children: [], breadcrumbs: [] });
+  const [errorState, setErrorState] = useState(/** @type {ErrorState | null} */ (null));
+  const [data, setData] = useState(
+    /** @type {MemoryNodeData} */ ({ node: null, children: [], breadcrumbs: [] })
+  );
 
   const [searchValue, setSearchValue] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
@@ -118,7 +169,9 @@ export default function MemoryBrowser() {
   const [editContent, setEditContent] = useState('');
   const [editDisclosure, setEditDisclosure] = useState('');
   const [editPriority, setEditPriority] = useState(0);
-  const [contentView, setContentView] = useState('original');
+  const [contentView, setContentView] = useState(
+    /** @type {'original' | 'gist'} */ ('original')
+  );
 
   const [composerTitle, setComposerTitle] = useState('');
   const [composerDisclosure, setComposerDisclosure] = useState('');
@@ -127,15 +180,15 @@ export default function MemoryBrowser() {
   const [conversationDirty, setConversationDirty] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [feedback, setFeedback] = useState(null);
+  const [feedback, setFeedback] = useState(/** @type {FeedbackState | null} */ (null));
   const [visibleChildCount, setVisibleChildCount] = useState(CHILD_PAGE_SIZE);
   const nodeRequestRef = useRef(0);
-  const nodeAbortControllerRef = useRef(null);
+  const nodeAbortControllerRef = useRef(/** @type {AbortController | null} */ (null));
 
   const isRoot = !path;
   const error = useMemo(() => {
     if (!errorState) return null;
-    return extractApiError(errorState.error, t(errorState.fallbackKey));
+    return extractApiError(errorState.error, String(t(errorState.fallbackKey)));
   }, [errorState, t]);
 
   const refreshNode = useCallback(async () => {
@@ -269,7 +322,7 @@ export default function MemoryBrowser() {
     setSaving(true);
     setFeedback(null);
     try {
-      const payload = {};
+      const payload = /** @type {{ content?: string, priority?: number, disclosure?: string }} */ ({});
       if (editContent !== (data.node.content || '')) payload.content = editContent;
       if ((data.node.priority ?? 0) !== editPriority) payload.priority = editPriority;
       if ((data.node.disclosure || '') !== editDisclosure) payload.disclosure = editDisclosure;

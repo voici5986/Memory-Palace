@@ -1030,6 +1030,7 @@ def test_explicit_learn_failed_job_can_rollback_namespace_only(
     assert 1 not in client_stub.memories
     assert 2 not in client_stub.memories
     assert [item["operation"] for item in write_lane_calls] == [
+        "maintenance.learn.trigger.execute",
         "maintenance.learn.rollback.remove_path",
         "maintenance.learn.rollback.delete_memory",
         "maintenance.learn.rollback.remove_path",

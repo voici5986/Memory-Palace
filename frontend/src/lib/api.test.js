@@ -4,6 +4,7 @@ import {
   clearStoredMaintenanceAuth,
   extractApiError,
   getMaintenanceAuthState,
+  saveStoredMaintenanceAuth,
 } from './api';
 
 const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
@@ -198,6 +199,47 @@ describe('extractApiError', () => {
         configurable: true,
         value: originalSessionStorage,
       });
+    }
+  });
+
+  it('clears stored dashboard auth from both sessionStorage and localStorage', () => {
+    window.sessionStorage.setItem(
+      DASHBOARD_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        maintenanceApiKey: 'session-key',
+        maintenanceApiKeyMode: 'header',
+      }),
+    );
+    window.localStorage.setItem(
+      DASHBOARD_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        maintenanceApiKey: 'legacy-key',
+        maintenanceApiKeyMode: 'header',
+      }),
+    );
+
+    expect(clearStoredMaintenanceAuth()).toBe(true);
+    expect(window.sessionStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toBeNull();
+    expect(window.localStorage.getItem(DASHBOARD_AUTH_STORAGE_KEY)).toBeNull();
+  });
+
+  it('fails closed when browser storage access throws', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'sessionStorage');
+
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+
+    try {
+      expect(saveStoredMaintenanceAuth('stored-key')).toBe(false);
+      expect(getMaintenanceAuthState()).toBeNull();
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(window, 'sessionStorage', originalDescriptor);
+      }
     }
   });
 });

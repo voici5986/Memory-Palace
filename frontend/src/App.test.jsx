@@ -444,6 +444,44 @@ describe('App routing', () => {
     ).toBeInTheDocument();
   });
 
+  it('disables local .env save when setup status requires api key for loopback write', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+    setupApi.getSetupStatus.mockResolvedValue({
+      ok: true,
+      apply_supported: true,
+      apply_reason: 'local_env_file',
+      write_supported: false,
+      write_reason: 'local_api_key_required_for_write',
+      target_label: '.env',
+      restart_required: true,
+      restart_targets: ['backend', 'sse'],
+      summary: {
+        dashboard_auth_configured: true,
+        allow_insecure_local: false,
+        embedding_backend: 'hash',
+        embedding_configured: true,
+        reranker_enabled: false,
+        reranker_configured: false,
+        write_guard_enabled: false,
+        write_guard_configured: false,
+        intent_llm_enabled: false,
+        intent_llm_configured: false,
+      },
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    const saveButton = within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') });
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    expect(
+      await within(dialog).findByText(i18n.t('setup.reasons.local_api_key_required_for_write'))
+    ).toBeInTheDocument();
+  });
+
   it('remounts routes after stored auth changes without depending on raw key text', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/memory');

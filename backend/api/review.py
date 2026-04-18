@@ -321,6 +321,44 @@ def _supports_expected_current_memory_id(client: Any) -> bool:
         return False
 
 
+def _callable_supports_parameter(callable_obj: Any, parameter_name: str) -> bool:
+    if not callable(callable_obj):
+        return False
+    try:
+        return parameter_name in inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _restore_path_metadata_kwargs(client: Any, current: dict) -> Dict[str, Any]:
+    restore_path_metadata = getattr(client, "restore_path_metadata", None)
+    kwargs: Dict[str, Any] = {}
+    current_memory_id = current.get("id")
+    if (
+        isinstance(current_memory_id, int)
+        and _callable_supports_parameter(
+            restore_path_metadata, "expected_current_memory_id"
+        )
+    ):
+        kwargs["expected_current_memory_id"] = current_memory_id
+    if _callable_supports_parameter(
+        restore_path_metadata, "expected_current_priority"
+    ):
+        kwargs["expected_current_priority"] = current.get("priority")
+    if _callable_supports_parameter(
+        restore_path_metadata, "expected_current_disclosure"
+    ):
+        kwargs["expected_current_disclosure"] = current.get("disclosure")
+    return kwargs
+
+
+def _map_restore_path_metadata_value_error(exc: ValueError, uri: str) -> HTTPException:
+    detail = f"Cannot rollback '{uri}': {exc}"
+    if "not found" in str(exc).lower():
+        return HTTPException(status_code=404, detail=detail)
+    return HTTPException(status_code=409, detail=detail)
+
+
 # ========== Diff: PATH snapshots ==========
 
 async def _diff_path_create(snapshot: dict, resource_id: str) -> dict:
@@ -863,13 +901,17 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
                 domain=domain,
                 priority=data.get("priority", data.get("importance", 0)),
                 disclosure=data.get("disclosure"),
+                **_restore_path_metadata_kwargs(client, current),
             )
 
-        await _run_write_lane(
-            "rollback.update_meta",
-            _write_task_update_meta,
-            session_id=lane_session_id,
-        )
+        try:
+            await _run_write_lane(
+                "rollback.update_meta",
+                _write_task_update_meta,
+                session_id=lane_session_id,
+            )
+        except ValueError as exc:
+            raise _map_restore_path_metadata_value_error(exc, uri) from exc
         return {"metadata_restored": True}
     
     else:
@@ -877,7 +919,10 @@ async def _rollback_path(data: dict, *, lane_session_id: Optional[str] = None) -
 
 
 async def _rollback_memory_content(
-    data: dict, *, lane_session_id: Optional[str] = None
+    data: dict,
+    *,
+    lane_session_id: Optional[str] = None,
+    newer_snapshot_guard: Optional[Callable[[], None]] = None,
 ) -> dict:
     """Rollback a memory content change."""
     client = get_sqlite_client()
@@ -937,6 +982,11 @@ async def _rollback_memory_content(
             detail=f"Cannot rollback '{uri}': current memory_id is invalid.",
         )
 
+    if memory_id == current_memory_id:
+        if newer_snapshot_guard is not None:
+            newer_snapshot_guard()
+        return {"no_change": True, "new_version": memory_id}
+
     await _ensure_same_version_chain_or_409(
         client,
         snapshot_memory_id=memory_id,
@@ -944,10 +994,9 @@ async def _rollback_memory_content(
         uri=uri,
     )
 
-    if memory_id == current_memory_id:
-        return {"no_change": True, "new_version": memory_id}
-
     async def _write_task_rollback_to_memory() -> Any:
+        if newer_snapshot_guard is not None:
+            newer_snapshot_guard()
         kwargs: Dict[str, Any] = {}
         if _supports_expected_current_memory_id(client):
             kwargs["expected_current_memory_id"] = current_memory_id
@@ -973,7 +1022,10 @@ async def _rollback_memory_content(
 
 
 async def _rollback_legacy_modify(
-    data: dict, *, lane_session_id: Optional[str] = None
+    data: dict,
+    *,
+    lane_session_id: Optional[str] = None,
+    newer_snapshot_guard: Optional[Callable[[], None]] = None,
 ) -> dict:
     """Rollback for legacy 'modify' snapshots that combined content + metadata."""
     client = get_sqlite_client()
@@ -1027,14 +1079,18 @@ async def _rollback_legacy_modify(
         snapshot_priority != current.get("priority") or
         snapshot_disclosure != current.get("disclosure")
     )
-    
+
     if not has_version_change and not has_meta_change:
+        if newer_snapshot_guard is not None:
+            newer_snapshot_guard()
         return {"no_change": True, "new_version": current.get("id")}
     
     restored_id = current.get("id")
     
     if has_version_change and has_meta_change:
         async def _write_task_restore_legacy_modify() -> Any:
+            if newer_snapshot_guard is not None:
+                newer_snapshot_guard()
             kwargs: Dict[str, Any] = {}
             if _supports_expected_current_memory_id(client):
                 kwargs["expected_current_memory_id"] = current_memory_id
@@ -1062,6 +1118,8 @@ async def _rollback_legacy_modify(
         restored_id = result["restored_memory_id"]
     elif has_version_change:
         async def _write_task_rollback_to_memory() -> Any:
+            if newer_snapshot_guard is not None:
+                newer_snapshot_guard()
             kwargs: Dict[str, Any] = {}
             if _supports_expected_current_memory_id(client):
                 kwargs["expected_current_memory_id"] = current_memory_id
@@ -1087,19 +1145,25 @@ async def _rollback_legacy_modify(
     
     if has_meta_change and not has_version_change:
         async def _write_task_update_legacy_meta() -> Any:
+            if newer_snapshot_guard is not None:
+                newer_snapshot_guard()
             return await client.restore_path_metadata(
                 path=path,
                 domain=domain,
                 priority=snapshot_priority if snapshot_priority is not None else 0,
                 disclosure=snapshot_disclosure,
+                **_restore_path_metadata_kwargs(client, current),
             )
 
-        await _run_write_lane(
-            "rollback.update_meta",
-            _write_task_update_legacy_meta,
-            session_id=lane_session_id,
-        )
-    
+        try:
+            await _run_write_lane(
+                "rollback.update_meta",
+                _write_task_update_legacy_meta,
+                session_id=lane_session_id,
+            )
+        except ValueError as exc:
+            raise _map_restore_path_metadata_value_error(exc, uri) from exc
+
     return {"new_version": restored_id}
 
 
@@ -1141,22 +1205,26 @@ async def rollback_resource(session_id: str, resource_id: str, request: Rollback
         if resource_type == "path":
             result = await _rollback_path(data, lane_session_id=lane_session_id)
         elif resource_type == "memory":
+            newer_snapshot_guard = None
             if operation_type in {"modify_content", "modify"}:
-                _raise_if_newer_review_snapshot_exists(
-                    manager=manager,
-                    session_id=session_id,
-                    snapshot=snapshot,
-                )
+                def newer_snapshot_guard() -> None:
+                    _raise_if_newer_review_snapshot_exists(
+                        manager=manager,
+                        session_id=session_id,
+                        snapshot=snapshot,
+                    )
             if operation_type == "modify_content":
                 result = await _rollback_memory_content(
                     data,
                     lane_session_id=lane_session_id,
+                    newer_snapshot_guard=newer_snapshot_guard,
                 )
             elif operation_type == "modify":
                 # Legacy: old "modify" snapshots with resource_type="memory"
                 result = await _rollback_legacy_modify(
                     data,
                     lane_session_id=lane_session_id,
+                    newer_snapshot_guard=newer_snapshot_guard,
                 )
             elif operation_type in ("create", "delete", "create_alias"):
                 # Legacy: old snapshots used resource_type="memory" for all operations

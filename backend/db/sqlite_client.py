@@ -75,6 +75,7 @@ _LATIN_RETRIEVAL_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 _CJK_RETRIEVAL_TOKEN_PATTERN = re.compile(
     r"[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\U00020000-\U0002EBEF]+"
 )
+_EXPECTED_VALUE_UNSET = object()
 _INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     # Keep query-routing keywords in one place so future language additions or
     # config-driven overrides do not require editing classifier logic.
@@ -815,6 +816,38 @@ class SQLiteClient:
             return mode
         return "normal"
 
+    @staticmethod
+    def _quote_sqlite_identifier(value: Any) -> str:
+        identifier = str(value or "").strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
+            raise ValueError("invalid sqlite identifier")
+        return f'"{identifier}"'
+
+    @staticmethod
+    def _execute_sqlite_pragma(
+        cursor,
+        pragma_name: str,
+        value: Any,
+        *,
+        allowed_values: Optional[set[str]] = None,
+    ) -> None:
+        normalized_name = str(pragma_name or "").strip().lower()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized_name):
+            raise ValueError("unsupported pragma")
+
+        if allowed_values is None:
+            try:
+                normalized_value = str(int(value))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid pragma value") from exc
+        else:
+            normalized_allowed = {str(item).strip().upper() for item in allowed_values}
+            normalized_value = str(value or "").strip().upper()
+            if normalized_value not in normalized_allowed:
+                raise ValueError("invalid pragma value")
+
+        cursor.execute(f"PRAGMA {normalized_name}={normalized_value}")
+
     def _register_runtime_write_pragma_hook(self) -> None:
         @event.listens_for(self.engine.sync_engine, "connect")
         def _on_connect(dbapi_connection, _connection_record) -> None:
@@ -832,7 +865,11 @@ class SQLiteClient:
         cursor = None
         try:
             cursor = dbapi_connection.cursor()
-            cursor.execute(f"PRAGMA busy_timeout={int(self._runtime_write_busy_timeout_ms)}")
+            self._execute_sqlite_pragma(
+                cursor,
+                "busy_timeout",
+                int(self._runtime_write_busy_timeout_ms),
+            )
             cursor.execute("PRAGMA busy_timeout")
             busy_timeout_row = cursor.fetchone()
             if busy_timeout_row and busy_timeout_row[0] is not None:
@@ -856,7 +893,12 @@ class SQLiteClient:
                     "network_filesystem_risk:"
                     f"{self._runtime_write_wal_network_filesystem_signal}"
                 )
-            cursor.execute(f"PRAGMA journal_mode={requested_mode.upper()}")
+            self._execute_sqlite_pragma(
+                cursor,
+                "journal_mode",
+                requested_mode,
+                allowed_values={"WAL", "DELETE"},
+            )
             journal_mode_row = cursor.fetchone()
             if journal_mode_row and journal_mode_row[0] is not None:
                 journal_mode_effective = (
@@ -869,7 +911,12 @@ class SQLiteClient:
                 if journal_mode_effective != "wal":
                     status = "fallback_delete"
                     error = f"journal_mode_unavailable:{journal_mode_effective}"
-                    cursor.execute("PRAGMA journal_mode=DELETE")
+                    self._execute_sqlite_pragma(
+                        cursor,
+                        "journal_mode",
+                        "DELETE",
+                        allowed_values={"WAL", "DELETE"},
+                    )
                     delete_mode_row = cursor.fetchone()
                     if delete_mode_row and delete_mode_row[0] is not None:
                         journal_mode_effective = (
@@ -880,7 +927,12 @@ class SQLiteClient:
                 else:
                     status = "enabled"
                     sync_target = self._runtime_write_wal_synchronous_requested
-                    cursor.execute(f"PRAGMA synchronous={sync_target.upper()}")
+                    self._execute_sqlite_pragma(
+                        cursor,
+                        "synchronous",
+                        sync_target,
+                        allowed_values={"OFF", "NORMAL", "FULL", "EXTRA"},
+                    )
                     cursor.execute("PRAGMA synchronous")
                     sync_row = cursor.fetchone()
                     if sync_row and sync_row[0] is not None:
@@ -891,10 +943,10 @@ class SQLiteClient:
                         )
                     else:
                         wal_synchronous_effective = sync_target
-                    cursor.execute(
-                        "PRAGMA wal_autocheckpoint={}".format(
-                            int(self._runtime_write_wal_autocheckpoint)
-                        )
+                    self._execute_sqlite_pragma(
+                        cursor,
+                        "wal_autocheckpoint",
+                        int(self._runtime_write_wal_autocheckpoint),
                     )
                     cursor.execute("PRAGMA wal_autocheckpoint")
                     wal_checkpoint_row = cursor.fetchone()
@@ -911,7 +963,12 @@ class SQLiteClient:
             try:
                 if cursor is None:
                     cursor = dbapi_connection.cursor()
-                cursor.execute("PRAGMA journal_mode=DELETE")
+                self._execute_sqlite_pragma(
+                    cursor,
+                    "journal_mode",
+                    "DELETE",
+                    allowed_values={"WAL", "DELETE"},
+                )
                 delete_mode_row = cursor.fetchone()
                 if delete_mode_row and delete_mode_row[0] is not None:
                     journal_mode_effective = (
@@ -1343,7 +1400,7 @@ class SQLiteClient:
             # Keep configured dim when probing existing vectors fails.
             vector_dim = max(16, int(self._embedding_dim))
         self._sqlite_vec_knn_dim = vector_dim
-        table_name = self._sqlite_vec_knn_table
+        table_name = self._quote_sqlite_identifier(self._sqlite_vec_knn_table)
         try:
             connection.execute(
                 text(
@@ -3262,9 +3319,10 @@ class SQLiteClient:
         self, session: AsyncSession, *, memory_id: int
     ) -> None:
         try:
+            table_name = self._quote_sqlite_identifier(self._sqlite_vec_knn_table)
             await session.execute(
                 text(
-                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    f"DELETE FROM {table_name} "
                     "WHERE rowid IN ("
                     "  SELECT id FROM memory_chunks WHERE memory_id = :memory_id"
                     ")"
@@ -3281,9 +3339,10 @@ class SQLiteClient:
         if not rows:
             return
         try:
+            table_name = self._quote_sqlite_identifier(self._sqlite_vec_knn_table)
             await session.execute(
                 text(
-                    f"DELETE FROM {self._sqlite_vec_knn_table} "
+                    f"DELETE FROM {table_name} "
                     "WHERE rowid = :chunk_id"
                 ),
                 [
@@ -3294,7 +3353,7 @@ class SQLiteClient:
             )
             await session.execute(
                 text(
-                    f"INSERT INTO {self._sqlite_vec_knn_table}("
+                    f"INSERT INTO {table_name}("
                     "rowid, vector"
                     ") VALUES (:chunk_id, vec_f32(:vector))"
                 ),
@@ -3525,6 +3584,7 @@ class SQLiteClient:
             separators=(",", ":"),
         )
         base_vec_k = max(1, int(candidate_limit))
+        table_name = self._quote_sqlite_identifier(self._sqlite_vec_knn_table)
 
         async def _query_with_k(vec_k: int) -> List[Dict[str, Any]]:
             semantic_result = await session.execute(
@@ -3533,7 +3593,7 @@ class SQLiteClient:
                     "  SELECT "
                     "    rowid AS chunk_id, "
                     "    CAST(distance AS REAL) AS vector_distance "
-                    f"  FROM {self._sqlite_vec_knn_table} "
+                    f"  FROM {table_name} "
                     "  WHERE vector MATCH vec_f32(:query_vector_json) "
                     "    AND k = :vec_k "
                     "  ORDER BY distance ASC "
@@ -4797,6 +4857,9 @@ class SQLiteClient:
         priority: int,
         disclosure: Optional[str],
         domain: str = "core",
+        expected_current_memory_id: Optional[int] = None,
+        expected_current_priority: Any = _EXPECTED_VALUE_UNSET,
+        expected_current_disclosure: Any = _EXPECTED_VALUE_UNSET,
     ) -> Dict[str, Any]:
         priority_value = self._validate_priority(priority)
         async with self.session() as session:
@@ -4806,6 +4869,31 @@ class SQLiteClient:
             path_obj = result.scalar_one_or_none()
             if path_obj is None:
                 raise ValueError(f"Path '{domain}://{path}' not found")
+            if (
+                expected_current_memory_id is not None
+                and int(path_obj.memory_id) != int(expected_current_memory_id)
+            ):
+                raise ValueError(
+                    f"Path '{domain}://{path}' now points to memory_id={path_obj.memory_id} "
+                    f"instead of expected memory_id={expected_current_memory_id}"
+                )
+
+            if expected_current_priority is not _EXPECTED_VALUE_UNSET:
+                expected_priority_value = self._validate_priority(
+                    expected_current_priority
+                )
+                if int(path_obj.priority) != int(expected_priority_value):
+                    raise ValueError(
+                        f"Path '{domain}://{path}' now has priority={path_obj.priority} "
+                        f"instead of expected priority={expected_priority_value}"
+                    )
+
+            if expected_current_disclosure is not _EXPECTED_VALUE_UNSET:
+                if path_obj.disclosure != expected_current_disclosure:
+                    raise ValueError(
+                        f"Path '{domain}://{path}' now has disclosure={path_obj.disclosure!r} "
+                        f"instead of expected disclosure={expected_current_disclosure!r}"
+                    )
 
             path_obj.priority = priority_value
             path_obj.disclosure = disclosure
@@ -6050,9 +6138,16 @@ class SQLiteClient:
         except (TypeError, ValueError):
             requested_candidate_multiplier = 4
         applied_candidate_multiplier = max(1, requested_candidate_multiplier)
+        max_candidate_multiplier: Optional[int] = None
 
         if isinstance(intent_profile, dict):
             intent_candidate = str(intent_profile.get("intent") or "").strip().lower()
+            raw_max_candidate_multiplier = intent_profile.get("max_candidate_multiplier")
+            try:
+                if raw_max_candidate_multiplier is not None:
+                    max_candidate_multiplier = int(raw_max_candidate_multiplier)
+            except (TypeError, ValueError):
+                max_candidate_multiplier = None
             if intent_candidate in {"factual", "exploratory", "temporal", "causal"}:
                 intent_applied = intent_candidate
                 if intent_candidate == "factual":
@@ -6067,6 +6162,11 @@ class SQLiteClient:
                 elif intent_candidate == "causal":
                     strategy_template = "causal_wide_pool"
                     applied_candidate_multiplier = max(applied_candidate_multiplier, 8)
+        if max_candidate_multiplier is not None and max_candidate_multiplier > 0:
+            applied_candidate_multiplier = min(
+                applied_candidate_multiplier,
+                max_candidate_multiplier,
+            )
 
         strategy_metadata = {
             "intent": intent_applied,
@@ -6258,7 +6358,8 @@ class SQLiteClient:
                             )
 
                 if not keyword_rows:
-                    like_pattern = f"%{query.lower()}%"
+                    escaped_query = self._escape_like_pattern(query.lower())
+                    like_pattern = f"%{escaped_query}%"
                     keyword_result = await session.execute(
                         text(
                             "SELECT "
@@ -6270,7 +6371,8 @@ class SQLiteClient:
                             "JOIN memories m ON m.id = mc.memory_id "
                             "JOIN paths p ON p.memory_id = mc.memory_id "
                             f"WHERE {where_clause} "
-                            "AND (LOWER(mc.chunk_text) LIKE :like_pattern OR LOWER(p.path) LIKE :like_pattern) "
+                            "AND (LOWER(mc.chunk_text) LIKE :like_pattern ESCAPE '\\' "
+                            "OR LOWER(p.path) LIKE :like_pattern ESCAPE '\\') "
                             "ORDER BY p.priority ASC, m.created_at DESC "
                             "LIMIT :candidate_limit"
                         ),
@@ -6284,15 +6386,16 @@ class SQLiteClient:
 
                 # Legacy fallback for pre-index data
                 if not keyword_rows:
-                    search_pattern = f"%{query}%"
+                    escaped_query = self._escape_like_pattern(query)
+                    search_pattern = f"%{escaped_query}%"
                     legacy_query = (
                         select(Memory, Path)
                         .join(Path, Memory.id == Path.memory_id)
                         .where(Memory.deprecated == False)
                         .where(
                             or_(
-                                Path.path.like(search_pattern),
-                                Memory.content.like(search_pattern),
+                                Path.path.like(search_pattern, escape="\\"),
+                                Memory.content.like(search_pattern, escape="\\"),
                             )
                         )
                     )

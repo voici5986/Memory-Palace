@@ -24,6 +24,10 @@ def _resolve_timeout_seconds() -> float:
         return 5.0
 
 
+def _proxyless_opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def main() -> int:
     url = str(os.getenv("MEMORY_PALACE_BACKEND_HEALTHCHECK_URL") or "").strip()
     if not url:
@@ -36,7 +40,9 @@ def main() -> int:
 
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=_resolve_timeout_seconds()) as response:
+        with _proxyless_opener().open(
+            request, timeout=_resolve_timeout_seconds()
+        ) as response:
             raw_payload = response.read().decode("utf-8")
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", None) or exc

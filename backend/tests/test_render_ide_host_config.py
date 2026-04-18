@@ -18,6 +18,22 @@ def _load_module():
     return module
 
 
+def _set_windows_posix_shell_env(monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
+    for key in ("MSYSTEM", "CYGWIN", "WSL_DISTRO_NAME", "WSL_INTEROP", "OSTYPE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_parse_args_accepts_documented_vscode_host_alias(monkeypatch) -> None:
+    module = _load_module()
+    monkeypatch.setattr(sys, "argv", ["render_ide_host_config.py", "--host", "vscode-host"])
+
+    args = module.parse_args()
+
+    assert args.host == "vscode-host"
+
+
 def test_render_payload_for_cursor_uses_repo_agents_and_bash_wrapper(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -86,6 +102,20 @@ def test_render_payload_with_python_wrapper_uses_mcp_wrapper_path(
     assert any("backend virtualenv interpreter" in note for note in payload["notes"])
 
 
+def test_render_payload_normalizes_legacy_vscode_name_to_vscode_host(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+
+    payload = module.render_payload("vscode", "bash")
+
+    assert payload["host"] == "vscode-host"
+    assert any("local stdio MCP" in note for note in payload["notes"])
+
+
 def test_render_payload_auto_uses_python_wrapper_on_windows(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -104,6 +134,36 @@ def test_render_payload_auto_uses_python_wrapper_on_windows(
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == str(venv_python)
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
         str(project_root / "backend" / "mcp_wrapper.py")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("env", "label"),
+    [
+        ({"MSYSTEM": "MINGW64"}, "git-bash"),
+        ({"CYGWIN": "1"}, "cygwin"),
+        ({"WSL_DISTRO_NAME": "Ubuntu"}, "wsl-distro"),
+        ({"WSL_INTEROP": r"\\wsl$\\Ubuntu\\interop"}, "wsl-interop"),
+        ({"OSTYPE": "msys"}, "msys-ostype"),
+        ({"OSTYPE": "cygwin"}, "cygwin-ostype"),
+    ],
+)
+def test_render_payload_auto_keeps_bash_for_windows_posix_shell_hosts(
+    monkeypatch, tmp_path: Path, env: dict[str, str], label: str
+) -> None:
+    module = _load_module()
+    project_root = tmp_path / f"Memory-Palace-{label}"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.os, "name", "nt")
+    _set_windows_posix_shell_env(monkeypatch, env)
+
+    payload = module.render_payload("cursor", "auto")
+
+    assert payload["launcher"] == "bash"
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == "bash"
+    assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
+        str(project_root / "scripts" / "run_memory_palace_mcp_stdio.sh")
     ]
 
 

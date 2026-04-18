@@ -7,8 +7,17 @@ import os
 from pathlib import Path
 
 
-IDE_HOSTS = ("cursor", "windsurf", "vscode", "antigravity")
+IDE_HOSTS = ("cursor", "windsurf", "vscode-host", "antigravity")
+HOST_ALIASES = {"vscode": "vscode-host"}
 LAUNCHERS = ("auto", "bash", "python-wrapper")
+
+
+def host_choices() -> tuple[str, ...]:
+    return IDE_HOSTS + tuple(HOST_ALIASES)
+
+
+def canonicalize_host(host: str) -> str:
+    return HOST_ALIASES.get(host, host)
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,15 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--host",
         required=True,
-        choices=IDE_HOSTS,
-        help="Target IDE host.",
+        choices=host_choices(),
+        help="Target IDE host. Accepts the documented 'vscode-host' name and the legacy 'vscode' alias.",
     )
     parser.add_argument(
         "--launcher",
         choices=LAUNCHERS,
         default="auto",
         help=(
-            "Launcher style. 'auto' picks 'python-wrapper' on Windows and 'bash' elsewhere. "
+            "Launcher style. 'auto' picks 'python-wrapper' only for native Windows shells, "
+            "and keeps 'bash' for Git Bash/MSYS/Cygwin/WSL-style POSIX shell hosts. "
             "'bash' uses scripts/run_memory_palace_mcp_stdio.sh. "
             "'python-wrapper' emits backend/mcp_wrapper.py and is mainly for CRLF/stdin quirks."
         ),
@@ -65,6 +75,21 @@ def require_backend_venv_python_absolute() -> Path:
     )
 
 
+def _is_windows_posix_shell_host() -> bool:
+    if os.name != "nt":
+        return False
+
+    for key in ("MSYSTEM", "CYGWIN", "WSL_DISTRO_NAME", "WSL_INTEROP"):
+        if str(os.getenv(key) or "").strip():
+            return True
+
+    ostype = str(os.getenv("OSTYPE") or "").strip().lower()
+    if any(marker in ostype for marker in ("msys", "cygwin")):
+        return True
+
+    return False
+
+
 def antigravity_workflow_absolute() -> Path:
     return (
         project_root()
@@ -80,7 +105,7 @@ def antigravity_workflow_absolute() -> Path:
 
 def resolve_launcher(launcher: str) -> str:
     if launcher == "auto":
-        return "python-wrapper" if os.name == "nt" else "bash"
+        return "python-wrapper" if os.name == "nt" and not _is_windows_posix_shell_host() else "bash"
     return launcher
 
 
@@ -107,13 +132,14 @@ def build_mcp_config(launcher: str) -> dict[str, object]:
 
 
 def host_notes(host: str, launcher: str) -> list[str]:
+    host = canonicalize_host(host)
     resolved = resolve_launcher(launcher)
     notes = [
         "IDE hosts should project Memory Palace via repo-local AGENTS.md instead of hidden SKILL.md mirrors.",
         "Paste the rendered MCP snippet into the host's MCP/local stdio settings surface for this repository.",
         "The wrapper reuses the repository .env / DATABASE_URL when present, so Dashboard/API/MCP stay on the same database by default.",
     ]
-    if host in {"cursor", "windsurf", "vscode"}:
+    if host in {"cursor", "windsurf", "vscode-host"}:
         notes.append(
             "Use this path only if the host or extension supports local stdio MCP and workspace-level project rules."
         )
@@ -134,6 +160,7 @@ def host_notes(host: str, launcher: str) -> list[str]:
 
 
 def render_payload(host: str, launcher: str) -> dict[str, object]:
+    host = canonicalize_host(host)
     resolved = resolve_launcher(launcher)
     payload: dict[str, object] = {
         "host": host,

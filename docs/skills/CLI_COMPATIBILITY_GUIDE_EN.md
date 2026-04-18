@@ -320,9 +320,11 @@ Do not hand-write these snippets. Render them directly:
 ```bash
 python scripts/render_ide_host_config.py --host cursor
 python scripts/render_ide_host_config.py --host windsurf
-python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host vscode-host
 python scripts/render_ide_host_config.py --host antigravity
 ```
+
+Use `vscode-host` as the canonical flag for the documented `VSCode-host` IDE host. The script still accepts legacy `--host vscode` for backward compatibility, but this does not expand the tool beyond IDE hosts.
 
 If a host has `stdin/stdout` or CRLF quirks, switch to the wrapper form:
 
@@ -399,7 +401,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 These two reports are mainly used for supplemental verification and are not intended as primary entry documentation. They are local products that "appear only after running" by default, so it's normal if they aren't in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 `MCP_LIVE_E2E_REPORT.md` defaults to using an isolated temporary database and won't touch your official database; however, upon failure, it might still include stderr, logs, or temporary directory paths in the report, so it's also recommended to review the content yourself before forwarding.
-This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification baseline for this session is: backend non-benchmark tests (`868 passed, 15 skipped`), frontend tests (`154 passed`), passing `frontend npm run typecheck`, and passing frontend build; repo-local macOS `Profile B` (`backend + SSE + Vite + browser + i18n persistence`) and Docker one-click Profiles A/B/C/D (`/health`, frontend root, `/sse`, and proxied `/api/browse/node`) were also rerun. `skills+MCP` and `single-MCP` passed, while `skills-only` remains **PARTIAL**; native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries.
+This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification baseline for this session is: backend tests (`943 passed, 20 skipped`), frontend tests (`159 passed`), passing `frontend npm run build`, and passing `frontend npm run typecheck`; repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`) and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D` were also rerun. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
 
 ## Positive / Negative Prompts
 

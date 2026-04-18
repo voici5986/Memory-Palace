@@ -46,6 +46,19 @@ function Write-LinesUtf8 {
     [System.IO.File]::WriteAllLines($FilePath, $Lines, $utf8NoBom)
 }
 
+function Resolve-StableEnvFilePath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $Path
+    }
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Path))
+}
+
 function Get-DefaultComposeProjectName {
     $projectSlug = (Split-Path -Leaf $projectRoot).ToLower() -replace '[^a-z0-9]+', '-'
     $projectSlug = $projectSlug.Trim('-')
@@ -958,8 +971,16 @@ function Invoke-ComposeWithRetry {
 function Get-HttpStatusCode {
     param([string]$Url)
 
+    $NoProxyValue = Get-EffectiveNoProxyValue
+    $previousNoProxyUpper = $env:NO_PROXY
+    $previousNoProxyLower = $env:no_proxy
+    $hadNoProxyUpper = Test-Path Env:NO_PROXY
+    $hadNoProxyLower = Test-Path Env:no_proxy
+
     try {
-        $code = & curl.exe -sS -o NUL -w '%{http_code}' $Url 2>$null
+        $env:NO_PROXY = $NoProxyValue
+        $env:no_proxy = $NoProxyValue
+        $code = & curl.exe --noproxy $NoProxyValue -sS -o NUL -w '%{http_code}' $Url 2>$null
         if ([string]::IsNullOrWhiteSpace($code)) {
             return 0
         }
@@ -968,6 +989,38 @@ function Get-HttpStatusCode {
     catch {
         return 0
     }
+    finally {
+        if ($hadNoProxyUpper) {
+            $env:NO_PROXY = $previousNoProxyUpper
+        }
+        else {
+            Remove-Item Env:NO_PROXY -ErrorAction SilentlyContinue
+        }
+        if ($hadNoProxyLower) {
+            $env:no_proxy = $previousNoProxyLower
+        }
+        else {
+            Remove-Item Env:no_proxy -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-EffectiveNoProxyValue {
+    $entries = New-Object System.Collections.Generic.List[string]
+
+    foreach ($rawGroup in @($env:NO_PROXY, $env:no_proxy, '127.0.0.1', 'localhost', '::1', 'host.docker.internal')) {
+        foreach ($rawEntry in [string]$rawGroup -split ',') {
+            $entry = $rawEntry.Trim()
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+                continue
+            }
+            if (-not $entries.Contains($entry)) {
+                [void]$entries.Add($entry)
+            }
+        }
+    }
+
+    return ($entries -join ',')
 }
 
 function Wait-DeploymentReady {
@@ -1150,6 +1203,7 @@ if ([string]::IsNullOrWhiteSpace($envFile)) {
     $envFile = Join-Path ([System.IO.Path]::GetTempPath()) ("memory-palace-docker-env-$profileLower-$([System.Guid]::NewGuid().ToString('N')).env")
     $script:GeneratedDockerEnvFile = $envFile
 }
+$envFile = Resolve-StableEnvFilePath -Path $envFile
 $env:MEMORY_PALACE_DOCKER_ENV_FILE = $envFile
 Write-Host "[env-file] using $envFile"
 $previousAllowUnresolvedProfilePlaceholders = [System.Environment]::GetEnvironmentVariable('MEMORY_PALACE_ALLOW_UNRESOLVED_PROFILE_PLACEHOLDERS')

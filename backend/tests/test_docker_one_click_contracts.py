@@ -97,6 +97,60 @@ def test_powershell_one_click_env_io_uses_utf8_no_bom_helpers() -> None:
     assert "Set-Content -Path $FilePath -Value $newLines" not in ps1_text
 
 
+def test_one_click_scripts_resolve_custom_env_file_to_stable_absolute_paths() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "resolve_stable_env_file_path()" in shell_text
+    assert 'env_file="$(resolve_stable_env_file_path "${env_file}")"' in shell_text
+    assert "pwd -P" in shell_text
+
+    assert "function Resolve-StableEnvFilePath" in ps1_text
+    assert "$envFile = Resolve-StableEnvFilePath -Path $envFile" in ps1_text
+    assert "[System.IO.Path]::IsPathRooted($Path)" in ps1_text
+    assert "Get-Location" in ps1_text
+
+
+def test_shell_one_click_normalizes_windows_absolute_env_paths_before_shell_io() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "normalize_cli_path()" in shell_text
+    assert "is_mangled_windows_absolute_path()" in shell_text
+    assert "reconstruct_mangled_windows_path()" in shell_text
+    assert 'cygpath -u "${raw_path}"' in shell_text
+    assert 'wslpath -u "${raw_path}"' in shell_text
+    assert 'printf \'%s\\n\' "${raw_path//\\\\//}"' in shell_text
+    assert 'echo "Refusing mangled Windows absolute env file path:' in shell_text
+
+
+def test_one_click_readiness_probes_force_local_no_proxy_bypass() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "build_local_no_proxy_value()" in shell_text
+    assert '--noproxy "${effective_no_proxy}"' in shell_text
+    assert 'NO_PROXY="${effective_no_proxy}" no_proxy="${effective_no_proxy}"' in shell_text
+
+    assert "function Get-EffectiveNoProxyValue" in ps1_text
+    assert "& curl.exe --noproxy $NoProxyValue -sS -o NUL -w '%{http_code}' $Url" in ps1_text
+    assert "$env:NO_PROXY = $NoProxyValue" in ps1_text
+    assert "$env:no_proxy = $NoProxyValue" in ps1_text
+
+    for host in ("127.0.0.1", "localhost", "::1", "host.docker.internal"):
+        assert host in shell_text
+        assert host in ps1_text
+
+
 def test_profile_external_settings_gate_checks_required_model_ids() -> None:
     shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
         encoding="utf-8"
@@ -146,6 +200,9 @@ def test_compose_waits_for_healthy_sse_service() -> None:
     assert "RUNTIME_WRITE_JOURNAL_MODE: ${MEMORY_PALACE_DOCKER_JOURNAL_MODE:-wal}" in backend_block
     assert "\n  sse:\n" not in compose_text
     assert "backend:\n        condition: service_healthy" in frontend_block
+    assert "CMD-SHELL" in frontend_block
+    assert "unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY" in frontend_block
+    assert "wget -q -O /dev/null http://127.0.0.1:8080/" in frontend_block
 
 
 def test_local_compose_uses_stable_image_names_for_no_build_reuse() -> None:
@@ -187,9 +244,11 @@ def test_shell_env_upsert_uses_env_adjacent_temp_file_for_atomic_replace() -> No
         encoding="utf-8"
     )
 
-    assert 'env_dir="$(dirname "${env_file}")"' in shell_text
-    assert 'env_base="$(basename "${env_file}")"' in shell_text
-    assert 'mktemp "${env_dir}/.${env_base}.upsert.XXXXXX"' in shell_text
+    assert 'env_file="$(resolve_stable_env_file_path "${env_file}")"' in shell_text
+    assert "mktemp_adjacent_file()" in shell_text
+    assert 'target_dir="$(dirname "${target_path}")"' in shell_text
+    assert 'target_name="$(basename "${target_path}")"' in shell_text
+    assert 'tmp_file="$(mktemp_adjacent_file "${env_file}" "upsert")"' in shell_text
 
 
 def test_one_click_scripts_fail_fast_on_risky_network_bind_mounts_with_wal() -> None:
@@ -276,6 +335,9 @@ def test_pull_based_ghcr_compose_matches_repo_two_service_topology() -> None:
     assert "\n  sse:\n" not in ghcr_compose
     assert "backend:\n        condition: service_healthy" in frontend_block
     assert "sse:\n        condition: service_healthy" not in frontend_block
+    assert "CMD-SHELL" in frontend_block
+    assert "unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY" in frontend_block
+    assert "wget -q -O /dev/null http://127.0.0.1:8080/" in frontend_block
 
 
 def test_backend_dockerfile_installs_healthcheck_script() -> None:

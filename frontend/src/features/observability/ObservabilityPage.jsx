@@ -34,6 +34,185 @@ const INPUT_CLASS =
   'w-full rounded-lg border border-[color:var(--palace-line)] bg-white/90 px-3 py-2 text-sm text-[color:var(--palace-ink)] placeholder:text-[color:var(--palace-muted)] focus:outline-none focus:ring-2 focus:ring-[color:var(--palace-accent)]/35 focus:border-[color:var(--palace-accent)]';
 const LABEL_CLASS = 'mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--palace-muted)]';
 
+/**
+ * @typedef {{
+ *   error: unknown,
+ *   fallbackKey: string,
+ *   fallbackValues?: Record<string, string | number | boolean | null | undefined>,
+ * }} ObservabilityErrorState
+ */
+
+/**
+ * @typedef {{
+ *   job_id?: string | null,
+ *   status?: string | null,
+ *   task_type?: string | null,
+ *   reason?: string | null,
+ *   memory_id?: number | null,
+ *   cancel_reason?: string | null,
+ *   requested_at?: string | null,
+ *   started_at?: string | null,
+ *   finished_at?: string | null,
+ *   error?: string | null,
+ *   result?: {
+ *     error?: string | null,
+ *     degrade_reasons?: string[] | null,
+ *   } | null,
+ * }} IndexJob
+ */
+
+/**
+ * @typedef {{
+ *   source?: string | null,
+ *   match_type?: string | null,
+ *   priority?: number | null,
+ *   updated_at?: string | null,
+ * }} SearchResultMetadata
+ */
+
+/**
+ * @typedef {{
+ *   final?: number | null,
+ * }} SearchResultScores
+ */
+
+/**
+ * @typedef {{
+ *   uri?: string | null,
+ *   snippet?: string | null,
+ *   memory_id?: number | null,
+ *   metadata?: SearchResultMetadata | null,
+ *   scores?: SearchResultScores | null,
+ * }} SearchResultItem
+ */
+
+/**
+ * @typedef {{
+ *   latency_ms?: number | null,
+ *   mode_applied?: string | null,
+ *   intent_applied?: string | null,
+ *   intent?: string | null,
+ *   strategy_template_applied?: string | null,
+ *   strategy_template?: string | null,
+ *   intent_profile?: { strategy_template?: string | null } | null,
+ *   degraded?: boolean | null,
+ *   degrade_reasons?: string[] | null,
+ *   counts?: {
+ *     session?: number | null,
+ *     global?: number | null,
+ *     returned?: number | null,
+ *   } | null,
+ *   results?: SearchResultItem[] | null,
+ * }} SearchDiagnostics
+ */
+
+/**
+ * @typedef {{
+ *   status?: string | null,
+ *   timestamp?: string | null,
+ *   search_stats?: {
+ *     total_queries?: number | null,
+ *     degraded_queries?: number | null,
+ *     cache_hit_ratio?: number | null,
+ *     cache_hit_queries?: number | null,
+ *     latency_ms?: {
+ *       avg?: number | null,
+ *       p95?: number | null,
+ *     } | null,
+ *     mode_breakdown?: Record<string, number> | null,
+ *     intent_breakdown?: Record<string, number> | null,
+ *     strategy_hit_breakdown?: Record<string, number> | null,
+ *   } | null,
+ *   health?: {
+ *     index?: { degraded?: boolean | null } | null,
+ *     runtime?: {
+ *       index_worker?: {
+ *         active_job_id?: string | null,
+ *         recent_jobs?: IndexJob[] | null,
+ *         queue_depth?: number | null,
+ *         cancelling_jobs?: number | null,
+ *         sleep_pending?: boolean | null,
+ *         last_error?: string | null,
+ *       } | null,
+ *       sleep_consolidation?: { reason?: string | null } | null,
+ *       sm_lite?: {
+ *         degraded?: boolean | null,
+ *         reason?: string | null,
+ *         session_cache?: {
+ *           session_count?: number | null,
+ *           total_hits?: number | null,
+ *         } | null,
+ *         flush_tracker?: {
+ *           session_count?: number | null,
+ *           pending_events?: number | null,
+ *         } | null,
+ *       } | null,
+ *     } | null,
+ *   } | null,
+ *   index_latency?: {
+ *     avg_ms?: number | null,
+ *     samples?: number | null,
+ *   } | null,
+ *   sleep_consolidation?: {
+ *     reason?: string | null,
+ *   } | null,
+ *   cleanup_query_stats?: {
+ *     total_queries?: number | null,
+ *     slow_queries?: number | null,
+ *     slow_threshold_ms?: number | null,
+ *     full_scan_queries?: number | null,
+ *     index_hit_ratio?: number | null,
+ *     latency_ms?: { p95?: number | null } | null,
+ *   } | null,
+ * }} ObservabilitySummary
+ */
+
+/**
+ * @typedef {{
+ *   query: string,
+ *   mode: string,
+ *   maxResults: string,
+ *   candidateMultiplier: string,
+ *   includeSession: boolean,
+ *   sessionId: string,
+ *   domain: string,
+ *   pathPrefix: string,
+ *   scopeHint: string,
+ *   maxPriority: string,
+ * }} SearchFormState
+ */
+
+/**
+ * @typedef {{
+ *   query: string,
+ *   mode: string,
+ *   max_results: number,
+ *   candidate_multiplier: number,
+ *   include_session: boolean,
+ *   session_id: string | null,
+ *   filters: {
+ *     domain?: string,
+ *     path_prefix?: string,
+ *     max_priority?: number,
+ *   },
+ *   scope_hint?: string,
+ * }} ObservabilitySearchPayload
+ */
+
+/**
+ * @typedef {{
+ *   job_id?: string | null,
+ * }} JobActionResponse
+ */
+
+const coerceTranslationText = (value, fallback = '') =>
+  typeof value === 'string' ? value : fallback;
+
+const toTranslationCount = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const formatNumber = (value, lng) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return '-';
@@ -231,27 +410,29 @@ function ResultCard({ item }) {
 
 export default function ObservabilityPage() {
   const { t, i18n } = useTranslation();
-  const [summary, setSummary] = useState(null);
+  const [summary, setSummary] = useState(/** @type {ObservabilitySummary | null} */ (null));
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryErrorState, setSummaryErrorState] = useState(null);
+  const [summaryErrorState, setSummaryErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
 
   const [searching, setSearching] = useState(false);
-  const [searchErrorState, setSearchErrorState] = useState(null);
-  const [searchResult, setSearchResult] = useState(null);
+  const [searchErrorState, setSearchErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
+  const [searchResult, setSearchResult] = useState(/** @type {SearchDiagnostics | null} */ (null));
 
   const [rebuilding, setRebuilding] = useState(false);
-  const [rebuildMessage, setRebuildMessage] = useState(null);
+  const [rebuildMessage, setRebuildMessage] = useState(/** @type {string | null} */ (null));
   const [sleepConsolidating, setSleepConsolidating] = useState(false);
-  const [jobActionKey, setJobActionKey] = useState(null);
-  const [activeJob, setActiveJob] = useState(null);
+  const [jobActionKey, setJobActionKey] = useState(/** @type {string | null} */ (null));
+  const [activeJob, setActiveJob] = useState(/** @type {IndexJob | null} */ (null));
   const [activeJobLoading, setActiveJobLoading] = useState(false);
-  const [detailJobErrorState, setDetailJobErrorState] = useState(null);
-  const [inspectedJobId, setInspectedJobId] = useState(null);
+  const [detailJobErrorState, setDetailJobErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
+  const [inspectedJobId, setInspectedJobId] = useState(/** @type {string | null} */ (null));
   const summaryRequestSeqRef = useRef(0);
-  const initialDefaultQuery = i18n.t('observability.defaultQuery', { lng: i18n.resolvedLanguage || i18n.language || 'en' });
+  const initialDefaultQuery = coerceTranslationText(
+    i18n.t('observability.defaultQuery', { lng: i18n.resolvedLanguage || i18n.language || 'en' }),
+  );
   const previousDefaultQueryRef = useRef(initialDefaultQuery);
 
-  const [form, setForm] = useState(() => ({
+  const [form, setForm] = useState(/** @returns {SearchFormState} */ (() => ({
     query: initialDefaultQuery,
     mode: 'hybrid',
     maxResults: '8',
@@ -262,7 +443,7 @@ export default function ObservabilityPage() {
     pathPrefix: '',
     scopeHint: '',
     maxPriority: '',
-  }));
+  })));
   const activeJobId = summary?.health?.runtime?.index_worker?.active_job_id || null;
   const detailJobId = inspectedJobId || activeJobId || null;
   const summaryTimestamp = summary?.timestamp || '';
@@ -279,15 +460,17 @@ export default function ObservabilityPage() {
     if (!detailJobErrorState) return null;
     return extractApiError(
       detailJobErrorState.error,
-      i18n.t(detailJobErrorState.fallbackKey, {
+      coerceTranslationText(i18n.t(detailJobErrorState.fallbackKey, {
         lng: localeKey,
         ...(detailJobErrorState.fallbackValues || {}),
-      })
+      }))
     );
   }, [detailJobErrorState, i18n, localeKey]);
 
   useEffect(() => {
-    const nextDefaultQuery = i18n.t('observability.defaultQuery', { lng: localeKey });
+    const nextDefaultQuery = coerceTranslationText(
+      i18n.t('observability.defaultQuery', { lng: localeKey }),
+    );
     setForm((prev) => {
       const shouldUpdate = prev.query === previousDefaultQueryRef.current;
       previousDefaultQueryRef.current = nextDefaultQuery;
@@ -337,7 +520,7 @@ export default function ObservabilityPage() {
       setActiveJobLoading(true);
       setDetailJobErrorState(null);
       try {
-        const payload = await getIndexJob(detailJobId);
+        const payload = /** @type {{ job?: IndexJob | null } | null} */ (await getIndexJob(detailJobId));
         if (!disposed) {
           setActiveJob(payload?.job || null);
         }
@@ -367,10 +550,15 @@ export default function ObservabilityPage() {
     };
   }, [detailJobId, summaryTimestamp]);
 
+  /**
+   * @param {keyof SearchFormState} name
+   * @param {SearchFormState[keyof SearchFormState]} value
+   */
   const onFieldChange = (name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  /** @param {React.FormEvent<HTMLFormElement>} event */
   const runSearch = async (event) => {
     event.preventDefault();
     setSearching(true);
@@ -389,6 +577,7 @@ export default function ObservabilityPage() {
         filters.max_priority = maxPriority;
       }
 
+      /** @type {ObservabilitySearchPayload} */
       const payload = {
         query: form.query,
         mode: form.mode,
@@ -410,7 +599,7 @@ export default function ObservabilityPage() {
         payload.scope_hint = form.scopeHint.trim();
       }
 
-      const data = await runObservabilitySearch(payload);
+      const data = /** @type {SearchDiagnostics} */ (await runObservabilitySearch(payload));
       setSearchResult(data);
       await loadSummary();
     } catch (err) {
@@ -459,6 +648,7 @@ export default function ObservabilityPage() {
     }
   };
 
+  /** @param {string | null | undefined} jobId */
   const handleCancelJob = async (jobId) => {
     if (!jobId) return;
     const actionKey = `cancel:${jobId}`;
@@ -510,6 +700,7 @@ export default function ObservabilityPage() {
     }
   };
 
+  /** @param {IndexJob | null | undefined} job */
   const handleRetryJob = async (job) => {
     const jobId = job?.job_id;
     if (!jobId) return;
@@ -521,26 +712,27 @@ export default function ObservabilityPage() {
     const taskType = String(job?.task_type || '');
     const retryMemoryId = Number(job?.memory_id);
     try {
+      /** @type {JobActionResponse | null} */
       let payload = null;
       try {
-        payload = await retryIndexJob(jobId, { reason: retryReason });
+        payload = /** @type {JobActionResponse | null} */ (await retryIndexJob(jobId, { reason: retryReason }));
       } catch (err) {
         if (isRetryEndpointUnsupported(err)) {
           if (taskType === 'reindex_memory' && Number.isInteger(retryMemoryId) && retryMemoryId > 0) {
-            payload = await triggerMemoryReindex(retryMemoryId, {
+            payload = /** @type {JobActionResponse | null} */ (await triggerMemoryReindex(retryMemoryId, {
               reason: retryReason,
               wait: false,
-            });
+            }));
           } else if (taskType === 'rebuild_index') {
-            payload = await triggerIndexRebuild({
+            payload = /** @type {JobActionResponse | null} */ (await triggerIndexRebuild({
               reason: retryReason,
               wait: false,
-            });
+            }));
           } else if (taskType === 'sleep_consolidation') {
-            payload = await triggerSleepConsolidation({
+            payload = /** @type {JobActionResponse | null} */ (await triggerSleepConsolidation({
               reason: retryReason,
               wait: false,
-            });
+            }));
           } else {
             throw new Error(t('observability.messages.retryUnsupported', {
               taskType: taskType || 'unknown',
@@ -669,7 +861,7 @@ export default function ObservabilityPage() {
             label={t('observability.stats.queries')}
             value={formatNumber(searchStats.total_queries, i18n.resolvedLanguage)}
             hint={t('observability.stats.degraded', {
-              count: formatNumber(searchStats.degraded_queries, i18n.resolvedLanguage),
+              count: toTranslationCount(searchStats.degraded_queries),
             })}
             tone="neutral"
           />
@@ -685,7 +877,7 @@ export default function ObservabilityPage() {
             label={t('observability.stats.cacheHitRatio')}
             value={`${((searchStats.cache_hit_ratio || 0) * 100).toFixed(1)}%`}
             hint={t('observability.stats.hitQueries', {
-              count: formatNumber(searchStats.cache_hit_queries, i18n.resolvedLanguage),
+              count: toTranslationCount(searchStats.cache_hit_queries),
             })}
             tone={searchStats.cache_hit_ratio > 0.4 ? 'good' : 'neutral'}
           />
@@ -694,7 +886,7 @@ export default function ObservabilityPage() {
             label={t('observability.stats.indexLatency')}
             value={formatMs(indexLatency.avg_ms)}
             hint={t('observability.stats.samples', {
-              count: formatNumber(indexLatency.samples, i18n.resolvedLanguage),
+              count: toTranslationCount(indexLatency.samples),
             })}
             tone={indexLatency.samples > 0 ? 'neutral' : 'warn'}
           />
@@ -703,7 +895,7 @@ export default function ObservabilityPage() {
             label={t('observability.stats.cleanupP95')}
             value={formatMs(cleanupLatency.p95)}
             hint={t('observability.stats.slow', {
-              count: formatNumber(cleanupQueryStats.slow_queries, i18n.resolvedLanguage),
+              count: toTranslationCount(cleanupQueryStats.slow_queries),
               threshold: formatMs(cleanupQueryStats.slow_threshold_ms),
             })}
             tone={cleanupQueryStats.slow_queries > 0 ? 'warn' : 'neutral'}
@@ -713,7 +905,7 @@ export default function ObservabilityPage() {
             label={t('observability.stats.cleanupIndexHit')}
             value={`${((cleanupQueryStats.index_hit_ratio || 0) * 100).toFixed(1)}%`}
             hint={t('observability.stats.fullScan', {
-              count: formatNumber(cleanupQueryStats.full_scan_queries, i18n.resolvedLanguage),
+              count: toTranslationCount(cleanupQueryStats.full_scan_queries),
             })}
             tone={cleanupQueryStats.index_hit_ratio >= 0.9 ? 'good' : cleanupQueryStats.index_hit_ratio >= 0.5 ? 'neutral' : 'warn'}
           />

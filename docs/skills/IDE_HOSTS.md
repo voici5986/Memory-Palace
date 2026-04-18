@@ -116,9 +116,11 @@ docs/skills/memory-palace/variants/antigravity/global_workflows/memory-palace.md
 ```bash
 python scripts/render_ide_host_config.py --host cursor
 python scripts/render_ide_host_config.py --host windsurf
-python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host vscode-host
 python scripts/render_ide_host_config.py --host antigravity
 ```
+
+这里的规范参数名统一写成 `vscode-host`，和正文里的 `VSCode-host` 对齐。脚本仍兼容历史别名 `--host vscode`，但文档不再把两种写法混着用。
 
 默认会输出一份 repo-local MCP JSON 片段：
 

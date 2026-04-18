@@ -3,6 +3,16 @@ import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { isEdgeBrowserProfile } from '../lib/browserProfile';
 
+/**
+ * @typedef {{
+ *   children?: import('react').ReactNode,
+ *   className?: string,
+ *   hoverEffect?: boolean,
+ *   as?: import('react').ElementType,
+ * }} GlassCardProps
+ */
+
+/** @param {GlassCardProps & Record<string, unknown>} props */
 const GlassCard = ({ children, className, hoverEffect = true, as: Component = motion.div, ...props }) => {
   const reducedEffects = isEdgeBrowserProfile();
 

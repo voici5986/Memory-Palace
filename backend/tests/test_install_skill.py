@@ -350,6 +350,26 @@ def test_codex_server_block_uses_python_wrapper_on_windows(
     assert str(project_root / "backend" / "mcp_wrapper.py").replace("\\", "\\\\") in rendered
 
 
+def test_codex_server_block_uses_shell_wrapper_for_git_bash_windows_host(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setenv("MSYSTEM", "MINGW64")
+    monkeypatch.setenv("SHELL", "/usr/bin/bash")
+
+    rendered = module._codex_server_block_text()
+
+    assert 'command = "bash"' in rendered
+    assert str(project_root / "scripts" / "run_memory_palace_mcp_stdio.sh").replace(
+        "\\", "\\\\"
+    ) in rendered
+    assert "mcp_wrapper.py" not in rendered
+
+
 def test_check_mcp_binding_codex_falls_back_without_tomllib(
     monkeypatch, tmp_path: Path
 ) -> None:

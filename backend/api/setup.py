@@ -1,4 +1,5 @@
 import hmac
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -26,6 +27,7 @@ _ENV_EXAMPLE_PATH = _PROJECT_ROOT / ".env.example"
 _RESTART_TARGETS_LOCAL = ["backend", "sse"]
 _RESTART_TARGETS_DOCKER = ["backend", "sse", "frontend"]
 _REMOTE_EMBEDDING_BACKENDS = {"api", "router", "openai"}
+_PRE_DOTENV_ENV_KEYS_MARKER = "MEMORY_PALACE_PRE_DOTENV_ENV_KEYS"
 _SETUP_MANAGED_ENV_KEYS = {
     "MCP_API_KEY",
     "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
@@ -53,6 +55,30 @@ _SETUP_MANAGED_ENV_KEYS = {
     "ROUTER_EMBEDDING_MODEL",
     "ROUTER_RERANKER_MODEL",
 }
+
+
+def _normalize_env_compare_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _resolve_process_env_setup_overrides(target_env_path: Path) -> frozenset[str]:
+    """Keep only real process overrides, not values loaded from startup .env."""
+
+    raw_marker = str(os.getenv(_PRE_DOTENV_ENV_KEYS_MARKER) or "").strip()
+    if raw_marker:
+        try:
+            marker_payload = json.loads(raw_marker)
+        except json.JSONDecodeError:
+            marker_payload = []
+        if isinstance(marker_payload, list):
+            return frozenset(
+                key
+                for key in _SETUP_MANAGED_ENV_KEYS
+                if key in {str(item) for item in marker_payload if isinstance(item, str)}
+            )
+    return frozenset()
 _PLACEHOLDER_FIELD_VALUES = {
     "router_api_base": {
         "https://router.example.com/v1",
@@ -120,7 +146,10 @@ def _refresh_setup_managed_env_from_file(target_env_path: Path) -> None:
     if not target_env_path.exists():
         return
     parsed = dotenv_values(target_env_path)
+    process_env_overrides = _resolve_process_env_setup_overrides(target_env_path)
     for key in _SETUP_MANAGED_ENV_KEYS:
+        if key in process_env_overrides:
+            continue
         if key not in parsed:
             continue
         value = parsed.get(key)
@@ -144,16 +173,48 @@ def _normalize_optional_value(value: Optional[str]) -> Optional[str]:
     return normalized
 
 
-def _resolve_target_env_path() -> Path:
+def _resolve_setup_root() -> Path:
+    return _ENV_EXAMPLE_PATH.parent.resolve()
+
+
+def _resolve_target_env_path_state() -> tuple[Path, Optional[str]]:
     raw_override = str(os.getenv("MEMORY_PALACE_SETUP_ENV_FILE") or "").strip()
     if not raw_override:
-        return _DEFAULT_ENV_PATH
-    return Path(raw_override).expanduser()
+        return _DEFAULT_ENV_PATH, None
+
+    candidate = Path(raw_override).expanduser()
+    if not candidate.is_absolute():
+        candidate = _resolve_setup_root() / candidate
+
+    resolved = candidate.resolve(strict=False)
+    root = _resolve_setup_root()
+    if resolved != root and root not in resolved.parents:
+        return _DEFAULT_ENV_PATH, "target_env_outside_project"
+    if not resolved.name.startswith(".env"):
+        return _DEFAULT_ENV_PATH, "target_env_invalid_name"
+    return resolved, None
+
+
+def _resolve_target_env_path() -> Path:
+    return _resolve_target_env_path_state()[0]
+
+
 def _running_in_docker() -> bool:
     if Path("/.dockerenv").exists():
         return True
     marker = str(os.getenv("MEMORY_PALACE_RUNNING_IN_DOCKER") or "").strip().lower()
     return marker in _TRUTHY_ENV_VALUES
+
+
+def _nearest_existing_directory(path: Path) -> Optional[Path]:
+    current = path
+    while True:
+        if current.exists():
+            return current if current.is_dir() else None
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
 
 
 def _is_direct_loopback_request(request: Request) -> bool:
@@ -165,23 +226,31 @@ def _is_direct_loopback_request(request: Request) -> bool:
     return _is_loopback_hostname(host_header) and _is_loopback_hostname(request_host)
 
 
-def _resolve_apply_support(target_env_path: Path) -> tuple[bool, str]:
+def _resolve_apply_support(
+    target_env_path: Path, *, target_env_issue: Optional[str] = None
+) -> tuple[bool, str]:
     if _running_in_docker():
         return False, "docker_runtime_not_persisted"
 
     if not _ENV_EXAMPLE_PATH.exists():
         return False, "env_example_missing"
 
-    target_parent = target_env_path.parent
-    try:
-        target_parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return False, "target_parent_unwritable"
+    if target_env_issue:
+        return False, target_env_issue
 
+    target_parent = target_env_path.parent
     if target_env_path.exists():
         if not os.access(target_env_path, os.W_OK):
             return False, "env_file_not_writable"
-    elif not os.access(target_parent, os.W_OK):
+        return True, "local_env_file"
+
+    if target_parent.exists():
+        if not target_parent.is_dir() or not os.access(target_parent, os.W_OK):
+            return False, "target_parent_unwritable"
+        return True, "local_env_file"
+
+    nearest_parent = _nearest_existing_directory(target_parent)
+    if nearest_parent is None or not os.access(nearest_parent, os.W_OK):
         return False, "target_parent_unwritable"
 
     return True, "local_env_file"
@@ -550,28 +619,78 @@ async def require_setup_access(
         )
 
 
-async def require_local_setup_write_access(request: Request) -> None:
-    if _is_direct_loopback_request(request):
+def _resolve_local_setup_write_access(
+    request: Request,
+    *,
+    x_mcp_api_key: Optional[str] = None,
+    authorization: Optional[str] = None,
+) -> tuple[bool, str]:
+    if not _is_direct_loopback_request(request):
+        return False, "local_loopback_required_for_write"
+
+    configured = _get_configured_mcp_api_key()
+    if not configured:
+        return True, "local_env_file"
+
+    provided = str(x_mcp_api_key or "").strip() or _extract_bearer_token(authorization)
+    if not provided or not hmac.compare_digest(provided, configured):
+        return False, "local_api_key_required_for_write"
+
+    return True, "local_env_file"
+
+
+async def require_local_setup_write_access(
+    request: Request,
+    x_mcp_api_key: Optional[str] = Header(default=None, alias=_MCP_API_KEY_HEADER),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> None:
+    write_allowed, write_reason = _resolve_local_setup_write_access(
+        request,
+        x_mcp_api_key=x_mcp_api_key,
+        authorization=authorization,
+    )
+    if write_allowed:
         return
 
+    if write_reason == "local_loopback_required_for_write":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "setup_access_denied",
+                "reason": write_reason,
+            },
+        )
+
     raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
+        status_code=status.HTTP_401_UNAUTHORIZED,
         detail={
             "error": "setup_access_denied",
-            "reason": "local_loopback_required_for_write",
+            "reason": "invalid_or_missing_api_key",
         },
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
 @router.get("/status", dependencies=[Depends(require_setup_access)])
-async def get_setup_status(request: Request) -> Dict[str, Any]:
-    target_env_path = _resolve_target_env_path()
+async def get_setup_status(
+    request: Request,
+    x_mcp_api_key: Optional[str] = Header(default=None, alias=_MCP_API_KEY_HEADER),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> Dict[str, Any]:
+    target_env_path, target_env_issue = _resolve_target_env_path_state()
     _refresh_setup_managed_env_from_file(target_env_path)
-    apply_supported, apply_reason = _resolve_apply_support(target_env_path)
-    write_supported = apply_supported and _is_direct_loopback_request(request)
-    write_reason = apply_reason if not apply_supported else (
-        "local_env_file" if write_supported else "local_loopback_required_for_write"
+    apply_supported, apply_reason = _resolve_apply_support(
+        target_env_path,
+        target_env_issue=target_env_issue,
     )
+    write_supported = False
+    write_reason = apply_reason
+    if apply_supported:
+        write_supported, write_reason = _resolve_local_setup_write_access(
+            request,
+            x_mcp_api_key=x_mcp_api_key,
+            authorization=authorization,
+        )
     return {
         "ok": True,
         "apply_supported": apply_supported,
@@ -591,8 +710,11 @@ async def get_setup_status(request: Request) -> Dict[str, Any]:
     dependencies=[Depends(require_setup_access), Depends(require_local_setup_write_access)],
 )
 async def save_setup_config(payload: SetupConfigRequest) -> Dict[str, Any]:
-    target_env_path = _resolve_target_env_path()
-    apply_supported, apply_reason = _resolve_apply_support(target_env_path)
+    target_env_path, target_env_issue = _resolve_target_env_path_state()
+    apply_supported, apply_reason = _resolve_apply_support(
+        target_env_path,
+        target_env_issue=target_env_issue,
+    )
     if not apply_supported:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

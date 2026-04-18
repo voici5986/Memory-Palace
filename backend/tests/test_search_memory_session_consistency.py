@@ -84,6 +84,12 @@ class _BatchSessionConsistencyClient(_SessionConsistencyClient):
         raise AssertionError("single-path lookup should not run when batch lookup exists")
 
 
+class _RaisingSessionConsistencyClient(_SessionConsistencyClient):
+    async def get_memory_by_path(self, path: str, domain: str):
+        _ = path, domain
+        raise RuntimeError("lookup exploded")
+
+
 @pytest.mark.asyncio
 async def test_search_memory_drops_deleted_session_cache_hits(
     monkeypatch: pytest.MonkeyPatch,
@@ -182,6 +188,43 @@ async def test_search_memory_refreshes_session_cache_hits_from_current_memory(
     assert payload["results"][0]["priority"] == 0
     assert payload["results"][0]["snippet"] == "fresh content from database state"
     assert payload["session_first_metrics"]["session_queue_refreshed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_memory_drops_results_when_path_revalidation_lookup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RaisingSessionConsistencyClient(
+        current_by_uri={},
+        global_results=[
+            {
+                "uri": "core://agent/current",
+                "memory_id": 7,
+                "snippet": "stale snippet from session cache",
+                "priority": 3,
+                "score": 0.91,
+                "updated_at": "2026-03-20T10:00:00Z",
+            }
+        ],
+    )
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    raw = await mcp_server.search_memory(
+        "fresh content",
+        mode="hybrid",
+        max_results=5,
+        include_session=False,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["results"] == []
+    assert payload["count"] == 0
+    assert payload["session_first_metrics"]["revalidate_lookup_failed"] == 1
+    assert "path_revalidation_lookup_failed" in payload["degrade_reasons"]
 
 
 @pytest.mark.asyncio

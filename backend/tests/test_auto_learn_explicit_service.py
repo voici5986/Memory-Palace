@@ -4,6 +4,7 @@ import json
 import pytest
 
 import mcp_server
+from api import maintenance as maintenance_api
 from runtime_state import ImportLearnAuditTracker
 
 
@@ -218,6 +219,31 @@ async def test_explicit_learn_service_requires_session_id(
     assert payload["ok"] is True
     assert payload["accepted"] is False
     assert payload["reason"] == "session_id_required"
+
+
+@pytest.mark.asyncio
+async def test_explicit_learn_service_rejects_invalid_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state, "import_learn_tracker", ImportLearnAuditTracker()
+    )
+    client = _GuardOnlyClient({"action": "ADD", "method": "keyword", "reason": "ok"})
+
+    payload = await mcp_server.run_explicit_learn_service(
+        content="new correction note",
+        source="manual_review",
+        reason="fix factual drift",
+        session_id=" bad-session",
+        client=client,
+    )
+
+    assert payload["ok"] is True
+    assert payload["accepted"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert "must not contain whitespace" in payload["validation_error"]
+    assert client.last_write_guard_kwargs is None
 
 
 @pytest.mark.asyncio
@@ -539,3 +565,54 @@ async def test_record_import_learn_event_persistence_is_monotonic_under_concurre
     assert isinstance(persisted, str)
     payload = json.loads(persisted)
     assert payload["total_events"] == 2
+
+
+@pytest.mark.parametrize(
+    "prepare_summary",
+    [
+        mcp_server._prepare_persisted_import_learn_summary,
+        maintenance_api._prepare_persisted_import_learn_summary,
+    ],
+)
+def test_import_learn_summary_merge_replaces_same_runtime_contribution_instead_of_double_counting(
+    prepare_summary,
+) -> None:
+    def _summary(total_events: int, timestamp: str) -> dict[str, object]:
+        return {
+            "window_size": total_events,
+            "total_events": total_events,
+            "event_type_breakdown": {"learn": total_events},
+            "operation_breakdown": {"learn_explicit": total_events},
+            "decision_breakdown": {"accepted": total_events},
+            "operation_decision_breakdown": {
+                "learn_explicit|accepted": total_events
+            },
+            "rejected_events": 0,
+            "rollback_events": 0,
+            "top_reasons": [{"reason": "prepared", "count": total_events}],
+            "last_event_at": timestamp,
+            "recent_events": [{"timestamp": timestamp, "reason": "prepared"}],
+        }
+
+    persisted_a = prepare_summary(
+        runtime_summary=_summary(1, "2026-04-18T00:00:01Z"),
+        persisted_summary=None,
+        runtime_id="runtime-a",
+    )
+    persisted_b = prepare_summary(
+        runtime_summary=_summary(1, "2026-04-18T00:00:02Z"),
+        persisted_summary=persisted_a,
+        runtime_id="runtime-b",
+    )
+    merged = prepare_summary(
+        runtime_summary=_summary(2, "2026-04-18T00:00:03Z"),
+        persisted_summary=persisted_b,
+        runtime_id="runtime-a",
+    )
+
+    assert merged["total_events"] == 3
+    assert merged["event_type_breakdown"]["learn"] == 3
+    assert merged["operation_decision_breakdown"]["learn_explicit|accepted"] == 3
+    assert merged["top_reasons"][0] == {"reason": "prepared", "count": 3}
+    assert merged["persistence_runtime_id"] == "runtime-a"
+    assert merged["persistence_runtime_ids"] == ["runtime-a", "runtime-b"]

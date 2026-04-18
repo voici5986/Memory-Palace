@@ -238,6 +238,8 @@ const en = {
         'The target directory is not writable from the current process.',
       env_file_not_writable:
         'The target .env file exists but is not writable from the current process.',
+      local_api_key_required_for_write:
+        'Saving local setup now requires the configured MCP API key, even on direct loopback requests.',
       local_loopback_required_for_write:
         'Saving local setup is allowed only from direct loopback requests.',
       status_unavailable:

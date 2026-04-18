@@ -236,6 +236,8 @@ const zhCN = {
         '当前进程没有目标目录的写权限。',
       env_file_not_writable:
         '目标 .env 文件存在，但当前进程没有写权限。',
+      local_api_key_required_for_write:
+        '即使是直连本机回环地址的请求，现在也必须带上已配置的 MCP API 密钥才能写入本地配置。',
       local_loopback_required_for_write:
         '只有直连本机回环地址的请求才能写入本地配置。',
       status_unavailable:

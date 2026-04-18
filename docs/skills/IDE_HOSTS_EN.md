@@ -137,9 +137,11 @@ Use:
 ```bash
 python scripts/render_ide_host_config.py --host cursor
 python scripts/render_ide_host_config.py --host windsurf
-python scripts/render_ide_host_config.py --host vscode
+python scripts/render_ide_host_config.py --host vscode-host
 python scripts/render_ide_host_config.py --host antigravity
 ```
+
+Use `vscode-host` as the canonical CLI flag so it matches the documented `VSCode-host` label. The script still accepts the legacy `--host vscode` alias for compatibility.
 
 By default, this renders a repo-local MCP JSON snippet:
 

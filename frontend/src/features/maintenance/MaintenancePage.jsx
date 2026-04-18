@@ -21,7 +21,79 @@ import { alertWithFallback, confirmWithFallback, promptWithFallback } from '../.
 
 const VITALITY_PREPARE_MAX_SELECTIONS = 100;
 const DEFAULT_VITALITY_REVIEWER = 'maintenance_dashboard';
+const ORPHAN_DELETE_CONCURRENCY = 4;
 
+/**
+ * @template T,R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R>} worker
+ * @returns {Promise<R[]>}
+ */
+const mapWithConcurrency = async (items, limit, worker) => {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }));
+
+  return results;
+};
+
+/**
+ * @typedef {{ error: unknown, fallbackKey: string }} ApiErrorState
+ * @typedef {{ type: 'translation', key: string, values?: Record<string, string | number> }} TranslationErrorState
+ * @typedef {{ id?: string | number, paths?: string[], content?: string }} MigrationTarget
+ * @typedef {{
+ *   id: string | number,
+ *   category?: string,
+ *   created_at?: string,
+ *   content_snippet?: string,
+ *   migrated_to?: string | number | null,
+ *   migration_target?: MigrationTarget | null,
+ * }} OrphanEntry
+ * @typedef {{ content?: string, migration_target?: MigrationTarget | null, errorState?: ApiErrorState }} OrphanDetail
+ * @typedef {{ reason?: string }} VitalityDecayMeta
+ * @typedef {{ status?: string, decay?: VitalityDecayMeta | null }} VitalityQueryMetaState
+ * @typedef {{
+ *   memory_id: string | number,
+ *   state_hash?: string,
+ *   can_delete?: boolean,
+ *   uri?: string,
+ *   content_snippet?: string,
+ *   vitality_score?: string | number | null,
+ *   inactive_days?: string | number | null,
+ *   access_count?: string | number | null,
+ * }} VitalityCandidate
+ * @typedef {{
+ *   review_id: string,
+ *   token: string,
+ *   confirmation_phrase: string,
+ *   action?: string,
+ *   reviewer?: string,
+ * }} VitalityPreparedReviewState
+ * @typedef {{
+ *   status?: string,
+ *   deleted_count?: number,
+ *   kept_count?: number,
+ *   skipped_count?: number,
+ *   error_count?: number,
+ * }} VitalityCleanupResultState
+ * @typedef {number | string} NumericInputState
+ */
+
+/**
+ * @param {string | number | Date | null | undefined} value
+ * @param {string | undefined} lng
+ * @param {string} fallback
+ */
 const formatDateTimeOrUnknown = (value, lng, fallback) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return fallback;
@@ -35,36 +107,84 @@ const formatDateTimeOrUnknown = (value, lng, fallback) => {
   }) || fallback;
 };
 
+/** @param {unknown} value */
 const normalizePaths = (value) => (Array.isArray(value) ? value : []);
+
+const shouldPreservePreparedReviewAfterConfirmError = (error, detailCode) => {
+  if (detailCode === 'confirmation_phrase_mismatch') {
+    return true;
+  }
+
+  if (
+    detailCode === 'maintenance_auth_failed'
+    || detailCode === 'setup_access_denied'
+    || detailCode === 'mcp_sse_auth_failed'
+  ) {
+    return true;
+  }
+
+  if (Number(error?.response?.status) === 401) {
+    return true;
+  }
+
+  if (error?.response) {
+    return false;
+  }
+
+  const errorCode = String(error?.code || '').trim().toUpperCase();
+  if (errorCode === 'ECONNABORTED' || errorCode === 'ERR_NETWORK') {
+    return true;
+  }
+
+  const message = String(error?.message || '').trim().toLowerCase();
+  if (!message) {
+    return false;
+  }
+  return (
+    message === 'network error'
+    || message === 'failed to fetch'
+    || (message.includes('timeout of') && message.includes('ms exceeded'))
+  );
+};
 
 export default function MaintenancePage() {
   const { t, i18n } = useTranslation();
-  const [orphans, setOrphans] = useState([]);
+  const [orphans, setOrphans] = useState(/** @type {OrphanEntry[]} */ ([]));
   const [loading, setLoading] = useState(false);
-  const [errorState, setErrorState] = useState(null);
+  const [errorState, setErrorState] = useState(/** @type {ApiErrorState | null} */ (null));
 
-  const [expandedId, setExpandedId] = useState(null);
-  const [detailData, setDetailData] = useState({});
-  const [detailLoading, setDetailLoading] = useState(null);
+  const [expandedId, setExpandedId] = useState(/** @type {string | number | null} */ (null));
+  const [detailData, setDetailData] = useState(/** @type {{ [key: string]: OrphanDetail }} */ ({}));
+  const [detailLoading, setDetailLoading] = useState(/** @type {string | number | null} */ (null));
 
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(/** @type {Set<string | number>} */ (new Set()));
   const [batchDeleting, setBatchDeleting] = useState(false);
-  const [orphanActionMessage, setOrphanActionMessage] = useState(null);
+  const [orphanActionMessage, setOrphanActionMessage] = useState(/** @type {string | null} */ (null));
 
-  const [vitalityCandidates, setVitalityCandidates] = useState([]);
+  const [vitalityCandidates, setVitalityCandidates] = useState(/** @type {VitalityCandidate[]} */ ([]));
   const [vitalityLoading, setVitalityLoading] = useState(false);
-  const [vitalityErrorState, setVitalityErrorState] = useState(null);
-  const [vitalitySelectedIds, setVitalitySelectedIds] = useState(new Set());
-  const [vitalityThreshold, setVitalityThreshold] = useState(0.35);
-  const [vitalityInactiveDays, setVitalityInactiveDays] = useState(14);
-  const [vitalityLimit, setVitalityLimit] = useState(80);
+  const [vitalityErrorState, setVitalityErrorState] = useState(
+    /** @type {ApiErrorState | TranslationErrorState | string | null} */ (null)
+  );
+  const [vitalitySelectedIds, setVitalitySelectedIds] = useState(
+    /** @type {Set<string | number>} */ (new Set())
+  );
+  const [vitalityThreshold, setVitalityThreshold] = useState(/** @type {NumericInputState} */ (0.35));
+  const [vitalityInactiveDays, setVitalityInactiveDays] = useState(/** @type {NumericInputState} */ (14));
+  const [vitalityLimit, setVitalityLimit] = useState(/** @type {NumericInputState} */ (80));
   const [vitalityDomain, setVitalityDomain] = useState('');
   const [vitalityPathPrefix, setVitalityPathPrefix] = useState('');
   const [vitalityReviewer, setVitalityReviewer] = useState(DEFAULT_VITALITY_REVIEWER);
   const [vitalityProcessing, setVitalityProcessing] = useState(false);
-  const [vitalityPreparedReview, setVitalityPreparedReview] = useState(null);
-  const [vitalityLastResult, setVitalityLastResult] = useState(null);
-  const [vitalityQueryMeta, setVitalityQueryMeta] = useState(null);
+  const [vitalityPreparedReview, setVitalityPreparedReview] = useState(
+    /** @type {VitalityPreparedReviewState | null} */ (null)
+  );
+  const [vitalityLastResult, setVitalityLastResult] = useState(
+    /** @type {VitalityCleanupResultState | null} */ (null)
+  );
+  const [vitalityQueryMeta, setVitalityQueryMeta] = useState(
+    /** @type {VitalityQueryMetaState | null} */ (null)
+  );
   const orphanRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const vitalityRequestSeqRef = useRef(0);
@@ -79,12 +199,16 @@ export default function MaintenancePage() {
   const vitalityError = useMemo(() => {
     if (!vitalityErrorState) return null;
     if (typeof vitalityErrorState === 'string') return vitalityErrorState;
-    if (vitalityErrorState.type === 'translation') {
+    if ('type' in vitalityErrorState && vitalityErrorState.type === 'translation') {
       return t(vitalityErrorState.key, vitalityErrorState.values || {});
     }
-    return extractApiError(vitalityErrorState.error, t(vitalityErrorState.fallbackKey));
+    if ('error' in vitalityErrorState) {
+      return extractApiError(vitalityErrorState.error, t(vitalityErrorState.fallbackKey));
+    }
+    return null;
   }, [t, vitalityErrorState]);
 
+  /** @param {string | undefined | null} action */
   const translateVitalityAction = useCallback((action) => {
     if (!action) {
       return t('maintenance.vitality.reviewFallback');
@@ -162,6 +286,7 @@ export default function MaintenancePage() {
       if (forceDecay) {
         await triggerVitalityDecay({ force: true, reason: 'maintenance.manual_refresh' });
       }
+      /** @type {{ threshold: number, inactive_days: number, limit: number, domain?: string, path_prefix?: string }} */
       const payload = {
         threshold: parsedThreshold,
         inactive_days: parsedInactiveDays,
@@ -194,6 +319,10 @@ export default function MaintenancePage() {
     }
   };
 
+  /**
+   * @param {string | number} id
+   * @param {import('react').MouseEvent<HTMLButtonElement>} e
+   */
   const toggleSelect = useCallback((id, e) => {
     e.stopPropagation();
     setSelectedIds(prev => {
@@ -204,6 +333,7 @@ export default function MaintenancePage() {
     });
   }, []);
 
+  /** @param {OrphanEntry[]} items */
   const toggleSelectAll = useCallback((items) => {
     const ids = items.map(i => i.id);
     setSelectedIds(prev => {
@@ -218,6 +348,7 @@ export default function MaintenancePage() {
     });
   }, []);
 
+  /** @param {string | number} memoryId */
   const toggleVitalitySelect = useCallback((memoryId) => {
     if (vitalityProcessing) return;
     setVitalitySelectedIds(prev => {
@@ -260,12 +391,24 @@ export default function MaintenancePage() {
     const toDelete = [...selectedIds];
     const failed = [];
 
-    for (const id of toDelete) {
-      try {
-        await deleteOrphanMemory(id);
-      } catch {
-        failed.push(id);
-      }
+    try {
+      const outcomes = await mapWithConcurrency(
+        toDelete,
+        ORPHAN_DELETE_CONCURRENCY,
+        async (id) => {
+          try {
+            await deleteOrphanMemory(id);
+            return { id, ok: true };
+          } catch {
+            return { id, ok: false };
+          }
+        }
+      );
+      outcomes.forEach(({ id, ok }) => {
+        if (!ok) failed.push(id);
+      });
+    } finally {
+      setBatchDeleting(false);
     }
 
     const failedSet = new Set(failed);
@@ -282,14 +425,13 @@ export default function MaintenancePage() {
         count,
         ids: failed.join(', '),
       });
-      if (!alertWithFallback(message)) {
-        setOrphanActionMessage(message);
+        if (!alertWithFallback(message)) {
+          setOrphanActionMessage(message);
+        }
       }
-    }
-
-    setBatchDeleting(false);
   };
 
+  /** @param {'keep' | 'delete' | string} action */
   const prepareVitalityReview = async (action) => {
     const selectedRows = vitalityCandidates.filter(item => vitalitySelectedIds.has(item.memory_id));
     if (selectedRows.length === 0) return;
@@ -412,7 +554,7 @@ export default function MaintenancePage() {
         error: err,
         fallbackKey: 'maintenance.errors.confirmCleanup',
       });
-      if (detailCode !== 'confirmation_phrase_mismatch') {
+      if (!shouldPreservePreparedReviewAfterConfirmError(err, detailCode)) {
         invalidatePreparedReview();
         await loadVitalityCandidates();
       }
@@ -421,6 +563,7 @@ export default function MaintenancePage() {
     }
   };
 
+  /** @param {string | number} id */
   const handleExpand = async (id) => {
     if (expandedId === id) {
       detailRequestSeqRef.current += 1;
@@ -466,6 +609,7 @@ export default function MaintenancePage() {
     item => vitalitySelectedIds.has(item.memory_id) && item.can_delete
   ).length;
 
+  /** @param {OrphanEntry} item */
   const renderCard = (item) => {
     const isExpanded = expandedId === item.id;
     const detail = detailData[item.id];
@@ -479,6 +623,16 @@ export default function MaintenancePage() {
         <div
           className="flex items-start gap-3 p-4 cursor-pointer select-none"
           onClick={() => handleExpand(item.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              void handleExpand(item.id);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          aria-expanded={isExpanded}
+          aria-label={String(item.content_snippet || item.id)}
         >
           <button
             onClick={(e) => toggleSelect(item.id, e)}
@@ -593,6 +747,12 @@ export default function MaintenancePage() {
     );
   };
 
+  /**
+   * @param {import('react').ReactNode} icon
+   * @param {string} label
+   * @param {string} color
+   * @param {OrphanEntry[]} items
+   */
   const renderSectionHeader = (icon, label, color, items) => {
     const allSelected = items.length > 0 && items.every(i => selectedIds.has(i.id));
     const someSelected = items.some(i => selectedIds.has(i.id));

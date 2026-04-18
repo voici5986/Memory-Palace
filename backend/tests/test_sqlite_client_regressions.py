@@ -13,6 +13,14 @@ def _sqlite_url(db_path: Path) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
 
 
+class _CaptureCursor:
+    def __init__(self) -> None:
+        self.executed: list[str] = []
+
+    def execute(self, sql: str) -> None:
+        self.executed.append(sql)
+
+
 @pytest.fixture(autouse=True)
 def _force_local_retrieval_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "hash")
@@ -84,6 +92,91 @@ async def test_invalid_fts_query_degrades_only_current_request_without_disabling
     assert "fts_query_invalid" in result["degrade_reasons"]
     assert client._fts_available is True
     assert status["capabilities"]["fts_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_sqlite_identifier_hardening_rejects_invalid_table_name(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "sqlite-identifier-hardening.db"))
+    await client.init_db()
+
+    assert client._quote_sqlite_identifier("memory_chunks_vec0") == '"memory_chunks_vec0"'
+    with pytest.raises(ValueError, match="invalid sqlite identifier"):
+        client._quote_sqlite_identifier("memory_chunks_vec0; DROP TABLE memories; --")
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_write_pragma_hardening_validates_names_and_values(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "sqlite-pragma-hardening.db"))
+    await client.init_db()
+
+    cursor = _CaptureCursor()
+    client._execute_sqlite_pragma(cursor, "busy_timeout", 5000)
+    client._execute_sqlite_pragma(
+        cursor,
+        "journal_mode",
+        "WAL",
+        allowed_values={"WAL", "DELETE"},
+    )
+
+    assert cursor.executed == [
+        "PRAGMA busy_timeout=5000",
+        "PRAGMA journal_mode=WAL",
+    ]
+
+    with pytest.raises(ValueError, match="unsupported pragma"):
+        client._execute_sqlite_pragma(cursor, "busy_timeout; DROP TABLE memories", 1)
+
+    with pytest.raises(ValueError, match="invalid pragma value"):
+        client._execute_sqlite_pragma(
+            cursor,
+            "journal_mode",
+            "WAL; DROP TABLE memories",
+            allowed_values={"WAL", "DELETE"},
+        )
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_keyword_fallback_escapes_like_wildcards_in_query(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "fts-like-wildcard-regression.db"))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="alpha note",
+        priority=1,
+        title="alpha",
+        domain="core",
+    )
+    await client.create_memory(
+        parent_path="",
+        content="beta note",
+        priority=1,
+        title="beta",
+        domain="core",
+    )
+
+    result = await client.search_advanced(
+        query="%",
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    await client.close()
+
+    assert result["degraded"] is True
+    assert "fts_query_invalid" in result["degrade_reasons"]
+    assert result["results"] == []
 
 
 @pytest.mark.asyncio

@@ -219,6 +219,195 @@ find_free_port() {
   return 1
 }
 
+resolve_stable_env_file_path() {
+  local raw_path="$1"
+  local original_path="${1:-}"
+  local reconstructed_path=""
+
+  if [[ -z "${raw_path}" ]]; then
+    printf '%s\n' "${raw_path}"
+    return 0
+  fi
+
+  raw_path="$(normalize_cli_path "${raw_path}")"
+  if is_mangled_windows_absolute_path "${raw_path}"; then
+    if reconstructed_path="$(reconstruct_mangled_windows_path "${raw_path}")"; then
+      raw_path="${reconstructed_path}"
+    else
+      echo "Refusing mangled Windows absolute env file path: ${original_path}" >&2
+      echo "bash received it without directory separators before docker_one_click.sh could normalize it." >&2
+      echo "Re-run with C:/... or a repo-relative POSIX path instead." >&2
+      return 1
+    fi
+  fi
+
+  case "${raw_path}" in
+    /*|[a-zA-Z]:[\\/]*|\\\\*|//*)
+      printf '%s\n' "${raw_path}"
+      return 0
+      ;;
+  esac
+
+  if command -v python3 >/dev/null 2>&1; then
+    RAW_ENV_FILE_PATH="${raw_path}" python3 - <<'PY'
+import os
+
+print(os.path.abspath(os.environ["RAW_ENV_FILE_PATH"]))
+PY
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    RAW_ENV_FILE_PATH="${raw_path}" python - <<'PY'
+import os
+
+print(os.path.abspath(os.environ["RAW_ENV_FILE_PATH"]))
+PY
+    return 0
+  fi
+
+  printf '%s/%s\n' "$(pwd -P)" "${raw_path}"
+}
+
+normalize_cli_path() {
+  local raw_path="${1:-}"
+  if [[ -z "${raw_path}" ]]; then
+    printf '%s\n' "${raw_path}"
+    return 0
+  fi
+
+  if [[ "${raw_path}" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "${raw_path}"
+      return 0
+    fi
+    if command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "${raw_path}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "${raw_path//\\//}"
+}
+
+is_mangled_windows_absolute_path() {
+  local raw_path="${1:-}"
+  [[ "${raw_path}" =~ ^[A-Za-z]:[^/\\].* ]] && [[ ! "${raw_path}" =~ ^[A-Za-z]:[\\/].* ]]
+}
+
+reconstruct_mangled_windows_path() {
+  local raw_path="${1:-}"
+  local normalized="${raw_path//\\//}"
+  if [[ ! "${normalized}" =~ ^([A-Za-z]):([^/].*)$ ]]; then
+    return 1
+  fi
+
+  local drive="${BASH_REMATCH[1]}"
+  local remainder="${BASH_REMATCH[2]}"
+  local drive_root=""
+  if command -v cygpath >/dev/null 2>&1; then
+    drive_root="$(cygpath -u "${drive}:/" 2>/dev/null || true)"
+  fi
+  if [[ -z "${drive_root}" ]] && command -v wslpath >/dev/null 2>&1; then
+    drive_root="$(wslpath -u "${drive}:/" 2>/dev/null || true)"
+  fi
+  if [[ -z "${drive_root}" || ! -d "${drive_root}" ]]; then
+    return 1
+  fi
+
+  local current="${drive_root%/}"
+  local remainder_value="${remainder}"
+  local best_match=""
+  local child=""
+  local name=""
+  shopt -s nullglob dotglob
+  while [[ -n "${remainder_value}" && -d "${current}" ]]; do
+    best_match=""
+    for child in "${current}"/* "${current}"/.[!.]* "${current}"/..?*; do
+      [[ -e "${child}" ]] || continue
+      name="$(basename "${child}")"
+      if [[ "${remainder_value}" == "${name}"* ]]; then
+        if [[ -z "${best_match}" || ${#name} -gt ${#best_match} ]]; then
+          best_match="${name}"
+        fi
+      fi
+    done
+    if [[ -z "${best_match}" ]]; then
+      break
+    fi
+    current="${current}/${best_match}"
+    remainder_value="${remainder_value#${best_match}}"
+  done
+  shopt -u nullglob dotglob
+
+  if [[ -z "${remainder_value}" ]]; then
+    printf '%s\n' "${current}"
+    return 0
+  fi
+  if [[ -d "${current}" ]]; then
+    printf '%s\n' "${current}/${remainder_value}"
+    return 0
+  fi
+  return 1
+}
+
+mktemp_adjacent_file() {
+  local target_path="$1"
+  local label="${2:-tmp}"
+  local target_dir target_name
+  target_dir="$(dirname "${target_path}")"
+  target_name="$(basename "${target_path}")"
+  mkdir -p "${target_dir}" >/dev/null 2>&1 || true
+  mktemp "${target_dir}/.${target_name}.${label}.XXXXXX"
+}
+
+append_no_proxy_entry() {
+  local current_value="$1"
+  local raw_entry="$2"
+  local entry="${raw_entry#"${raw_entry%%[![:space:]]*}"}"
+  local existing=""
+
+  entry="${entry%"${entry##*[![:space:]]}"}"
+  if [[ -z "${entry}" ]]; then
+    printf '%s\n' "${current_value}"
+    return 0
+  fi
+
+  IFS=',' read -r -a existing_entries <<< "${current_value}"
+  for existing in "${existing_entries[@]}"; do
+    existing="${existing#"${existing%%[![:space:]]*}"}"
+    existing="${existing%"${existing##*[![:space:]]}"}"
+    if [[ "${existing}" == "${entry}" ]]; then
+      printf '%s\n' "${current_value}"
+      return 0
+    fi
+  done
+
+  if [[ -z "${current_value}" ]]; then
+    printf '%s\n' "${entry}"
+  else
+    printf '%s,%s\n' "${current_value}" "${entry}"
+  fi
+}
+
+build_local_no_proxy_value() {
+  local effective_no_proxy=""
+  local raw_group=""
+  local entry=""
+
+  for raw_group in "${NO_PROXY:-}" "${no_proxy:-}"; do
+    IFS=',' read -r -a current_entries <<< "${raw_group}"
+    for entry in "${current_entries[@]}"; do
+      effective_no_proxy="$(append_no_proxy_entry "${effective_no_proxy}" "${entry}")"
+    done
+  done
+
+  for entry in "127.0.0.1" "localhost" "::1" "host.docker.internal"; do
+    effective_no_proxy="$(append_no_proxy_entry "${effective_no_proxy}" "${entry}")"
+  done
+
+  printf '%s\n' "${effective_no_proxy}"
+}
+
 wait_for_deployment_ready() {
   local attempts="${1:-30}"
   local sleep_seconds="${2:-2}"
@@ -229,11 +418,19 @@ wait_for_deployment_ready() {
   local sse_url="http://127.0.0.1:${probe_frontend_port}/sse"
   local sse_status=""
   local attempt=0
+  local effective_no_proxy=""
+
+  effective_no_proxy="$(build_local_no_proxy_value)"
 
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if curl -fsS "${backend_url}" >/dev/null 2>&1 && \
-       curl -fsS "${frontend_url}" >/dev/null 2>&1; then
-      sse_status="$(curl -sS -o /dev/null -w '%{http_code}' "${sse_url}" || true)"
+    if NO_PROXY="${effective_no_proxy}" no_proxy="${effective_no_proxy}" \
+      curl --noproxy "${effective_no_proxy}" -fsS "${backend_url}" >/dev/null 2>&1 && \
+      NO_PROXY="${effective_no_proxy}" no_proxy="${effective_no_proxy}" \
+      curl --noproxy "${effective_no_proxy}" -fsS "${frontend_url}" >/dev/null 2>&1; then
+      sse_status="$(
+        NO_PROXY="${effective_no_proxy}" no_proxy="${effective_no_proxy}" \
+          curl --noproxy "${effective_no_proxy}" -sS -o /dev/null -w '%{http_code}' "${sse_url}" || true
+      )"
       if [[ "${sse_status}" == "200" || "${sse_status}" == "401" ]]; then
         return 0
       fi
@@ -394,6 +591,7 @@ get_env_value_from_file() {
   local env_file="$1"
   local key="$2"
   local raw
+  env_file="$(resolve_stable_env_file_path "${env_file}")"
   raw="$(awk -F= -v target="${key}" '$1==target {print substr($0, index($0, "=") + 1)}' "${env_file}" | tail -n 1)"
   echo "${raw%$'\r'}"
 }
@@ -402,11 +600,9 @@ upsert_env_value_in_file() {
   local env_file="$1"
   local key="$2"
   local value="$3"
-  local tmp_file env_dir env_base
-  env_dir="$(dirname "${env_file}")"
-  env_base="$(basename "${env_file}")"
-  mkdir -p "${env_dir}" >/dev/null 2>&1 || true
-  tmp_file="$(mktemp "${env_dir}/.${env_base}.upsert.XXXXXX")"
+  local tmp_file
+  env_file="$(resolve_stable_env_file_path "${env_file}")"
+  tmp_file="$(mktemp_adjacent_file "${env_file}" "upsert")"
   awk -v target="${key}" -v replacement="${value}" '
     BEGIN { updated=0 }
     $0 ~ ("^" target "=") {
@@ -941,6 +1137,7 @@ if [[ -z "${env_file}" ]]; then
   TEMP_DOCKER_ENV_FILE="${env_file}"
   TEMP_DOCKER_ENV_FILE_AUTO=1
 fi
+env_file="$(resolve_stable_env_file_path "${env_file}")"
 chmod 600 "${env_file}" >/dev/null 2>&1 || true
 export MEMORY_PALACE_DOCKER_ENV_FILE="${env_file}"
 echo "[env-file] using ${env_file}"

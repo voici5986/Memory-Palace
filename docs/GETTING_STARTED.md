@@ -262,7 +262,7 @@ VITE v7.x.x  ready in xxx ms
 
 - `docs/DASHBOARD_GUIDE_CN.md`
 
-> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。当前状态有时会晚一点返回，但你已经自己输入过的字段不会再被后到的状态覆盖，没碰过的检索字段会继续按当前 setup 状态补齐。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。第 5 节会继续说明本地验证方式。
+> 如果你在本地手动启动时看到右上角的 `设置 API 密钥`（英文模式下会显示 `Set API key`），这是正常现象：页面已经打开，但 `/browse/*`、`/review/*`、`/maintenance/*` 等受保护接口还没授权。现在点击这个按钮会打开**首启配置向导**，你可以只把 `MCP_API_KEY` 保存到当前浏览器会话，也可以在“本地 checkout + 非 Docker 运行”场景下把常见运行参数写进 `.env`。这条写入路径现在只会写当前项目里的 `.env*` 文件。向导右上角也自带语言切换按钮，不需要先关掉弹窗才能切中文。当前状态有时会晚一点返回，但你已经自己输入过的字段不会再被后到的状态覆盖，没碰过的检索字段会继续按当前 setup 状态补齐。对带鉴权的非 loopback 访问路径，向导现在仍然会显示当前 setup 状态，但“保存到本地 `.env`”会继续保持禁用，并明确提示这是直连回环地址才允许的操作。如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。`MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` 只会放宽直连回环地址的读请求，不会放开这条本地写入门槛。第 5 节会继续说明本地验证方式。
 >
 > 如果你走的是标准 Docker 代理这类 proxy-held auth 路径，服务端鉴权已经生效时，首启配置向导现在不会只因为浏览器本地没保存 key 就一上来自动弹出；右上角按钮还可能在，但这时只有你手动点进去才会进入向导。
 >
@@ -525,7 +525,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend 非 benchmark 测试 `868 passed, 15 skipped`；frontend `154 passed`；`npm run typecheck` 通过；前端 build 通过。本轮也实际复核了 repo-local macOS `Profile B`（`backend + SSE + Vite + browser + i18n persistence`）和 Docker one-click 的 A/B/C/D（`/health`、首页、`/sse` 和代理 `/api/browse/node`）；`skills+MCP` 与 `single-MCP` 通过，`skills-only` 仍是 **PARTIAL**。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `943 passed, 20 skipped`；frontend `159 passed`；`npm run typecheck` 通过；前端 build 通过。本轮也实际复核了 repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
