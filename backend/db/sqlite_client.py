@@ -28,6 +28,7 @@ from filelock import AsyncFileLock
 from shared_utils import (
     env_bool as _shared_env_bool,
     env_int as _shared_env_int,
+    normalize_http_api_base as _shared_normalize_http_api_base,
     parse_iso_datetime as _shared_parse_iso_datetime,
 )
 from runtime_state import runtime_state
@@ -1912,35 +1913,36 @@ class SQLiteClient:
 
     @staticmethod
     def _normalize_chat_api_base(base: str) -> str:
-        normalized = (base or "").strip().rstrip("/")
-        if not normalized:
+        try:
+            return _shared_normalize_http_api_base(
+                base,
+                trim_suffixes=("/chat/completions", "/responses"),
+            )
+        except ValueError as exc:
+            logger.warning("Ignoring invalid chat API base: %s", exc)
             return ""
-
-        lowered = normalized.lower()
-        for suffix in ("/chat/completions", "/responses"):
-            if lowered.endswith(suffix):
-                return normalized[: -len(suffix)]
-        return normalized
 
     @staticmethod
     def _normalize_embedding_api_base(base: str) -> str:
-        normalized = (base or "").strip().rstrip("/")
-        if not normalized:
+        try:
+            return _shared_normalize_http_api_base(
+                base,
+                trim_suffixes=("/embeddings",),
+            )
+        except ValueError as exc:
+            logger.warning("Ignoring invalid embedding API base: %s", exc)
             return ""
-        lowered = normalized.lower()
-        if lowered.endswith("/embeddings"):
-            return normalized[: -len("/embeddings")]
-        return normalized
 
     @staticmethod
     def _normalize_reranker_api_base(base: str) -> str:
-        normalized = (base or "").strip().rstrip("/")
-        if not normalized:
+        try:
+            return _shared_normalize_http_api_base(
+                base,
+                trim_suffixes=("/rerank",),
+            )
+        except ValueError as exc:
+            logger.warning("Ignoring invalid reranker API base: %s", exc)
             return ""
-        lowered = normalized.lower()
-        if lowered.endswith("/rerank"):
-            return normalized[: -len("/rerank")]
-        return normalized
 
     @staticmethod
     def _normalize_vector_engine(value: Optional[str]) -> str:
@@ -2353,6 +2355,7 @@ class SQLiteClient:
         confidence = round(min(0.96, 0.58 + top_score * 0.07 + margin * 0.04), 2)
 
         strategy_by_intent = {
+            "factual": "factual_high_precision",
             "temporal": "temporal_time_filtered",
             "causal": "causal_wide_pool",
             "exploratory": "exploratory_high_recall",

@@ -3,6 +3,7 @@ import math
 from datetime import datetime, timezone
 from ipaddress import ip_address
 from typing import Iterable, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
@@ -115,3 +116,46 @@ def is_loopback_hostname(
         return ip_address(hostname).is_loopback
     except ValueError:
         return False
+
+
+def normalize_http_api_base(
+    value: Optional[str],
+    *,
+    trim_suffixes: Optional[Iterable[str]] = None,
+) -> str:
+    normalized = str(value or "").strip().rstrip("/")
+    if not normalized:
+        return ""
+
+    parsed = urlsplit(normalized)
+    scheme = str(parsed.scheme or "").strip().lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError("API base URL must use http or https.")
+    if not parsed.netloc or not parsed.hostname:
+        raise ValueError("API base URL must include a host.")
+    if parsed.username or parsed.password:
+        raise ValueError("API base URL must not include embedded credentials.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("API base URL must not include query parameters or fragments.")
+
+    try:
+        host_ip = ip_address(parsed.hostname)
+    except ValueError:
+        host_ip = None
+    if host_ip is not None and (
+        host_ip.is_unspecified or host_ip.is_multicast or host_ip.is_link_local
+    ):
+        raise ValueError(
+            "API base URL cannot point to an unspecified, multicast, or link-local address."
+        )
+
+    path = str(parsed.path or "").rstrip("/")
+    for suffix in trim_suffixes or ():
+        suffix_text = str(suffix or "").strip()
+        if not suffix_text:
+            continue
+        if path.lower().endswith(suffix_text.lower()):
+            path = path[: -len(suffix_text)].rstrip("/")
+            break
+
+    return urlunsplit((scheme, parsed.netloc, path, "", ""))

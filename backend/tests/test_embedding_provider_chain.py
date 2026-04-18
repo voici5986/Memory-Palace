@@ -196,6 +196,33 @@ async def test_remote_embedding_dim_mismatch_falls_back_to_hash(
 
 
 @pytest.mark.asyncio
+async def test_invalid_link_local_embedding_base_is_ignored_at_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://169.254.169.254/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "embedding-invalid-base.db"))
+    await client.init_db()
+
+    degrade_reasons: list[str] = []
+    async with client.session() as session:
+        embedding = await client._get_embedding(
+            session,
+            "invalid embedding base fallback sample",
+            degrade_reasons=degrade_reasons,
+        )
+    await client.close()
+
+    assert client._embedding_api_base == ""
+    assert len(embedding) == client._embedding_dim
+    assert "embedding_config_missing" in degrade_reasons
+    assert "embedding_fallback_hash" in degrade_reasons
+
+
+@pytest.mark.asyncio
 async def test_embedding_provider_chain_fail_closed_when_fallback_none(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

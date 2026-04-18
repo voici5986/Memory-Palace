@@ -83,6 +83,10 @@ const en = {
       maintenance: 'Maintenance',
       observability: 'Observability',
     },
+    errorBoundary: {
+      title: 'Something went wrong.',
+      message: 'Please refresh the page and try again.',
+    },
     auth: {
       setApiKey: 'Set API key',
       updateApiKey: 'Update API key',

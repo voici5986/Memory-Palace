@@ -52,11 +52,11 @@ backend/
 ### 核心模块说明
 
 - **`main.py`**：FastAPI 应用入口，负责生命周期管理（数据库初始化、legacy 数据库文件兼容恢复、退出前 best-effort drain pending auto-flush summary）、CORS 配置、路由注册（`review`、`browse`、`maintenance`、`setup`）和健康检查。当前 `/health` 对本机 loopback 或带有效 `MCP_API_KEY` 的请求会返回索引状态、write lane 与 index worker 的详细运行时信息；未鉴权的远端探活只返回浅健康结果，避免把内部状态直接暴露出去。如果这类详细健康检查已经进入降级态，HTTP 状态码也会直接变成 `503`，方便 Docker healthcheck 和运维探活按“未就绪”处理。默认 CORS origin 收敛为本地常用列表（`localhost/127.0.0.1` 的 `5173/3000`）；显式配置 wildcard（`*`）时会自动禁用 credentials；legacy sqlite 恢复前会执行 regular-file + quick_check + 核心表存在校验，并在解析 SQLite URL 时剥离 query / fragment，跳过 `:memory:` / `file::memory:` 这类非文件目标。启动阶段在 `load_dotenv(..., override=False)` 之前，还会先记下当时进程里原本就存在的 env key，给 setup 模块后续判断“这是不是进程显式覆盖”用。
-- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。最终结果回包前的 path 状态复核，现在也会优先走批量查询，减少结果较多时逐条回查 SQLite 的额外开销；如果复核 lookup 自己出错，当前实现会直接丢掉这条结果，并在回包里带上降级信号，而不是继续 fail-open 把可能过期的结果照常返回。`fast` interaction tier 传下去的 candidate cap 现在也会继续压住 `temporal/causal` 这类 intent widening，不会到了 SQLite 层又被悄悄抬高。`create_memory` 在 write guard 临时异常或降级导致 fail-closed 时，当前返回里也会明确标出 `retryable` / `retry_hint`，避免调用方把“临时不可用”误读成“永远不能创建”。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。
-- **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。当前 session-first 检索缓存与 flush tracker 都采用“**单 session 限长 + 总 session 数上限**”的进程内边界，避免长时间运行后按 session 数无限增长；session-first 命中缓存还会惰性清理过期条目，避免旧命中长期占着容量。
+- **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。最终结果回包前的 path 状态复核，现在也会优先走批量查询，减少结果较多时逐条回查 SQLite 的额外开销；如果复核 lookup 自己出错，当前实现会直接丢掉这条结果，并在回包里带上降级信号，而不是继续 fail-open 把可能过期的结果照常返回。`fast` interaction tier 传下去的 candidate cap 现在也会继续压住 `temporal/causal` 这类 intent widening，不会到了 SQLite 层又被悄悄抬高。`create_memory` 在 write guard 临时异常或降级导致 fail-closed 时，当前返回里也会明确标出 `retryable` / `retry_hint`，避免调用方把“临时不可用”误读成“永远不能创建”。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。reflection prepare 的共享任务当前还会显式跟踪 waiter 数量：最后一个等待方取消后，后台 task 会一起回收，不再留下孤儿 prepare；import/learn meta persist locks 也改成按 event loop 的弱引用缓存，避免 loop 生命周期结束后字典还一直涨。
+- **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。当前 session-first 检索缓存与 flush tracker 都采用“**单 session 限长 + 总 session 数上限**”的进程内边界，避免长时间运行后按 session 数无限增长；session-first 命中缓存还会惰性清理过期条目，避免旧命中长期占着容量。`SessionRecentReadCache` 这条最近读取缓存现在也按 LRU 语义刷新命中顺序，不再是“读过但淘汰顺序不变”。
 - **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。它现在还会在受信代理链路下优先按 `X-Forwarded-For` / `X-Real-IP` 识别真实客户端地址来做 `/messages` burst limit，并默认发送 15 秒 heartbeat ping。传输层的 host/origin 校验现在默认保留本机回环 allowlist；如果你确实需要远程 hostname / origin 通过校验，可以显式补 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是依赖非回环监听地址去“自动放开”。仓库当前保留两种使用方式：本地可独立运行 `run_sse.py` 做 standalone 调试；Docker 默认路径则把同一套 SSE 入口直接挂进 `main.py` 的 backend 进程，通过前端代理暴露。
-- **`setup.py`**：首启配置与本地 `.env` 写入口。当前 `/setup/status` 和 `/setup/config` 在判断 setup 管理变量时，会把“真正的进程显式覆盖”和“服务启动时只是从 `.env` 读进来的值”分开看；所以 status/save 不会再把 `.env` 启动值误判成 process override，本地保存后也能把当前进程里的 setup 管理配置刷新到新值。`/setup/status` 的可写性探测现在也是纯检查：只看状态不会为了探测先创建目标父目录。
-- **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。keyword fallback 的 `LIKE` 查询现在会转义 `%` 和 `_`，避免把通配符当普通搜索词时误扫出一大片不相关结果。
+- **`setup.py`**：首启配置与本地 `.env` 写入口。当前 `/setup/status` 和 `/setup/config` 在判断 setup 管理变量时，会把“真正的进程显式覆盖”和“服务启动时只是从 `.env` 读进来的值”分开看；所以 status/save 不会再把 `.env` 启动值误判成 process override，本地保存后也能把当前进程里的 setup 管理配置刷新到新值。`/setup/status` 的可写性探测现在也是纯检查：只看状态不会为了探测先创建目标父目录。第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；provider API base 也会先做归一化和校验，像 `/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉，而格式不对或指到 link-local 的地址会直接拒绝。
+- **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。keyword fallback 的 `LIKE` 查询现在会转义 `%` 和 `_`，避免把通配符当普通搜索词时误扫出一大片不相关结果。运行时如果读到无效的 `chat / embedding / reranker` API base，当前实现会按 fail-closed 处理：忽略这条 base 并走降级/回退，而不是继续拿它发请求；默认 factual 意图现在也显式映射到 `factual_high_precision` 模板。
 - **`db/migration_runner.py`**：负责发现和执行 SQL migration，并记录版本与 checksum。当前 checksum 归一化不仅会处理 `CRLF/LF`，也会剥离 UTF-8 BOM，所以同一份 migration 只是被 Windows/Notepad 改了文件头，不会被误判成 schema drift。
 
 ---
@@ -207,6 +207,7 @@ frontend/src/
 ├── RootErrorBoundary.jsx                      # 根级 render 崩溃兜底页
 ├── i18n.js                                    # react-i18next 初始化、默认语言与持久化
 ├── index.css                                  # 全局样式（TailwindCSS）
+├── lib/sse.js                                 # 轻量 EventSource 封装，供本地 `/sse` 调试复用
 ├── locales/
 │   ├── en.js                                  # 英文文案
 │   └── zh-CN.js                               # 中文文案
@@ -240,7 +241,7 @@ frontend/src/
 补充说明：
 
 - 当前版本的前端会先恢复浏览器里已保存的语言；如果没有保存值，常见中文浏览器语言（`zh`、`zh-TW`、`zh-HK` 和其他 `zh-*`）会统一归并到 `zh-CN`，其他首次访问场景则回退到英文。React 挂载前还会先把 `<html lang>` 和 `document.title` 同步到这次启动实际要用的语言，减少刷新后先闪回旧标题或旧语言的情况。应用壳层右上角同时提供语言切换入口与统一鉴权入口
-- React 根节点现在还会先包一层 `RootErrorBoundary`。说人话就是：如果某个组件在 render 阶段直接崩掉，Dashboard 会先退回一个最小兜底页，而不是把整个 SPA 直接卸掉又不给解释。
+- React 根节点现在还会先包一层 `RootErrorBoundary`。说人话就是：如果某个组件在 render 阶段直接崩掉，Dashboard 会先退回一个最小兜底页，而不是把整个 SPA 直接卸掉又不给解释；这层兜底页文案现在也会跟着当前语言切换。
 - 语言切换支持英文 / 中文一键切换，结果会保存在浏览器 `localStorage` 的 `memory-palace.locale`
 - 常见静态文案、日期/数字格式，以及前端侧的常见错误映射会跟随当前语言切换
 - 如果还没配置鉴权，页面外壳仍会打开，但受保护的数据请求会先显示授权提示、空态或 `401`
@@ -250,6 +251,7 @@ frontend/src/
 - Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，保存还会一起写正确的 `RETRIEVAL_EMBEDDING_DIM`，并且 `/setup/config` 已支持 `openai` embedding backend
 - Setup Assistant 现在也会把 `Profile A` 直接显示出来；它对应的还是默认 `keyword + none` 基线，不是新增的一条独立高阶配置档
 - Setup Assistant 现在一打开就会优先把焦点放到 Dashboard API key 输入框；`Escape` 可以直接关闭，`Tab/Shift+Tab` 会在弹窗内部循环，不会把键盘焦点甩到弹窗外面
+- 前端现在还额外抽出了一层轻量 `EventSource` helper（`frontend/src/lib/sse.js`）；repo-local Vite 的 `/sse` 代理继续保留，主要就是给本地同源 EventSource / MCP 调试复用
 - `Maintenance` 页的 vitality cleanup confirm 现在不是“失败就一律把 prepared review 清空”；像 `401`、超时、网络错误这类更像临时失败的情况，会保留当前 prepared review，方便修完鉴权或网络后直接重试
 - Memory 页的“离开未保存编辑”和“删除路径”现在都走 fail-closed 确认逻辑；如果宿主环境不支持原生 `confirm()`，动作会被直接拦下，并给出页内错误提示，而不是静默继续
 
@@ -361,7 +363,7 @@ Docker 端口环境变量：
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`
 
-当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `943 passed, 20 skipped`、frontend `159 passed`，前端 typecheck 和 build 通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `957 passed, 20 skipped`、frontend `164 passed`，前端 typecheck 和 build 通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
 
 ---
 
@@ -372,7 +374,8 @@ Docker 端口环境变量：
 - 公开 HTTP 端点包括 `/`、`/health`，以及 FastAPI 默认文档端点；其中 `/health` 公开的是浅健康结果，详细 runtime/index 仍只对本机 loopback 或带有效 key 的请求开放。其余 Browse / Review / Maintenance 与 SSE 通道遵循同一鉴权逻辑。
 - `MCP_API_KEY` 为空时默认 **fail-closed**（拒绝请求）。
 - 仅在 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true` **且** loopback 请求（`127.0.0.1` / `::1` / `localhost`）时可本地放行，且仅限直连 loopback 且无 forwarding headers 的请求。
-- `/setup/config` 这条本地 `.env` 写入路径同样按 fail-closed 处理：它只会写当前项目里的 `.env*` 文件，仍然只允许直连 loopback 请求；如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。
+- `/setup/config` 这条本地 `.env` 写入路径同样按 fail-closed 处理：它只会写当前项目里的 `.env*` 文件，仍然只允许直连 loopback 请求；第一次本地保存还要求 `Dashboard API key` 非空；如果后端已经带着 `MCP_API_KEY` 在跑，那么即使是这条 loopback 写入路径，也还要带上同一把有效 key。
+- setup/provider API base 现在还会先做归一化和校验：常见尾缀会自动去掉，格式不对或指到 link-local 的地址会直接拒绝；运行时读到无效 base 时也会按 fail-closed 走降级/回退。
 - Docker 容器默认以非 root 用户运行：
   - Backend：自定义用户 `app`（UID `10001`，GID `10001`）
   - Frontend：使用 `nginx-unprivileged` 官方非 root 镜像

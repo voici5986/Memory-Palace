@@ -167,10 +167,12 @@ In plain English:
   friction day-to-day setup.
 - `Profile C/D` again show the quality-first tier, but they still cost much
   more latency than `Profile B`.
-- This same session also rechecked Docker Profiles A/B/C/D at the service/API
-  level (`/health`, frontend root, `/sse`, proxied `/api/browse/node`) and a
-  repo-local macOS `Profile B` browser path (`backend + SSE + Vite + i18n
-  persistence`).
+- This same session rechecked a repo-local macOS `Profile B` browser path
+  (`backend + frontend + real browser setup/maintenance smoke`) and a local
+  smoke pass covering the same retrieval / reranker / write-guard / gist paths
+  as `Profile C/D`.
+- Docker one-click `Profile C/D` was **not** rerun in this round, so this page
+  keeps that target-environment recheck boundary explicit.
 - Native Windows and native Linux host runtime paths were **not** rerun in
   this round, so this page does not claim a fresh host-runtime pass there.
 

@@ -7,6 +7,7 @@ from shared_utils import (
     env_bool,
     env_int,
     is_loopback_hostname,
+    normalize_http_api_base,
     parse_iso_datetime,
     utc_iso_now,
 )
@@ -37,6 +38,36 @@ def test_is_loopback_hostname_handles_ipv6_and_host_ports() -> None:
     assert is_loopback_hostname("[::1]:8000") is True
     assert is_loopback_hostname("127.0.0.1:5173") is True
     assert is_loopback_hostname("memory-palace.example") is False
+
+
+def test_normalize_http_api_base_trims_known_suffix_without_losing_host() -> None:
+    assert (
+        normalize_http_api_base(
+            "https://Example.com/v1/embeddings/",
+            trim_suffixes=("/embeddings",),
+        )
+        == "https://Example.com/v1"
+    )
+
+
+def test_normalize_http_api_base_rejects_non_http_scheme() -> None:
+    with pytest.raises(ValueError, match="http or https"):
+        normalize_http_api_base("file:///tmp/provider.sock")
+
+
+def test_normalize_http_api_base_rejects_embedded_credentials() -> None:
+    with pytest.raises(ValueError, match="embedded credentials"):
+        normalize_http_api_base("https://user:pass@example.com/v1")
+
+
+def test_normalize_http_api_base_rejects_link_local_metadata_addresses() -> None:
+    with pytest.raises(ValueError, match="link-local"):
+        normalize_http_api_base("http://169.254.169.254/v1")
+
+
+def test_normalize_http_api_base_allows_loopback_and_private_network_hosts() -> None:
+    assert normalize_http_api_base("http://127.0.0.1:8318/v1") == "http://127.0.0.1:8318/v1"
+    assert normalize_http_api_base("http://10.88.1.144:11435/v1") == "http://10.88.1.144:11435/v1"
 
 
 def test_utc_iso_now_returns_utc_z_suffix() -> None:

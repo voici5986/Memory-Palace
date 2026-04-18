@@ -312,3 +312,39 @@ async def test_read_memory_fast_path_invalidates_when_child_topology_changes(
     assert first == "CHILDREN: agent/foo/child-1"
     assert second == "CHILDREN: agent/foo/child-1,agent/foo/child-2"
     assert render_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_recent_read_cache_refreshes_entry_recency_on_hit() -> None:
+    cache = SessionRecentReadCache()
+    cache._max_entries_per_session = 2
+
+    await cache.remember(
+        session_id="session-lru",
+        uri="core://agent/a",
+        state_token="state-a",
+        payload="payload-a",
+    )
+    await cache.remember(
+        session_id="session-lru",
+        uri="core://agent/b",
+        state_token="state-b",
+        payload="payload-b",
+    )
+
+    assert (
+        await cache.get(
+            session_id="session-lru",
+            uri="core://agent/a",
+            state_token="state-a",
+        )
+    ) == "payload-a"
+
+    await cache.remember(
+        session_id="session-lru",
+        uri="core://agent/c",
+        state_token="state-c",
+        payload="payload-c",
+    )
+
+    assert sorted(cache._values["session-lru"].keys()) == ["core://agent/a", "core://agent/c"]

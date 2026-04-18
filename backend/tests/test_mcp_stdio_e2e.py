@@ -143,6 +143,56 @@ def test_write_private_report_uses_private_permissions(tmp_path: Path) -> None:
     assert report_path.stat().st_mode & 0o777 == 0o600
 
 
+def test_maybe_reexec_with_backend_python_sets_guard_env(monkeypatch, tmp_path: Path) -> None:
+    harness = _load_harness()
+    backend_python = tmp_path / "backend-python"
+    backend_python.write_text("", encoding="utf-8")
+
+    monkeypatch.delenv(harness._REEXEC_GUARD_ENV, raising=False)
+    monkeypatch.setattr(harness, "_resolve_backend_python", lambda: backend_python)
+    monkeypatch.setattr(harness.sys, "executable", str(tmp_path / "system-python"))
+
+    captured = {}
+
+    def _fake_execve(path, argv, env):
+        captured["path"] = path
+        captured["argv"] = argv
+        captured["env"] = env
+        raise RuntimeError("execve-called")
+
+    monkeypatch.setattr(harness.os, "execve", _fake_execve)
+
+    with pytest.raises(RuntimeError, match="execve-called"):
+        harness._maybe_reexec_with_backend_python()
+
+    assert captured["path"] == str(backend_python)
+    assert captured["argv"][0] == str(backend_python)
+    assert captured["env"][harness._REEXEC_GUARD_ENV] == "1"
+
+
+def test_maybe_reexec_with_backend_python_stops_after_guard_is_set(
+    monkeypatch, tmp_path: Path
+) -> None:
+    harness = _load_harness()
+    backend_python = tmp_path / "backend-python"
+    backend_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setenv(harness._REEXEC_GUARD_ENV, "1")
+    monkeypatch.setattr(harness, "_resolve_backend_python", lambda: backend_python)
+    monkeypatch.setattr(harness.sys, "executable", str(tmp_path / "system-python"))
+
+    exec_calls = []
+    monkeypatch.setattr(
+        harness.os,
+        "execve",
+        lambda *args: exec_calls.append(args),
+    )
+
+    harness._maybe_reexec_with_backend_python()
+
+    assert exec_calls == []
+
+
 def test_python_wrapper_live_stdio_smoke() -> None:
     harness = _load_harness()
     backend_python = harness._resolve_backend_python()

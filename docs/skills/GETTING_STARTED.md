@@ -374,7 +374,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
-现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证口径是：backend 非 benchmark `868 passed, 15 skipped`、frontend `154 passed`、frontend `npm run typecheck` 通过、frontend build 通过；repo-local macOS `Profile B`（`backend + SSE + Vite + browser + i18n persistence`）和 Docker one-click A/B/C/D（`/health`、首页、`/sse` 和代理 `/api/browse/node`）也已重跑。`skills+MCP` 与 `single-MCP` 通过，`skills-only` 仍是 **PARTIAL**；原生 Windows / Linux 宿主 runtime 继续保留目标环境复核边界。
+现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证口径是：backend `957 passed, 20 skipped`、frontend `164 passed`、frontend `npm run typecheck` 通过、frontend build 通过；repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke 也已重跑。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。
 

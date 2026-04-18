@@ -53,7 +53,7 @@
 >
 > **补充说明**：C/D 模板默认走 `router` 路线；如果你的部署不使用统一 router，也可以直接配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 连接 OpenAI-compatible 服务。
 >
-> **首启向导口径也一样**：向导里的 `Profile C` / `Profile D` 只是分别预填一组更像“本地/private router”或“远程 router”的建议起点，不代表你已经完成配置。真正保存前，仍然要把 router 的必填地址 / 模型字段换成你自己的真实值；如果你不走 router，也可以直接切到 `api` / `openai` embedding backend。`openai` 是 embedding backend 选项，不是额外新增的新档位。
+> **首启向导口径也一样**：向导里的 `Profile C` / `Profile D` 只是分别预填一组更像“本地/private router”或“远程 router”的建议起点，不代表你已经完成配置。真正保存前，仍然要把 router 的必填地址 / 模型字段换成你自己的真实值；如果你不走 router，也可以直接切到 `api` / `openai` embedding backend。`openai` 是 embedding backend 选项，不是额外新增的新档位。这里填写的 API base 口径也和后端一致：请填服务 base/root（通常到 `/v1`），不要手动写成 `/embeddings`、`/rerank`、`/chat/completions` 这种具体接口路径；常见尾缀会自动去掉，但格式不对或指到 link-local 的地址会直接 fail-closed。
 >
 > **本地模板补一条**：仓库内的本地 `profile c/d` 模板现在也显式保留 `RUNTIME_AUTO_FLUSH_ENABLED=true`，所以通过 `apply_profile.sh/.ps1` 生成的 `.env`，默认会和 A/B 一样继续保留 auto-flush。
 >
@@ -160,7 +160,7 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # 注意：不存在 RETRIEVAL_RERANKER_BACKEND 配置项
 ```
 
-> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求。如果最终返回的真实维度还是和你的配置不一致，运行时现在会立刻拒绝这条向量并走 fallback / degrade，不会再静默写入一条错维度索引。
+> 如果你走的是直连 API 路径，`RETRIEVAL_EMBEDDING_DIM` 请和 provider 实际返回的向量维度保持一致。当前代码不会替你猜这个值；它只会把这个值作为 OpenAI-compatible `/embeddings` 请求里的 `dimensions` 发出去。若 provider 明确不支持 `dimensions`，运行时会自动重试一次不带这个字段的旧请求。如果最终返回的真实维度还是和你的配置不一致，运行时现在会立刻拒绝这条向量并走 fallback / degrade，不会再静默写入一条错维度索引。`RETRIEVAL_EMBEDDING_API_BASE` / `RETRIEVAL_RERANKER_API_BASE` / `WRITE_GUARD_LLM_API_BASE` 这类地址也请统一写服务 base/root；常见接口尾缀会自动归一化，但 malformed / link-local 值会直接 fail-closed。
 >
 > 如果你本地用的是 Ollama 这类 OpenAI-compatible 路径，也优先走 `/v1/embeddings`；只有在模型本身确实返回某个固定维度时，再把 `RETRIEVAL_EMBEDDING_DIM` 填成那个真实值，不要照抄别处的 `1024` 或 `4096` 示例。
 >
@@ -473,6 +473,8 @@ MEMORY_PALACE_API_PROXY_TARGET=http://127.0.0.1:18000 npm run dev -- --host 127.
 
 ```bash
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
+
+这条 `/sse` 代理是刻意保留的本地开发路径，主要给 Vite 同源下的 EventSource / MCP 调试复用；前端现在已经有独立的 `frontend/src/lib/sse.js` 来走这条路径。
 ```
 
 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起转发到你本机单独启动的 `run_sse.py`，仅用于本地 Vite 开发入口联调。

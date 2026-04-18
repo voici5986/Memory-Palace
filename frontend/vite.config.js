@@ -22,6 +22,8 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
+      // Keep same-origin SSE paths available during local Vite development for
+      // dashboard EventSource experiments and manual MCP transport debugging.
       '/sse/messages': {
         target: sseProxyTarget,
         changeOrigin: true

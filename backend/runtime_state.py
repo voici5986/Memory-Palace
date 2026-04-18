@@ -809,7 +809,9 @@ class SessionRecentReadCache:
                 self._evict_oldest_session_if_needed()
                 entries = {}
                 self._values[sid] = entries
-            elif clean_uri not in entries and len(entries) >= self._max_entries_per_session:
+            elif clean_uri in entries:
+                entries.pop(clean_uri, None)
+            elif len(entries) >= self._max_entries_per_session:
                 oldest_uri = next(iter(entries.keys()))
                 entries.pop(oldest_uri, None)
 
@@ -849,6 +851,8 @@ class SessionRecentReadCache:
                     self._values.pop(sid, None)
                     self._session_last_seen.pop(sid, None)
                 return None
+            entries.pop(clean_uri, None)
+            entries[clean_uri] = entry
             self._mark_session_seen(sid)
             return entry.payload
 

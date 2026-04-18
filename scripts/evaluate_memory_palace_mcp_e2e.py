@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "docs" / "skills" / "MCP_LIVE_E2E_REPORT.md"
 REPORT_OVERRIDE_ROOT = Path(tempfile.gettempdir()) / "memory-palace-reports"
+_REEXEC_GUARD_ENV = "MEMORY_PALACE_MCP_E2E_REEXEC_GUARD"
 _ABSOLUTE_PATH_PATTERN = re.compile(
     r"(/Users/[^\s\"']+|/private/var/[^\s\"']+|[A-Za-z]:[\\/][^\s\"']+)"
 )
@@ -118,11 +119,16 @@ def _maybe_reexec_with_backend_python() -> None:
     backend_python = _resolve_backend_python()
     if backend_python is None:
         return
+    if str(os.getenv(_REEXEC_GUARD_ENV) or "").strip():
+        return
     if Path(sys.executable).resolve() == backend_python.resolve():
         return
-    os.execv(
+    reexec_env = dict(os.environ)
+    reexec_env[_REEXEC_GUARD_ENV] = "1"
+    os.execve(
         str(backend_python),
         [str(backend_python), str(Path(__file__).resolve()), *sys.argv[1:]],
+        reexec_env,
     )
 
 

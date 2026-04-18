@@ -83,6 +83,10 @@ const zhCN = {
       maintenance: '维护',
       observability: '观测',
     },
+    errorBoundary: {
+      title: '页面发生错误。',
+      message: '请刷新页面后重试。',
+    },
     auth: {
       setApiKey: '设置 API 密钥',
       updateApiKey: '更新 API 密钥',

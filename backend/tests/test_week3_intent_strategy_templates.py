@@ -306,6 +306,7 @@ async def test_classify_intent_uses_scoring_and_ambiguous_fallback(
     db_path = tmp_path / "week3-intent-classifier.db"
     client = SQLiteClient(_sqlite_url(db_path))
 
+    factual = client.classify_intent("project alpha risk summary")
     causal = client.classify_intent("Why did rebuild fail?")
     temporal = client.classify_intent("When did rebuild happen?")
     exploratory = client.classify_intent("Explore alternatives and compare options")
@@ -316,6 +317,8 @@ async def test_classify_intent_uses_scoring_and_ambiguous_fallback(
 
     await client.close()
 
+    assert factual["intent"] == "factual"
+    assert factual["strategy_template"] == "factual_high_precision"
     assert causal["intent"] == "causal"
     assert temporal["intent"] == "temporal"
     assert exploratory["intent"] == "exploratory"

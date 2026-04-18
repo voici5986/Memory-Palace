@@ -22,7 +22,9 @@ import json
 import copy
 import inspect
 import hashlib
+import weakref
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -264,9 +266,17 @@ def _auto_learn_allowed_domains() -> List[str]:
 
 
 IMPORT_LEARN_AUDIT_META_KEY = "audit.import_learn.summary.v1"
-_IMPORT_LEARN_META_PERSIST_LOCKS: Dict[int, asyncio.Lock] = {}
+_IMPORT_LEARN_META_PERSIST_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
 _IMPORT_LEARN_META_PERSIST_LOCKS_GUARD = threading.Lock()
-_REFLECTION_PREPARE_IN_FLIGHT: Dict[str, asyncio.Task[Dict[str, Any]]] = {}
+
+
+@dataclass
+class _ReflectionPrepareInFlightEntry:
+    task: asyncio.Task[Dict[str, Any]]
+    waiters: int = 0
+
+
+_REFLECTION_PREPARE_IN_FLIGHT: Dict[str, _ReflectionPrepareInFlightEntry] = {}
 _REFLECTION_PREPARE_IN_FLIGHT_LOCK = asyncio.Lock()
 
 # Session ID for this MCP server instance
@@ -299,12 +309,11 @@ def _normalize_session_fragment(
 
 def _get_import_learn_meta_persist_lock() -> asyncio.Lock:
     loop = asyncio.get_running_loop()
-    loop_id = id(loop)
     with _IMPORT_LEARN_META_PERSIST_LOCKS_GUARD:
-        lock = _IMPORT_LEARN_META_PERSIST_LOCKS.get(loop_id)
+        lock = _IMPORT_LEARN_META_PERSIST_LOCKS.get(loop)
         if lock is None:
             lock = asyncio.Lock()
-            _IMPORT_LEARN_META_PERSIST_LOCKS[loop_id] = lock
+            _IMPORT_LEARN_META_PERSIST_LOCKS[loop] = lock
         return lock
 
 
@@ -313,17 +322,28 @@ async def _run_deduped_reflection_prepare(
     task_factory,
 ) -> Dict[str, Any]:
     async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
-        task = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
-        if task is None or task.done():
-            task = asyncio.create_task(task_factory())
-            _REFLECTION_PREPARE_IN_FLIGHT[dedup_key] = task
+        entry = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
+        if entry is None or entry.task.done():
+            entry = _ReflectionPrepareInFlightEntry(task=asyncio.create_task(task_factory()))
+            _REFLECTION_PREPARE_IN_FLIGHT[dedup_key] = entry
+        entry.waiters += 1
+        task = entry.task
 
     try:
         result = await asyncio.shield(task)
     finally:
+        cancel_task = False
         async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
-            if _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key) is task:
-                _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
+            current = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
+            if current is entry:
+                entry.waiters = max(0, entry.waiters - 1)
+                if entry.waiters == 0:
+                    _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
+                    cancel_task = not task.done()
+                elif task.done():
+                    _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
+        if cancel_task:
+            task.cancel()
 
     return copy.deepcopy(result)
 

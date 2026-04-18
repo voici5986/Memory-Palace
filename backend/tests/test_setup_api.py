@@ -781,6 +781,79 @@ def test_setup_config_accepts_real_local_router_endpoint_with_real_models(
     assert "ROUTER_RERANKER_MODEL=local-router-rerank" in written
 
 
+def test_setup_config_rejects_link_local_provider_url_targets(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "local-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "api",
+                "embedding_api_base": "http://169.254.169.254/v1",
+                "embedding_model": "local-embedding-model",
+                "embedding_dim": 1024,
+            },
+        )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert detail["reason"] == "invalid_api_base_url"
+    assert detail["field"] == "embedding_api_base"
+    assert not target_env.exists()
+
+
+def test_setup_config_normalizes_provider_suffixes_before_writing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "local-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "api",
+                "embedding_api_base": "http://127.0.0.1:9100/v1/embeddings/",
+                "embedding_model": "local-embedding-model",
+                "embedding_dim": 1024,
+                "reranker_enabled": True,
+                "reranker_api_base": "http://127.0.0.1:9200/v1/rerank",
+                "reranker_model": "local-reranker-model",
+            },
+        )
+
+    assert response.status_code == 200
+    written = target_env.read_text(encoding="utf-8")
+    assert "RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:9100/v1" in written
+    assert "RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:9200/v1" in written
+
+
 def test_setup_config_rejects_example_router_model_ids(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -932,6 +1005,35 @@ def test_setup_config_rejects_loopback_write_without_api_key_when_configured(
     detail = response.json()["detail"]
     assert detail["error"] == "setup_access_denied"
     assert detail["reason"] == "invalid_or_missing_api_key"
+    assert not target_env.exists()
+
+
+def test_setup_config_requires_dashboard_api_key_for_first_local_save(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\n", encoding="utf-8")
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "   ",
+                "allow_insecure_local": False,
+                "embedding_backend": "hash",
+            },
+        )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "setup_validation_failed"
+    assert "dashboard_api_key" in detail["missing_fields"]
     assert not target_env.exists()
 
 

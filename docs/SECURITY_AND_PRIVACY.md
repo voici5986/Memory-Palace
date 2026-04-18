@@ -162,12 +162,15 @@ Authorization: Bearer <MCP_API_KEY>
 - `/setup/config` 的**写入能力只允许直连本机回环地址**；即使拿着有效 `MCP_API_KEY`，远端请求也不能直接改主机 `.env`
 - 向导接口只允许写入一组白名单 env 键，不支持任意文件写入
 - 现阶段只允许写本地 checkout 的 `.env`
+- 第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；留空会被后端直接拒绝，不再当成匿名自举
 - 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
 - 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
 - 浏览器本地只会把 Dashboard 使用的 `MCP_API_KEY` 放在当前浏览器会话的 `sessionStorage`；embedding / reranker / LLM key 不会保存在浏览器里。若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但现在只会在确认 `localStorage` 里还是**同一份旧值**时才删除它，避免多标签页并发迁移时误删另一标签页刚写入的新值。
 - 如果服务端 Dashboard 鉴权已经生效，前端不会只因为浏览器本地还没保存 Dashboard key 就自动弹出首启配置向导；这样能减少在 proxy-held key 部署里把真实 `MCP_API_KEY` 再存进浏览器的误操作。
 - 向导切档时，当前已经隐藏掉的旧字段会跟着本次保存一起清掉，减少把上一档残留的 router/API 字段继续带进本次提交的风险。
 - 切到远端 embedding backend 时，setup 保存会显式写入 `RETRIEVAL_EMBEDDING_DIM`；`/setup/config` 现在也支持 `openai` embedding backend。
+- provider API base 字段现在会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉；格式不对、带凭证、或指到 link-local 的地址会直接拒绝。
+- 当前运行时如果读到无效的 `chat / embedding / reranker` API base，也会按 fail-closed 处理：直接忽略这条配置并走降级/回退，不会继续拿这类地址发请求。
 - Memory 页在确认弹窗不可用时也会保持同样的 fail-closed 边界：不会继续执行删除或跳转，而是直接拦下动作并给出页内提示。
 
 **新增测试锚点：**

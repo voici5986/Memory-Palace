@@ -12,6 +12,7 @@ from shared_utils import (
     TRUTHY_ENV_VALUES as _TRUTHY_ENV_VALUES,
     env_bool as _env_bool,
     is_loopback_hostname as _is_loopback_hostname,
+    normalize_http_api_base as _normalize_http_api_base,
 )
 
 from .maintenance import (
@@ -90,6 +91,13 @@ _PLACEHOLDER_FIELD_VALUES = {
     "write_guard_llm_model": {"chat-model"},
     "intent_llm_model": {"intent-model"},
     "router_chat_model": {"router-chat-model"},
+}
+_API_BASE_FIELD_SPECS = {
+    "embedding_api_base": ("/embeddings",),
+    "reranker_api_base": ("/rerank",),
+    "write_guard_llm_api_base": ("/chat/completions", "/responses"),
+    "intent_llm_api_base": ("/chat/completions", "/responses"),
+    "router_api_base": (),
 }
 
 
@@ -462,9 +470,56 @@ def _require_setup_text_field(
         placeholder_fields.append(field)
 
 
+def _normalize_setup_api_base_field(
+    payload: SetupConfigRequest,
+    field: str,
+) -> Optional[str]:
+    normalized = _normalize_optional_value(getattr(payload, field))
+    if normalized is None:
+        return None
+    try:
+        return _normalize_http_api_base(
+            normalized,
+            trim_suffixes=_API_BASE_FIELD_SPECS.get(field, ()),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "setup_validation_failed",
+                "reason": "invalid_api_base_url",
+                "field": field,
+                "message": str(exc),
+            },
+        ) from exc
+
+
+def _normalize_setup_api_base_fields(payload: SetupConfigRequest) -> None:
+    for field in _API_BASE_FIELD_SPECS:
+        setattr(payload, field, _normalize_setup_api_base_field(payload, field))
+
+
+def _enforce_setup_bootstrap_policy(payload: SetupConfigRequest) -> None:
+    if _get_configured_mcp_api_key():
+        return
+    if _normalize_optional_value(payload.dashboard_api_key) is not None:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "error": "setup_validation_failed",
+            "missing_fields": ["dashboard_api_key"],
+            "placeholder_fields": [],
+            "message": "Set a dashboard API key before saving local setup for the first time.",
+        },
+    )
+
+
 def _validate_setup_payload(payload: SetupConfigRequest) -> None:
     missing_fields: List[str] = []
     placeholder_fields: List[str] = []
+
+    _normalize_setup_api_base_fields(payload)
 
     if payload.embedding_backend in {"api", "openai"}:
         _require_setup_text_field(payload, "embedding_api_base", missing_fields, placeholder_fields)
@@ -501,6 +556,8 @@ def _validate_setup_payload(payload: SetupConfigRequest) -> None:
                 "message": "Complete the required setup fields before saving.",
             },
         )
+
+    _enforce_setup_bootstrap_policy(payload)
 
 
 def _build_env_updates(payload: SetupConfigRequest) -> Dict[str, str]:

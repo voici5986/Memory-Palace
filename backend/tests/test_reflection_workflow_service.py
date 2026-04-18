@@ -1,4 +1,6 @@
 import asyncio
+import gc
+import weakref
 
 import pytest
 
@@ -178,6 +180,55 @@ async def test_reflection_prepare_deduplicates_concurrent_same_session_requests(
     assert second["prepared"] is True
     assert first["review_id"] == second["review_id"]
     assert summary["operation_decision_breakdown"]["reflection_workflow|accepted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_deduped_reflection_prepare_cancels_orphaned_task_when_last_waiter_cancels() -> None:
+    mcp_server._REFLECTION_PREPARE_IN_FLIGHT.clear()
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _factory() -> dict[str, object]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    waiter = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("cancel-me", _factory)
+    )
+    await started.wait()
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+    assert "cancel-me" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
+
+
+async def _capture_import_learn_lock() -> asyncio.Lock:
+    return mcp_server._get_import_learn_meta_persist_lock()
+
+
+def test_import_learn_meta_persist_locks_release_closed_event_loops() -> None:
+    mcp_server._IMPORT_LEARN_META_PERSIST_LOCKS.clear()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(_capture_import_learn_lock())
+    assert len(mcp_server._IMPORT_LEARN_META_PERSIST_LOCKS) == 1
+
+    loop_ref = weakref.ref(loop)
+    asyncio.set_event_loop(None)
+    loop.close()
+    del loop
+    gc.collect()
+
+    assert loop_ref() is None
+    assert len(mcp_server._IMPORT_LEARN_META_PERSIST_LOCKS) == 0
 
 
 @pytest.mark.asyncio

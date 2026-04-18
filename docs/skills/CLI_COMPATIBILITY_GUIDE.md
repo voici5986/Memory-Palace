@@ -376,7 +376,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 `MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
-现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper，而且 launcher 规则已经和 `install_skill.py`、`render_ide_host_config.py` 对齐：原生 Windows 走 `backend/mcp_wrapper.py`，macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 走 `scripts/run_memory_palace_mcp_stdio.sh`。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证口径是：backend `943 passed, 20 skipped`、frontend `159 passed`、frontend `npm run build` 和 `npm run typecheck` 通过；repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke 也已重跑。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
+现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper，而且 launcher 规则已经和 `install_skill.py`、`render_ide_host_config.py` 对齐：原生 Windows 走 `backend/mcp_wrapper.py`，macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 走 `scripts/run_memory_palace_mcp_stdio.sh`。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证口径是：backend `957 passed, 20 skipped`、frontend `164 passed`、frontend `npm run build` 和 `npm run typecheck` 通过；repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke 也已重跑。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 ## 正向 / 反向 prompt
 

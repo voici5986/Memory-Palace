@@ -155,11 +155,14 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - the `/setup/config` **write path is loopback-only**; even a request with a valid `MCP_API_KEY` cannot rewrite the host `.env` remotely
 - the assistant only writes a white-listed set of env keys; it is not an arbitrary file writer
 - it only targets the local checkout `.env`
+- the first local `.env` save now also requires a non-empty Dashboard key; leaving it blank is rejected by the backend instead of being treated like an anonymous bootstrap
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
 - only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend still only migrates it forward once, but now only removes the old copy when it can confirm that `localStorage` still holds that same old value. This avoids one tab deleting a newer value that was just written by another tab.
 - when you switch profiles or turn optional providers back off, the assistant now clears hidden stale router / API fields before saving. In plain language: once a field is no longer active on screen, the browser no longer quietly keeps the old secret around for the next save.
 - for remote embedding backends, the assistant now persists the actual `RETRIEVAL_EMBEDDING_DIM` together with the backend selection, and `openai` is part of the supported embedding backend list.
+- provider API base fields now go through normalization and validation first: common suffixes such as `/embeddings`, `/rerank`, `/chat/completions`, and `/responses` are trimmed automatically; malformed, credential-bearing, or link-local targets are rejected before save.
+- if the runtime later reads an invalid `chat / embedding / reranker` API base from env, it also fails closed on that value: the bad base is ignored and the code falls back / degrades instead of continuing to send requests to it.
 - if a host cannot provide a native confirm dialog, the Memory page now fails closed and keeps the current state instead of silently deleting data or navigating away.
 
 **New validation anchors:**

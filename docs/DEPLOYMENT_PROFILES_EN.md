@@ -53,7 +53,7 @@ This document helps you choose the appropriate Memory Palace configuration profi
 >
 > **Additional Note**: C/D templates follow the `router` path by default. If your deployment doesn't use a unified router, you can also directly configure `RETRIEVAL_EMBEDDING_*`, `RETRIEVAL_RERANKER_*`, and `WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` to connect to OpenAI-compatible services.
 >
-> **The first-run assistant follows the same wording**: `Profile C` / `Profile D` in the assistant only prefill a more local/private-style router starting point versus a more remote-style router starting point. They do not mean the setup is already valid. Before save, you still need to replace the required router base/model fields with your real values; if you are not using a router, you can switch directly to the `api` / `openai` embedding backend instead. `openai` is an embedding-backend option, not a brand-new extra profile tier.
+> **The first-run assistant follows the same wording**: `Profile C` / `Profile D` in the assistant only prefill a more local/private-style router starting point versus a more remote-style router starting point. They do not mean the setup is already valid. Before save, you still need to replace the required router base/model fields with your real values; if you are not using a router, you can switch directly to the `api` / `openai` embedding backend instead. `openai` is an embedding-backend option, not a brand-new extra profile tier. The API-base wording is the same as the backend: enter the provider service base/root (usually up to `/v1`), not a concrete endpoint suffix such as `/embeddings`, `/rerank`, or `/chat/completions`; common suffixes are trimmed automatically, but malformed or link-local targets still fail closed.
 >
 > **One local-template note**: the repository's local `profile c/d` templates now also keep `RUNTIME_AUTO_FLUSH_ENABLED=true` explicitly, so `.env` files generated through `apply_profile.sh/.ps1` keep the same auto-flush default as A/B unless you override it yourself.
 >
@@ -159,7 +159,7 @@ RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 # Note: There is no RETRIEVAL_RERANKER_BACKEND configuration item
 ```
 
-> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field. If the final response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry.
+> If you use the direct API path, keep `RETRIEVAL_EMBEDDING_DIM` aligned with the vector dimension your provider actually returns. The current code still does not try to guess this value for you; it only forwards that value as `dimensions` on OpenAI-compatible `/embeddings` requests. If the provider explicitly rejects `dimensions`, the runtime retries once without that field. If the final response still comes back with the wrong vector size, the runtime now rejects that vector immediately and falls back / degrades instead of silently writing an incompatible index entry. The same "service base/root" rule also applies to `RETRIEVAL_EMBEDDING_API_BASE`, `RETRIEVAL_RERANKER_API_BASE`, and `WRITE_GUARD_LLM_API_BASE`: common endpoint suffixes are normalized automatically, while malformed or link-local values still fail closed.
 >
 > If you are using a local OpenAI-compatible path such as Ollama, prefer `/v1/embeddings` and only set `RETRIEVAL_EMBEDDING_DIM` to the real vector size that provider returns. Do not blindly copy someone else's `1024` or `4096` example.
 >
@@ -477,6 +477,8 @@ If you also want the local Vite entry to proxy same-origin SSE, add:
 
 ```bash
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
+
+That `/sse` proxy is intentionally kept as the local development path for same-origin EventSource / MCP debugging; the frontend now has a dedicated `frontend/src/lib/sse.js` helper for that path.
 ```
 
 This also forwards `/sse`, `/messages`, and `/sse/messages` to your separately started local `run_sse.py` process, specifically for local Vite-entry debugging.

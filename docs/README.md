@@ -8,13 +8,13 @@
 >
 > 如果你想让 AI 直接带你一步一步安装，优先从独立仓库 [`memory-palace-setup`](https://github.com/AGI-is-going-to-arrive/memory-palace-setup) 开始。当前统一口径是：**优先走 skills + MCP，不要默认只配 MCP-only**。
 >
-> 如需额外复核 skill smoke 或真实 MCP 调用链，可运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。它们会在 `docs/skills/` 下生成本地摘要，但这些报告不是主入口文档。当前脚本还会自动脱敏常见 secret、session token 和本地绝对路径，并在宿主支持时改用更私有的文件权限。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。
+> 如需额外复核 skill smoke 或真实 MCP 调用链，可运行 `python scripts/evaluate_memory_palace_skill.py` 或 `cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py`。它们会在 `docs/skills/` 下生成本地摘要，但这些报告不是主入口文档。当前脚本还会自动脱敏常见 secret、session token 和本地绝对路径，并在宿主支持时改用更私有的文件权限。`evaluate_memory_palace_skill.py` 现在只要任一检查是 `FAIL` 就会返回非零退出码；`SKIP` / `PARTIAL` / `MANUAL` 不会单独让进程失败。如果 `codex exec` 在 smoke 超时前没有产出结构化输出，`codex` 那一项会记成 `PARTIAL`，而不是把整轮卡住。`evaluate_memory_palace_mcp_e2e.py` 这轮还补了一层 re-exec guard，避免在本地 Python 解释器切换场景里重复重入。
 >
 > 另外，A/B/C/D 更适合理解成不同配置档，不是“无感热切换按钮”。只要你切了 embedding backend / model / dimension，就要准备检查索引是否仍然匹配；当前运行时如果发现维度不一致，会明确要求重建索引，而不是假装切档已经成功。
 >
 > 当前前端会在 React 挂载前先按浏览器已保存语言同步首帧 `lang` 和页面标题；右上角语言按钮可在英文和中文之间一键切换，浏览器会记住你的选择。
 >
-> 2026-04-18 这轮公开复核：backend 非 benchmark `868 passed / 15 skipped`，frontend `154 passed`，前端 `typecheck/build` 通过；repo-local `Profile B` 的 backend + SSE + Vite + 浏览器页面 + 中英切换/刷新持久化通过；Docker `A/B/C/D` 的 `health`、首页、`/sse` 和代理 API 通过。`skills+MCP` 与 `single-MCP` 是 PASS；`skills-only` 仍是 PARTIAL（`codex` smoke timeout、`gemini_live` skip、部分 IDE host 还是 partial），不要把它理解成“全绿”。
+> 当前这轮公开复核：backend `957 passed / 20 skipped`，frontend `164 passed`，前端 `typecheck/build` 通过；repo-local macOS `Profile B` 的 `backend + frontend + 真实浏览器 setup/maintenance smoke` 通过，也额外补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D`、原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮没有重跑，继续保留目标环境复核边界。
 
 ![系统架构图](images/系统架构图.png)
 

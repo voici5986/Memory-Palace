@@ -306,13 +306,13 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`868 passed / 15 skipped`
-- Frontend 全量：`154 passed`
+- Backend 非 benchmark 全量：`957 passed / 20 skipped`
+- Frontend 全量：`164 passed`
 - Frontend `typecheck` / `build`：通过
-- repo-local `Profile B`：backend + SSE + Vite + 真实浏览器页面 + 中英切换/刷新持久化通过
-- Docker `A/B/C/D`：`/health`、首页、`/sse`、代理 `/api/browse/node` 通过
-- `skills+MCP` / `single-MCP`：PASS
-- `skills-only`：PARTIAL。当前已知边界是 `codex` smoke timeout、`gemini_live` skip、部分 IDE host 还是 partial
+- repo-local `Profile B`：backend + frontend + 真实浏览器 setup/maintenance smoke 通过
+- 本地 smoke：补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的验证
+- Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界
+- `skills+MCP` / `single-MCP`：本轮未重跑，这里不追加新结论
 
 这里故意不把这轮结果写成“全链路全绿”。尤其是 `skills-only`，现在还只能写 PARTIAL，不能往上拔。
 
