@@ -1,7 +1,25 @@
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _pwsh_executable() -> str | None:
+    candidates = [
+        shutil.which("pwsh"),
+        r"C:\Program Files\PowerShell\7\pwsh.exe",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.is_file():
+            return str(path)
+    return None
 
 
 def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
@@ -95,6 +113,72 @@ def test_powershell_one_click_env_io_uses_utf8_no_bom_helpers() -> None:
     assert "Write-LinesUtf8 -FilePath $FilePath -Lines $newLines" in ps1_text
     assert "Get-Content -Path $FilePath | Where-Object" not in ps1_text
     assert "Set-Content -Path $FilePath -Value $newLines" not in ps1_text
+
+
+def test_powershell_one_click_validation_errors_exit_with_code_2_contract() -> None:
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Exit-ValidationError" in ps1_text
+    assert "function Assert-ValidProfile" in ps1_text
+    assert "function Resolve-PortValue" in ps1_text
+    assert "exit 2" in ps1_text
+    assert "$profileLower = Assert-ValidProfile -ProfileName $Profile" in ps1_text
+    assert "$FrontendPort = Resolve-PortValue -Value $FrontendPort -Name 'FrontendPort'" in ps1_text
+    assert "$BackendPort = Resolve-PortValue -Value $BackendPort -Name 'BackendPort'" in ps1_text
+
+
+def test_powershell_one_click_invalid_profile_exits_with_code_2() -> None:
+    pwsh_bin = _pwsh_executable()
+    if not pwsh_bin:
+        pytest.skip("PowerShell is not available")
+
+    proc = subprocess.run(
+        [
+            pwsh_bin,
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            str(PROJECT_ROOT / "scripts" / "docker_one_click.ps1"),
+            "-Profile",
+            "z",
+        ],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2
+    assert "Unsupported profile" in proc.stderr
+
+
+def test_powershell_one_click_invalid_frontend_port_exits_with_code_2() -> None:
+    pwsh_bin = _pwsh_executable()
+    if not pwsh_bin:
+        pytest.skip("PowerShell is not available")
+
+    proc = subprocess.run(
+        [
+            pwsh_bin,
+            "-NoLogo",
+            "-NoProfile",
+            "-File",
+            str(PROJECT_ROOT / "scripts" / "docker_one_click.ps1"),
+            "-FrontendPort",
+            "not-a-number",
+        ],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2
+    assert "FrontendPort must be an integer" in proc.stderr
 
 
 def test_one_click_scripts_resolve_custom_env_file_to_stable_absolute_paths() -> None:

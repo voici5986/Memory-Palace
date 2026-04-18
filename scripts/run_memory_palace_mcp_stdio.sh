@@ -343,6 +343,18 @@ is_docker_internal_database_url() {
   return 1
 }
 
+database_url_has_parent_reference() {
+  local normalized_path
+  normalized_path="$(normalize_sqlite_database_url_path "${1:-}")"
+  [[ -n "${normalized_path}" ]] || return 1
+  local segment
+  IFS='/' read -r -a segments <<< "${normalized_path}"
+  for segment in "${segments[@]-}"; do
+    [[ "${segment}" == ".." ]] && return 0
+  done
+  return 1
+}
+
 VENV_PYTHON=""
 if prefer_windows_venv_layout; then
   if [[ -x "${WINDOWS_VENV_PYTHON}" ]]; then
@@ -370,6 +382,12 @@ if [[ -z "${runtime_database_url}" && -f "${ENV_FILE}" ]]; then
   if [[ -n "${effective_database_url}" ]]; then
     export DATABASE_URL="${effective_database_url}"
   fi
+fi
+
+if database_url_has_parent_reference "${effective_database_url}"; then
+  echo "Refusing to start repo-local stdio MCP with parent-directory DATABASE_URL: ${effective_database_url}" >&2
+  echo "The DATABASE_URL path must be a normalized host absolute path and must not contain '..' segments." >&2
+  exit 1
 fi
 
 if is_docker_internal_database_url "${effective_database_url}"; then

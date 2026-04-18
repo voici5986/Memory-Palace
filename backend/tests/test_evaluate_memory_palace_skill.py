@@ -248,6 +248,43 @@ def test_repo_local_stdio_wrapper_rejects_docker_internal_database_url_with_uppe
     assert "connect your client to the Docker /sse endpoint instead." in result.stderr
 
 
+def test_repo_local_stdio_wrapper_rejects_parent_directory_database_url(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    backend_python = project_root / "backend" / ".venv" / "bin" / "python"
+
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    backend_python.parent.mkdir(parents=True, exist_ok=True)
+
+    source_wrapper = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "run_memory_palace_mcp_stdio.sh"
+    ).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "")
+    with script_path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(source_wrapper)
+    script_path.chmod(0o755)
+
+    _write_shell_script(backend_python, "#!/usr/bin/env bash\nexit 0\n")
+
+    (project_root / ".env").write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////Users/test/../memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    result = _run_command(
+        ["bash", "scripts/run_memory_palace_mcp_stdio.sh"],
+        cwd=project_root,
+        env={key: value for key, value in os.environ.items() if key != "DATABASE_URL"},
+    )
+
+    assert result.returncode == 1
+    assert "parent-directory DATABASE_URL" in result.stderr
+    assert "must not contain '..' segments" in result.stderr
+
+
 def test_repo_local_stdio_wrapper_exports_repo_database_url_when_runtime_value_is_empty(
     tmp_path: Path,
 ) -> None:

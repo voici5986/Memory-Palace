@@ -119,6 +119,13 @@ def is_docker_internal_database_url(value: str | None) -> bool:
     )
 
 
+def _sqlite_database_url_has_parent_reference(value: str | None) -> bool:
+    normalized_path = _normalize_sqlite_database_url_path(value)
+    if not normalized_path:
+        return False
+    return any(segment == ".." for segment in normalized_path.split("/"))
+
+
 def sqlite_database_url(path: Path) -> str:
     normalized = path.resolve().as_posix()
     return f"sqlite+aiosqlite:///{normalized}"
@@ -201,6 +208,19 @@ def build_runtime_env() -> dict[str, str]:
         )
         if runtime_remote_timeout:
             runtime_env["RETRIEVAL_REMOTE_TIMEOUT_SEC"] = runtime_remote_timeout
+
+    if _sqlite_database_url_has_parent_reference(effective_database_url):
+        print(
+            "Refusing to start repo-local stdio MCP with parent-directory DATABASE_URL: "
+            f"{_normalize_env_string_value(effective_database_url)}",
+            file=sys.stderr,
+        )
+        print(
+            "The DATABASE_URL path must be a normalized host absolute path and must not "
+            "contain '..' segments.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     if is_docker_internal_database_url(effective_database_url):
         print(

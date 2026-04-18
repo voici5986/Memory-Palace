@@ -153,6 +153,31 @@ def test_build_runtime_env_rejects_data_prefixed_docker_internal_database_url(
     assert str(excinfo.value) == "1"
 
 
+def test_build_runtime_env_rejects_parent_directory_database_url(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////Users/test/../memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    captured = capsys.readouterr()
+
+    assert str(excinfo.value) == "1"
+    assert "parent-directory DATABASE_URL" in captured.err
+    assert "must not contain '..' segments" in captured.err
+
+
 def test_build_runtime_env_uses_last_database_url_from_env_file_when_runtime_value_is_missing(
     monkeypatch, tmp_path: Path
 ) -> None:

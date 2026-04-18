@@ -329,4 +329,34 @@ describe('MemoryBrowser', () => {
 
     expect(await screen.findByText('memory-55')).toBeInTheDocument();
   });
+
+  it('does not render a large child list all at once', async () => {
+    const user = userEvent.setup();
+    api.getMemoryNode.mockResolvedValue({
+      ...ROOT_PAYLOAD,
+      children: Array.from({ length: 500 }, (_, index) => makeChild(`memory-${index + 1}`)),
+    });
+
+    renderMemoryBrowser('/memory?domain=core');
+
+    await screen.findByText('memory-1');
+    expect(screen.getByText('memory-50')).toBeInTheDocument();
+    expect(screen.queryByText('memory-51')).not.toBeInTheDocument();
+    expect(screen.queryByText('memory-500')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t('memory.showingChildren', { shown: 50, total: 500 }))
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: i18n.t('memory.loadMoreChildren', { count: 50 }),
+      })
+    );
+
+    expect(await screen.findByText('memory-100')).toBeInTheDocument();
+    expect(screen.queryByText('memory-101')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(i18n.t('memory.showingChildren', { shown: 100, total: 500 }))
+    ).toBeInTheDocument();
+  });
 });

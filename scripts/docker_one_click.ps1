@@ -1,10 +1,9 @@
 param(
-    [ValidateSet('a', 'b', 'c', 'd', 'A', 'B', 'C', 'D')]
     [string]$Profile = 'b',
 
-    [int]$FrontendPort = 0,
+    [string]$FrontendPort = '',
 
-    [int]$BackendPort = 0,
+    [string]$BackendPort = '',
 
     [switch]$NoAutoPort,
 
@@ -21,6 +20,47 @@ $script:BackendPortLockDir = $null
 $script:DeploymentLockDir = $null
 $script:GeneratedDockerEnvFile = $null
 $script:PreviousDockerEnvFile = $null
+
+function Exit-ValidationError {
+    param([string]$Message)
+
+    [Console]::Error.WriteLine($Message)
+    exit 2
+}
+
+function Assert-ValidProfile {
+    param([string]$ProfileName)
+
+    if ([string]::IsNullOrWhiteSpace($ProfileName)) {
+        Exit-ValidationError "Profile is required. Expected one of: a | b | c | d"
+    }
+
+    $normalizedProfile = $ProfileName.Trim().ToLowerInvariant()
+    if ($normalizedProfile -notin @('a', 'b', 'c', 'd')) {
+        Exit-ValidationError "Unsupported profile: $normalizedProfile. Expected one of: a | b | c | d"
+    }
+
+    return $normalizedProfile
+}
+
+function Resolve-PortValue {
+    param(
+        [string]$Value,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        Exit-ValidationError "$Name is required"
+    }
+
+    $trimmedValue = $Value.Trim()
+    $parsedValue = 0
+    if (-not [int]::TryParse($trimmedValue, [ref]$parsedValue)) {
+        Exit-ValidationError "$Name must be an integer, got $trimmedValue"
+    }
+
+    return $parsedValue
+}
 
 function Read-LinesUtf8 {
     param([string]$FilePath)
@@ -201,7 +241,7 @@ function Assert-ValidPort {
     )
 
     if ($Port -lt 1 -or $Port -gt 65535) {
-        throw "$Name must be in range [1, 65535], got $Port"
+        Exit-ValidationError "$Name must be in range [1, 65535], got $Port"
     }
 }
 
@@ -1148,31 +1188,34 @@ function Get-ComposePublishedPort {
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
-$profileLower = $Profile.ToLower()
+$profileLower = Assert-ValidProfile -ProfileName $Profile
 
 if (-not $PSBoundParameters.ContainsKey('FrontendPort')) {
     if ($env:MEMORY_PALACE_FRONTEND_PORT) {
-        $FrontendPort = [int]$env:MEMORY_PALACE_FRONTEND_PORT
+        $FrontendPort = $env:MEMORY_PALACE_FRONTEND_PORT
     }
     elseif ($env:NOCTURNE_FRONTEND_PORT) {
-        $FrontendPort = [int]$env:NOCTURNE_FRONTEND_PORT
+        $FrontendPort = $env:NOCTURNE_FRONTEND_PORT
     }
     else {
-        $FrontendPort = 3000
+        $FrontendPort = '3000'
     }
 }
 
 if (-not $PSBoundParameters.ContainsKey('BackendPort')) {
     if ($env:MEMORY_PALACE_BACKEND_PORT) {
-        $BackendPort = [int]$env:MEMORY_PALACE_BACKEND_PORT
+        $BackendPort = $env:MEMORY_PALACE_BACKEND_PORT
     }
     elseif ($env:NOCTURNE_BACKEND_PORT) {
-        $BackendPort = [int]$env:NOCTURNE_BACKEND_PORT
+        $BackendPort = $env:NOCTURNE_BACKEND_PORT
     }
     else {
-        $BackendPort = 18000
+        $BackendPort = '18000'
     }
 }
+
+$FrontendPort = Resolve-PortValue -Value $FrontendPort -Name 'FrontendPort'
+$BackendPort = Resolve-PortValue -Value $BackendPort -Name 'BackendPort'
 
 Assert-ValidPort -Port $FrontendPort -Name 'FrontendPort'
 Assert-ValidPort -Port $BackendPort -Name 'BackendPort'
