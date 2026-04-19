@@ -47,6 +47,9 @@ Threshold definition file: `backend/tests/benchmark/thresholds_v1.json`
 - `write_guard.recall_gte`: 0.85
 - `intent.accuracy_gte`: 0.80
 - `gist.rouge_l_gte`: 0.40
+- `prompt_safety.contract_pass_rate_gte`: 1.00
+- `reflection_lane.timeout_degrade_correct_eq`: 1
+- `reflection_lane.tasks_total_gte`: 2
 
 ## MCP/API Contract Lock
 

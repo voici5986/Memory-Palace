@@ -380,7 +380,7 @@ function Badge({ children, tone = 'neutral' }) {
 }
 
 function ResultCard({ item }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const finalScore = item?.scores?.final;
   const scoreText = finalScore === undefined ? '-' : Number(finalScore).toFixed(4);
   const uri = item?.uri || '-';
@@ -388,6 +388,10 @@ function ResultCard({ item }) {
   const metadata = item?.metadata || {};
   const source = metadata.source || metadata.match_type || 'global';
   const sourceLabel = translateObservabilityToken(t, 'sources', source, source);
+  const localeKey = i18n.resolvedLanguage || i18n.language || 'en';
+  const updatedAtLabel = metadata.updated_at
+    ? formatDateTime(metadata.updated_at, localeKey)
+    : t('observability.result.updatedAtUnknown');
 
   return (
     <article className="rounded-2xl border border-[color:var(--palace-line)] bg-[rgba(255,250,244,0.9)] p-4 shadow-[var(--palace-shadow-sm)] transition duration-200 hover:border-[color:var(--palace-accent-2)] hover:shadow-[var(--palace-shadow-md)]">
@@ -402,7 +406,7 @@ function ResultCard({ item }) {
       <footer className="flex flex-wrap gap-2 text-[11px] text-[color:var(--palace-muted)]">
         <span>{t('observability.result.memory', { value: item?.memory_id ?? '-' })}</span>
         <span>{t('observability.result.priority', { value: metadata.priority ?? '-' })}</span>
-        <span>{metadata.updated_at || t('observability.result.updatedAtUnknown')}</span>
+        <span>{updatedAtLabel}</span>
       </footer>
     </article>
   );

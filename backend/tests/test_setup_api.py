@@ -8,6 +8,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import setup as setup_api
+from db.sqlite_client import (
+    DEFAULT_EMBEDDING_BACKEND,
+    DEFAULT_EMBEDDING_DIM,
+    SQLiteClient,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +64,79 @@ def test_setup_status_allows_loopback_without_api_key(monkeypatch, tmp_path: Pat
     assert payload["write_reason"] == "local_env_file"
     assert payload["target_label"] == ".env"
     assert payload["summary"]["dashboard_auth_configured"] is False
+
+
+def test_setup_status_defaults_to_runtime_hash_backend_when_env_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "RETRIEVAL_EMBEDDING_BACKEND=none",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.delenv("RETRIEVAL_EMBEDDING_BACKEND", raising=False)
+    monkeypatch.delenv("RETRIEVAL_EMBEDDING_DIM", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["embedding_backend"] == DEFAULT_EMBEDDING_BACKEND
+    assert summary["embedding_dim"] == DEFAULT_EMBEDDING_DIM
+    assert summary["embedding_configured"] is True
+
+    runtime_client = SQLiteClient(f"sqlite+aiosqlite:///{tmp_path / 'setup-defaults.db'}")
+    assert runtime_client._embedding_backend == summary["embedding_backend"]
+    assert runtime_client._embedding_dim == summary["embedding_dim"]
+
+
+def test_setup_status_marks_remote_embedding_incomplete_without_dimension(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "RETRIEVAL_EMBEDDING_BACKEND=openai",
+                "RETRIEVAL_EMBEDDING_API_BASE=https://api.openai.com/v1",
+                "RETRIEVAL_EMBEDDING_MODEL=text-embedding-3-large",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+    target_env.write_text(env_example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["embedding_backend"] == "openai"
+    assert summary["embedding_dim"] is None
+    assert summary["embedding_configured"] is False
 
 
 def test_setup_status_rejects_non_loopback_without_api_key(monkeypatch) -> None:
@@ -972,7 +1050,7 @@ def test_setup_config_rejects_private_literal_provider_base_without_allowlist(
                 "dashboard_api_key": "local-secret",
                 "allow_insecure_local": False,
                 "embedding_backend": "api",
-                "embedding_api_base": "http://10.88.1.144:11435/v1",
+                "embedding_api_base": "http://10.0.0.8:11435/v1",
                 "embedding_model": "local-embedding-model",
                 "embedding_dim": 1024,
             },
@@ -998,7 +1076,7 @@ def test_setup_config_allows_private_literal_provider_base_with_allowlist(
 
     monkeypatch.delenv("MCP_API_KEY", raising=False)
     monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
-    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.88.0.0/16")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.0/8")
     monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
     monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
 
@@ -1009,7 +1087,7 @@ def test_setup_config_allows_private_literal_provider_base_with_allowlist(
                 "dashboard_api_key": "local-secret",
                 "allow_insecure_local": False,
                 "embedding_backend": "api",
-                "embedding_api_base": "http://10.88.1.144:11435/v1",
+                "embedding_api_base": "http://10.0.0.8:11435/v1",
                 "embedding_model": "local-embedding-model",
                 "embedding_dim": 1024,
             },
@@ -1017,7 +1095,7 @@ def test_setup_config_allows_private_literal_provider_base_with_allowlist(
 
     assert response.status_code == 200
     written = target_env.read_text(encoding="utf-8")
-    assert "RETRIEVAL_EMBEDDING_API_BASE=http://10.88.1.144:11435/v1" in written
+    assert "RETRIEVAL_EMBEDDING_API_BASE=http://10.0.0.8:11435/v1" in written
 
 
 def test_setup_config_rejects_example_router_model_ids(

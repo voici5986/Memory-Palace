@@ -304,6 +304,8 @@ On the shell-wrapper path (`macOS / Linux / Git Bash / WSL`), `run_memory_palace
 
 4. Or find and release the occupied port:
 
+   One more small boundary that was tightened in this round: when `docker_one_click.sh` cannot use `lsof` / `nc` and falls back to its Python socket probe, it now checks the wildcard bind (`0.0.0.0`) instead of only `127.0.0.1`. In plain terms: if the port is already occupied on another local host IP, treat that as a real conflict too instead of checking loopback listeners only.
+
    ```bash
    # macOS / Linux
    lsof -i :8000

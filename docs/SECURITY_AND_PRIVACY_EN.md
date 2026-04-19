@@ -119,6 +119,10 @@ The above authentication logic is covered in the following test files in the cur
 - `backend/tests/test_week6_sse_auth.py::test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy` — trusted-proxy path prefers the real client IP
 - `backend/tests/test_sensitive_api_auth.py` — Review and Browse read/write authentication
 - `backend/tests/test_review_rollback.py` — Review operation authentication test
+- `backend/tests/test_reflection_workflow_service.py` — verifies Dashboard `/browse` writes can seed the reflection workflow and that reflection `execute` still enters the write lane
+- `backend/tests/test_reflection_workflow_api.py` — verifies reflection rollback requires an explicit `session_id` and still performs best-effort namespace cleanup after the review rollback path
+- `backend/tests/test_reflection_observability_summary.py` — verifies `reflection_workflow` summary counters stay restart-stable
+- `backend/tests/test_setup_api.py` — verifies loopback access, remote auth, explicit remote embedding-dimension requirements, runtime-default `/setup/status` summary, and Docker fail-closed behavior
 
 ---
 
@@ -155,6 +159,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - the `/setup/config` **write path is loopback-only**; even a request with a valid `MCP_API_KEY` cannot rewrite the host `.env` remotely
 - the assistant only writes a white-listed set of env keys; it is not an arbitrary file writer
 - it only targets the local checkout `.env`
+- `/setup/status` now reports the runtime's real retrieval-default summary as well; when the related env values are unset, a local runtime shows `hash / 64`. The first-run assistant's auto-open `Profile A` baseline is still only a frontend guidance state, not a promise that the HTTP status endpoint will pretend the runtime is `none`
 - the first local `.env` save now also requires a non-empty Dashboard key; leaving it blank is rejected by the backend instead of being treated like an anonymous bootstrap
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
@@ -167,7 +172,8 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 
 **New validation anchors:**
 
-- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, explicit remote embedding-dimension requirements, and Docker fail-closed behavior
+- `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, explicit remote embedding-dimension requirements, the runtime-default `/setup/status` summary, and Docker fail-closed behavior
+- `backend/tests/test_reflection_workflow_api.py` — Verifies reflection rollback requires an explicit `session_id` and still performs best-effort namespace cleanup after the review rollback path
 - `frontend/src/App.test.jsx` — Verifies first-run auto-open behavior, including the browser-only Dashboard-key flow on the proxy-backed path
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — Verifies the Memory page blocks destructive actions when confirm is unavailable
 - `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path

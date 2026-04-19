@@ -92,6 +92,59 @@ async def test_classify_intent_with_llm_uses_reflection_lane_and_prompt_safety(
 
 
 @pytest.mark.asyncio
+async def test_classify_intent_with_llm_accepts_fenced_json_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INTENT_LLM_ENABLED", "true")
+    monkeypatch.setenv("INTENT_LLM_API_BASE", "http://fake.intent/v1")
+    monkeypatch.setenv("INTENT_LLM_MODEL", "fake-intent-model")
+
+    client = SQLiteClient(_SQLITE_MEMORY_URL)
+
+    async def _run_reflection(*, operation: str, task):
+        assert operation == "intent_llm"
+        return await task()
+
+    async def _fake_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+    ) -> Dict[str, Any]:
+        _ = base, endpoint, payload, api_key
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": """
+```json
+{
+  intent: "temporal",
+  confidence: 0.91,
+  signals: ["intent_llm:temporal"]
+}
+```
+""".strip()
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runtime_state.reflection_lanes, "run_reflection", _run_reflection)
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+
+    try:
+        payload = await client.classify_intent_with_llm(
+            "When did the index rebuild finish?"
+        )
+    finally:
+        await client.close()
+
+    assert payload["intent"] == "temporal"
+    assert payload["intent_llm_applied"] is True
+
+
+@pytest.mark.asyncio
 async def test_generate_compact_gist_degrades_when_reflection_lane_times_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

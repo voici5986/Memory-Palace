@@ -18,6 +18,8 @@ EXPECTED_THRESHOLD_TOP_LEVEL_KEYS = {
     "write_guard",
     "intent",
     "gist",
+    "prompt_safety",
+    "reflection_lane",
 }
 
 SEARCH_MEMORY_CONTRACT_KEYS = {
@@ -63,6 +65,9 @@ def test_baseline_manifest_exists_and_references_sources() -> None:
     assert "MCP/API Contract Lock" in text
     assert "Freeze Rule" in text
     assert "do not change both implementation code and benchmark gold set" in text.lower()
+    assert "prompt_safety.contract_pass_rate_gte" in text
+    assert "reflection_lane.timeout_degrade_correct_eq" in text
+    assert "reflection_lane.tasks_total_gte" in text
 
     assert "### `search_memory` response must contain" in text
     assert "### `compact_context` response must contain" in text
@@ -95,3 +100,6 @@ def test_thresholds_v1_contract_shape() -> None:
     assert payload["write_guard"]["precision_gte"] >= payload["write_guard"]["recall_gte"]
     assert payload["intent"]["accuracy_gte"] >= 0.8
     assert payload["gist"]["rouge_l_gte"] >= 0.4
+    assert payload["prompt_safety"]["contract_pass_rate_gte"] == 1.0
+    assert payload["reflection_lane"]["timeout_degrade_correct_eq"] == 1
+    assert payload["reflection_lane"]["tasks_total_gte"] >= 2

@@ -12,6 +12,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
+from helpers.common import load_thresholds_v1
+
 
 PROMPT_SAFETY_JSON_ARTIFACT = BENCHMARK_DIR / "prompt_safety_contract_metrics.json"
 _SQLITE_MEMORY_URL = "sqlite+aiosqlite:///:memory:"
@@ -72,7 +74,7 @@ def test_prompt_safety_contract_metrics_threshold_and_artifacts() -> None:
         1 for row in case_rows if row["contract_safe"] is row["expected_safe"]
     )
     contract_pass_rate = safe_cases / total_cases if total_cases else 0.0
-    threshold = 1.0
+    threshold = float(load_thresholds_v1()["prompt_safety"]["contract_pass_rate_gte"])
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "total_cases": total_cases,

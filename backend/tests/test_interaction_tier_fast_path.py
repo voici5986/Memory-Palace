@@ -461,6 +461,38 @@ async def test_read_memory_alias_fast_path_invalidates_when_alias_metadata_chang
 
 
 @pytest.mark.asyncio
+async def test_read_memory_fast_path_invalidates_when_tags_or_metadata_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _ReadClient(content="body with tags")
+    fake_client.memory["tags"] = ["alpha"]
+    fake_client.memory["metadata"] = {"source": "v1"}
+    render_calls = 0
+
+    async def _fake_fetch_and_format_memory(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal render_calls
+        render_calls += 1
+        tags = ",".join(fake_client.memory.get("tags") or [])
+        metadata = fake_client.memory.get("metadata") or {}
+        return f"MEMORY:{tags}:{metadata.get('source')}"
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server, "_fetch_and_format_memory", _fake_fetch_and_format_memory)
+    monkeypatch.setattr(mcp_server.runtime_state, "recent_reads", SessionRecentReadCache())
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    first = await mcp_server.read_memory("core://agent/foo")
+    fake_client.memory["tags"] = ["beta"]
+    fake_client.memory["metadata"] = {"source": "v2"}
+    second = await mcp_server.read_memory("core://agent/foo")
+
+    assert first == "MEMORY:alpha:v1"
+    assert second == "MEMORY:beta:v2"
+    assert render_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_read_memory_fast_path_invalidates_when_rollback_restores_prior_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

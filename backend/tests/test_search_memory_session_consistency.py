@@ -191,6 +191,110 @@ async def test_search_memory_refreshes_session_cache_hits_from_current_memory(
 
 
 @pytest.mark.asyncio
+async def test_search_memory_reapplies_filters_after_session_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SessionConsistencyClient(
+        current_by_uri={
+            "writer://chapter_1/note": {
+                "id": 7,
+                "content": "writer cached result",
+                "priority": 1,
+                "created_at": "2026-03-20T10:00:00Z",
+            },
+            "core://agent/current": {
+                "id": 8,
+                "content": "core global result",
+                "priority": 1,
+                "created_at": "2026-03-20T12:00:00Z",
+            },
+        },
+        global_results=[
+            {
+                "uri": "core://agent/current",
+                "memory_id": 8,
+                "snippet": "core global result",
+                "priority": 1,
+                "score": 0.91,
+                "updated_at": "2026-03-20T12:00:00Z",
+            }
+        ],
+    )
+
+    async def _fake_session_search(*, session_id, query, limit):
+        _ = session_id, query, limit
+        return [
+            {
+                "uri": "writer://chapter_1/note",
+                "memory_id": 7,
+                "snippet": "writer cached result",
+                "priority": 1,
+                "updated_at": "2026-03-20T10:00:00Z",
+                "match_type": "session_queue",
+                "source": "session_queue",
+            }
+        ]
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+    monkeypatch.setattr(runtime_state.session_cache, "search", _fake_session_search)
+
+    raw = await mcp_server.search_memory(
+        "current result",
+        mode="hybrid",
+        max_results=5,
+        include_session=True,
+        filters={"domain": "core"},
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert [item["uri"] for item in payload["results"]] == ["core://agent/current"]
+    assert payload["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_memory_uses_rewritten_query_for_session_cache_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SessionConsistencyClient(current_by_uri={}, global_results=[])
+    observed_queries: list[str] = []
+
+    def _rewrite_query(query: str):
+        return {
+            "original_query": query,
+            "normalized_query": "normalized query",
+            "rewritten_query": "normalized query",
+            "tokens": ["normalized", "query"],
+            "changed": True,
+        }
+
+    client.preprocess_query = _rewrite_query
+
+    async def _fake_session_search(*, session_id, query, limit):
+        _ = session_id, limit
+        observed_queries.append(query)
+        return []
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+    monkeypatch.setattr(runtime_state.session_cache, "search", _fake_session_search)
+
+    raw = await mcp_server.search_memory(
+        "Original Query",
+        mode="hybrid",
+        max_results=5,
+        include_session=True,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert observed_queries == ["normalized query"]
+
+
+@pytest.mark.asyncio
 async def test_search_memory_drops_results_when_path_revalidation_lookup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

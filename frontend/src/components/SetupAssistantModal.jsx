@@ -147,6 +147,7 @@ import {
  *   open: boolean,
  *   authState?: SetupAuthState | null,
  *   initialStatusProbe?: InitialStatusProbe | null,
+ *   preferBaselineProfile?: boolean | undefined,
  *   onClose?: (() => void) | undefined,
  *   onAuthUpdated?: ((auth: unknown) => void) | undefined,
  * }} SetupAssistantModalProps
@@ -222,7 +223,7 @@ const normalizeRemoteEmbeddingDimDraft = (value) => {
 
 /** @param {SetupSummary} summary */
 const shouldHydrateRetrievalShape = (summary) => (
-  ['none', 'api', 'openai', 'router'].includes(summary.embedding_backend ?? '')
+  ['none', 'hash', 'api', 'openai', 'router'].includes(summary.embedding_backend ?? '')
   || Boolean(summary.reranker_enabled)
 );
 
@@ -495,6 +496,7 @@ export default function SetupAssistantModal({
   open,
   authState = null,
   initialStatusProbe = null,
+  preferBaselineProfile = false,
   onClose,
   onAuthUpdated,
 }) {
@@ -551,9 +553,35 @@ export default function SetupAssistantModal({
         next.intent_llm_enabled = summary.intent_llm_enabled ?? current.intent_llm_enabled;
       }
 
+      const shouldKeepDocumentedBaseline =
+        preferBaselineProfile
+        && summary.dashboard_auth_configured !== true
+        && summary.embedding_backend === 'hash'
+        && summary.reranker_enabled !== true
+        && summary.write_guard_enabled !== true
+        && summary.intent_llm_enabled !== true;
+
+      if (shouldKeepDocumentedBaseline) {
+        if (!touchedFieldsRef.current.has('embedding_backend')) {
+          next.embedding_backend = 'none';
+        }
+        if (!touchedFieldsRef.current.has('embedding_dim')) {
+          next.embedding_dim = '';
+        }
+        if (!touchedFieldsRef.current.has('reranker_enabled')) {
+          next.reranker_enabled = false;
+        }
+        if (!touchedFieldsRef.current.has('write_guard_llm_enabled')) {
+          next.write_guard_llm_enabled = false;
+        }
+        if (!touchedFieldsRef.current.has('intent_llm_enabled')) {
+          next.intent_llm_enabled = false;
+        }
+      }
+
       return clearHiddenRetrievalFields(next);
     });
-  }, []);
+  }, [preferBaselineProfile]);
 
   React.useEffect(() => {
     if (!open) {
@@ -614,6 +642,29 @@ export default function SetupAssistantModal({
       cancelled = true;
     };
   }, [applySetupStatus, authState, initialStatusProbe, open]);
+
+  React.useEffect(() => {
+    if (!open || !initializedOpenRef.current || !initialStatusProbe) {
+      return undefined;
+    }
+
+    if (initialStatusProbe.kind === 'success' && initialStatusProbe.payload) {
+      setStatusErrorState(null);
+      setStatusLoading(false);
+      applySetupStatus(initialStatusProbe.payload);
+      return undefined;
+    }
+
+    if (initialStatusProbe.kind === 'error') {
+      setStatusLoading(false);
+      setStatusErrorState({
+        error: initialStatusProbe.error,
+        fallbackKey: 'setup.messages.statusUnavailable',
+      });
+    }
+
+    return undefined;
+  }, [applySetupStatus, initialStatusProbe, open]);
 
   React.useEffect(() => {
     if (!open) return undefined;

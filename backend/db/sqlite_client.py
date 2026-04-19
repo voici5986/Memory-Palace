@@ -72,6 +72,9 @@ _SQLITE_ADAPTERS_REGISTERED = False
 _DATABASE_URL_PLACEHOLDER_PATTERN = re.compile(r"<[^>]+>|__REPLACE_ME__")
 _NETWORK_FILESYSTEM_TYPES = {"nfs", "nfs4", "cifs", "smb", "smbfs"}
 logger = logging.getLogger(__name__)
+DEFAULT_EMBEDDING_BACKEND = "hash"
+DEFAULT_EMBEDDING_MODEL = "hash-v1"
+DEFAULT_EMBEDDING_DIM = 64
 _LATIN_RETRIEVAL_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 _CJK_RETRIEVAL_TOKEN_PATTERN = re.compile(
     r"[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\U00020000-\U0002EBEF]+"
@@ -501,7 +504,10 @@ class SQLiteClient:
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
         self._embedding_backend = (
-            os.getenv("RETRIEVAL_EMBEDDING_BACKEND", "hash").strip().lower() or "hash"
+            os.getenv("RETRIEVAL_EMBEDDING_BACKEND", DEFAULT_EMBEDDING_BACKEND)
+            .strip()
+            .lower()
+            or DEFAULT_EMBEDDING_BACKEND
         )
         self._embedding_model = (
             self._first_env(
@@ -510,9 +516,9 @@ class SQLiteClient:
                     "ROUTER_EMBEDDING_MODEL",
                     "OPENAI_EMBEDDING_MODEL",
                 ],
-                default="hash-v1",
+                default=DEFAULT_EMBEDDING_MODEL,
             )
-            or "hash-v1"
+            or DEFAULT_EMBEDDING_MODEL
         )
         self._embedding_provider_chain_enabled = self._env_bool(
             "EMBEDDING_PROVIDER_CHAIN_ENABLED", False
@@ -531,7 +537,10 @@ class SQLiteClient:
             self._embedding_backend
         )
         self._embedding_provider_candidates = self._build_embedding_provider_candidates()
-        self._embedding_dim = max(16, self._env_int("RETRIEVAL_EMBEDDING_DIM", 64))
+        self._embedding_dim = max(
+            16,
+            self._env_int("RETRIEVAL_EMBEDDING_DIM", DEFAULT_EMBEDDING_DIM),
+        )
         self._remote_http_timeout_sec = max(
             1.0, self._env_float("RETRIEVAL_REMOTE_TIMEOUT_SEC", 8.0)
         )
@@ -2483,13 +2492,7 @@ class SQLiteClient:
                 "degrade_reasons": degrade_reasons,
             }
 
-        parsed: Optional[Dict[str, Any]] = None
-        try:
-            loaded = json.loads(message_text)
-            if isinstance(loaded, dict):
-                parsed = loaded
-        except (TypeError, ValueError):
-            parsed = None
+        parsed = self._parse_chat_json_object(message_text)
 
         if parsed is None:
             degrade_reasons.append("intent_llm_response_invalid")

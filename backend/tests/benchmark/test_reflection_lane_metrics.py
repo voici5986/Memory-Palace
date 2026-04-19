@@ -15,6 +15,8 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
+from helpers.common import load_thresholds_v1
+
 
 REFLECTION_LANE_JSON_ARTIFACT = BENCHMARK_DIR / "reflection_lane_metrics.json"
 
@@ -62,6 +64,7 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
         timeout_error = str(exc)
 
     status = await lane.status()
+    thresholds = load_thresholds_v1()["reflection_lane"]
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "tasks_total": status.get("tasks_total", 0),
@@ -71,11 +74,15 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
         "last_error": status.get("last_error"),
         "timeout_degrade_correct": timeout_error == "reflection_lane_timeout",
         "gate_pass": timeout_error == "reflection_lane_timeout"
-        and int(status.get("tasks_total", 0)) >= 2,
+        and int(status.get("tasks_total", 0))
+        >= int(thresholds["tasks_total_gte"]),
     }
     _write_artifact(payload)
 
     assert "tasks_total" in status
     assert "wait_ms_p95" in status
     assert payload["gate_pass"] is True
+    assert int(payload["timeout_degrade_correct"]) == int(
+        thresholds["timeout_degrade_correct_eq"]
+    )
     assert REFLECTION_LANE_JSON_ARTIFACT.exists()

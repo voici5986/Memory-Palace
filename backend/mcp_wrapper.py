@@ -342,6 +342,24 @@ def _forward_stream_chunked(source, destination, *, stop_event: threading.Event)
         destination.flush()
 
 
+def _terminate_process_on_io_error(
+    process: subprocess.Popen[bytes], *, wait_timeout: float = 1.0
+) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except Exception:  # pragma: no cover
+        return
+    try:
+        process.wait(timeout=wait_timeout)
+    except Exception:  # pragma: no cover
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
 def main() -> None:
     process = spawn_backend_process()
 
@@ -351,6 +369,7 @@ def main() -> None:
     def record_io_error(channel: str, exc: Exception) -> None:
         io_errors.append((channel, str(exc)))
         stop_forwarding.set()
+        _terminate_process_on_io_error(process)
 
     def forward_stdin() -> None:
         try:

@@ -462,11 +462,17 @@ async def _resolve_explicit_learn_service() -> Callable[..., Awaitable[Dict[str,
 async def _resolve_reflection_workflow_service() -> Callable[..., Awaitable[Dict[str, Any]]]:
     global _REFLECTION_WORKFLOW_SERVICE
 
-    if callable(_REFLECTION_WORKFLOW_SERVICE):
+    if callable(_REFLECTION_WORKFLOW_SERVICE) and (
+        str(getattr(_REFLECTION_WORKFLOW_SERVICE, "__module__", "") or "").strip()
+        != "mcp_server"
+    ):
         return _REFLECTION_WORKFLOW_SERVICE
 
     async with _REFLECTION_WORKFLOW_SERVICE_LOCK:
-        if callable(_REFLECTION_WORKFLOW_SERVICE):
+        if callable(_REFLECTION_WORKFLOW_SERVICE) and (
+            str(getattr(_REFLECTION_WORKFLOW_SERVICE, "__module__", "") or "").strip()
+            != "mcp_server"
+        ):
             return _REFLECTION_WORKFLOW_SERVICE
         try:
             module = importlib.import_module("mcp_server")
@@ -2026,6 +2032,16 @@ def _sanitize_search_event(raw: Any) -> Optional[Dict[str, Any]]:
         except (TypeError, ValueError):
             return 0
 
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    latency_ms = _safe_float(raw.get("latency_ms") or 0.0)
+    if latency_ms is None:
+        return None
+
     degrade_reasons_raw = raw.get("degrade_reasons")
     degrade_reasons = (
         [str(item) for item in degrade_reasons_raw if isinstance(item, str) and item.strip()]
@@ -2037,7 +2053,7 @@ def _sanitize_search_event(raw: Any) -> Optional[Dict[str, Any]]:
         "timestamp": str(raw.get("timestamp") or _utc_iso_now()),
         "mode_requested": str(raw.get("mode_requested") or "hybrid"),
         "mode_applied": str(raw.get("mode_applied") or "hybrid"),
-        "latency_ms": round(float(raw.get("latency_ms") or 0.0), 3),
+        "latency_ms": round(latency_ms, 3),
         "degraded": bool(raw.get("degraded")),
         "degrade_reasons": degrade_reasons,
         "session_count": _safe_int(raw.get("session_count") or 0),
@@ -2053,6 +2069,22 @@ def _sanitize_search_event(raw: Any) -> Optional[Dict[str, Any]]:
             raw.get("strategy_template_applied") or "default"
         ),
     }
+
+
+def _resolve_event_intent(item: Dict[str, Any]) -> str:
+    intent = str(item.get("intent") or "unknown")
+    intent_applied = str(item.get("intent_applied") or "").strip()
+    if intent_applied and intent_applied.lower() != "unknown":
+        return intent_applied
+    return intent
+
+
+def _resolve_event_strategy(item: Dict[str, Any]) -> str:
+    strategy = str(item.get("strategy_template") or "default")
+    strategy_applied = str(item.get("strategy_template_applied") or "").strip()
+    if strategy_applied and strategy_applied.lower() != "default":
+        return strategy_applied
+    return strategy
 
 
 def _serialize_search_events(events: List[Dict[str, Any]]) -> str:
@@ -2121,11 +2153,11 @@ def _normalize_search_filters(raw_filters: Dict[str, Any]) -> Dict[str, Any]:
 
     domain = raw_filters.get("domain")
     if isinstance(domain, str) and domain.strip():
-        normalized["domain"] = domain.strip()
+        normalized["domain"] = domain.strip().lower()
 
     path_prefix = raw_filters.get("path_prefix")
     if isinstance(path_prefix, str) and path_prefix.strip():
-        normalized["path_prefix"] = path_prefix.strip()
+        normalized["path_prefix"] = path_prefix.strip().strip("/")
 
     max_priority = raw_filters.get("max_priority", raw_filters.get("priority"))
     if max_priority is not None:
@@ -2400,18 +2432,8 @@ def _build_search_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
     mode_counts = Counter(str(item.get("mode_applied") or "unknown") for item in events)
-    intent_counts = Counter(
-        str(item.get("intent_applied") or item.get("intent") or "unknown")
-        for item in events
-    )
-    strategy_counts = Counter(
-        str(
-            item.get("strategy_template_applied")
-            or item.get("strategy_template")
-            or "default"
-        )
-        for item in events
-    )
+    intent_counts = Counter(_resolve_event_intent(item) for item in events)
+    strategy_counts = Counter(_resolve_event_strategy(item) for item in events)
     degrade_reason_counts = Counter()
     for item in events:
         reasons = item.get("degrade_reasons") or []
@@ -3166,6 +3188,8 @@ async def _rollback_job(
     prefer_learn: bool,
     allow_fallback: bool,
     not_found_error: str,
+    expected_session_id: Optional[str] = None,
+    expected_actor_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     current_job, job_pool = await _load_job_from_pool(
         job_id,
@@ -3177,6 +3201,30 @@ async def _rollback_job(
 
     current_status = str(current_job.get("status") or "unknown")
     current_job_type = _normalize_import_job_type(current_job.get("job_type"))
+    job_session_id = str(current_job.get("session_id") or "").strip() or None
+    requested_session_id = str(expected_session_id or "").strip() or None
+    if requested_session_id is not None and requested_session_id != job_session_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "import_job_session_mismatch",
+                "job_id": job_id,
+                "expected_session_id": requested_session_id,
+                "actual_session_id": job_session_id,
+            },
+        )
+    job_actor_id = str(current_job.get("actor_id") or "").strip() or None
+    requested_actor_id = str(expected_actor_id or "").strip() or None
+    if requested_actor_id is not None and requested_actor_id != job_actor_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "import_job_actor_mismatch",
+                "job_id": job_id,
+                "expected_actor_id": requested_actor_id,
+                "actual_actor_id": job_actor_id,
+            },
+        )
     review_snapshot = _extract_review_snapshot(current_job)
     created_memories = (
         current_job.get("created_memories")
@@ -3237,19 +3285,39 @@ async def _rollback_job(
 
     job_type = _normalize_import_job_type(transitioned_job.get("job_type"))
     try:
+        client = get_sqlite_client()
+        created_namespace_memories = []
+        if job_type == "learn":
+            created_namespace_memories = _normalize_created_namespace_memories(
+                transitioned_job.get("created_namespace_memories")
+            )
         if review_snapshot is not None:
             rollback_summary = await _rollback_review_snapshot(
                 review_snapshot=review_snapshot,
                 reason_text=str(payload.reason or "manual_rollback").strip()
                 or "manual_rollback",
             )
+            namespace_cleanup = await _best_effort_cleanup_learn_namespace(
+                client=client,
+                created_namespace_memories=created_namespace_memories,
+                session_id=str(transitioned_job.get("session_id") or "").strip(),
+                job_id=str(transitioned_job.get("job_id") or job_id),
+            )
+            namespace_attempted = bool(namespace_cleanup.get("attempted_paths"))
+            namespace_has_skipped = bool(namespace_cleanup.get("skipped"))
+            rollback_summary["namespace_cleanup"] = namespace_cleanup
+            rollback_summary["side_effects_audit_required"] = bool(
+                rollback_summary.get("side_effects_audit_required")
+            ) or namespace_attempted
+            rollback_summary["residual_artifacts_review_required"] = bool(
+                rollback_summary.get("residual_artifacts_review_required")
+            ) or namespace_attempted or namespace_has_skipped
+            rollback_summary["side_effects_note"] = (
+                "review_snapshot_rollback_with_best_effort_namespace_cleanup"
+                if namespace_attempted
+                else "review_snapshot_rollback"
+            )
         else:
-            client = get_sqlite_client()
-            created_namespace_memories = []
-            if job_type == "learn":
-                created_namespace_memories = _normalize_created_namespace_memories(
-                    transitioned_job.get("created_namespace_memories")
-                )
             rollback_summary = await _rollback_import_created_memories(
                 client=client,
                 created_memories=created_memories,
@@ -3273,7 +3341,11 @@ async def _rollback_job(
     transitioned_job["rollback"] = rollback_summary
     await update_job(job_id, transitioned_job)
 
-    rollback_operation = "learn_rollback" if job_type == "learn" else "import_rollback"
+    workflow_operation = str(transitioned_job.get("workflow_operation") or "").strip()
+    if workflow_operation == "reflection_workflow":
+        rollback_operation = "reflection_workflow"
+    else:
+        rollback_operation = "learn_rollback" if job_type == "learn" else "import_rollback"
     await _record_import_learn_event(
         event_type="rollback",
         operation=rollback_operation,
@@ -3307,33 +3379,6 @@ async def _rollback_job(
             ),
         },
     )
-    if str(transitioned_job.get("workflow_operation") or "").strip() == "reflection_workflow":
-        await _record_import_learn_event(
-            event_type="rollback",
-            operation="reflection_workflow",
-            decision="rejected" if has_errors else "rolled_back",
-            reason=(
-                "rollback_failed"
-                if has_errors
-                else str(payload.reason or "manual_rollback").strip()
-            ),
-            source=str(transitioned_job.get("source") or "session_summary"),
-            session_id=str(transitioned_job.get("session_id") or ""),
-            actor_id=str(transitioned_job.get("actor_id") or "") or None,
-            batch_id=str(transitioned_job.get("job_id") or job_id),
-            metadata={
-                "rolled_back_count": _safe_non_negative_int(
-                    rollback_summary.get("rolled_back_count")
-                ),
-                "error_count": _safe_non_negative_int(rollback_summary.get("error_count")),
-                "side_effects_audit_required": bool(
-                    rollback_summary.get("side_effects_audit_required")
-                ),
-                "residual_artifacts_review_required": bool(
-                    rollback_summary.get("residual_artifacts_review_required")
-                ),
-            },
-        )
 
     return {
         "ok": not has_errors,
@@ -3352,7 +3397,6 @@ async def _reflection_workflow_rollback_handler(
     session_id: Optional[str],
     actor_id: Optional[str],
 ) -> Dict[str, Any]:
-    _ = session_id, actor_id
     return await _rollback_job(
         job_id=job_id,
         payload=ImportRollbackRequest(
@@ -3361,6 +3405,8 @@ async def _reflection_workflow_rollback_handler(
         prefer_learn=True,
         allow_fallback=False,
         not_found_error="learn_job_not_found",
+        expected_session_id=session_id,
+        expected_actor_id=actor_id,
     )
 
 
@@ -3574,6 +3620,16 @@ async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
                 "reason": "job_id_required",
                 "mode": normalized_mode_lower,
                 "message": "reflection workflow rollback requires job_id",
+            },
+        )
+    if normalized_mode_lower == "rollback" and not normalized_session_id:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "reflection_workflow_invalid_request",
+                "reason": "session_id_required",
+                "mode": normalized_mode_lower,
+                "message": "session_id is required",
             },
         )
     try:
@@ -4237,9 +4293,14 @@ async def run_observability_search(payload: SearchConsoleRequest):
             detail="mode must be one of: keyword, semantic, hybrid",
         )
 
-    interaction_tier, raw_filters, _ = _resolve_interaction_tier(
+    scope_hint_raw: Optional[Any] = payload.scope_hint
+    if scope_hint_raw is None and isinstance(payload.filters, dict):
+        scope_hint_raw = payload.filters.get("scope_hint")
+
+    interaction_tier, raw_filters, scope_hint_raw = _resolve_interaction_tier(
         payload.filters,
         requested_tier=payload.interaction_tier,
+        requested_scope_hint=scope_hint_raw,
         allowed_tiers=_ALLOWED_INTERACTION_TIERS,
         default_tier=_DEFAULT_INTERACTION_TIER,
     )
@@ -4249,9 +4310,6 @@ async def run_observability_search(payload: SearchConsoleRequest):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    scope_hint_raw: Optional[Any] = payload.scope_hint
-    if scope_hint_raw is None and isinstance(payload.filters, dict):
-        scope_hint_raw = payload.filters.get("scope_hint")
     try:
         normalized_scope_hint = _normalize_scope_hint(scope_hint_raw)
         filters, scope_resolution = _merge_scope_hint_with_filters(
@@ -4387,68 +4445,131 @@ async def run_observability_search(payload: SearchConsoleRequest):
         else (True if interaction_tier == "fast" else _ENABLE_SESSION_FIRST_SEARCH)
     )
 
+    from mcp_server import (
+        _apply_local_filters_to_results as _apply_local_filters_to_results_shared,
+        _extract_search_payload as _extract_search_payload_shared,
+        _normalize_search_item as _normalize_search_item_shared,
+        _revalidate_search_results as _revalidate_search_results_shared,
+        _sort_search_results_for_response as _sort_search_results_for_response_shared,
+        _try_client_method_variants as _try_client_method_variants_shared,
+    )
+
     started = time.perf_counter()
     try:
-        try:
-            backend_payload = await client.search_advanced(
-                query=query_effective,
-                mode=mode,
-                max_results=payload.max_results,
-                candidate_multiplier=resolved_candidate_multiplier,
-                filters=filters,
-                intent_profile=intent_for_search,
-            )
-        except TypeError as exc:
-            message = str(exc)
-            if "unexpected keyword argument 'intent_profile'" not in message:
-                raise
-            preprocess_degrade_reasons.append("intent_profile_not_supported")
-            backend_payload = await client.search_advanced(
-                query=query_effective,
-                mode=mode,
-                max_results=payload.max_results,
-                candidate_multiplier=resolved_candidate_multiplier,
-                filters=filters,
-            )
+        method_name, kwargs_used, raw_result = await _try_client_method_variants_shared(
+            client,
+            [
+                "search_advanced",
+                "search_memories",
+                "search_memory",
+                "search_with_filters",
+                "search_v2",
+                "search",
+            ],
+            [
+                {
+                    "query": query_effective,
+                    "mode": mode,
+                    "max_results": payload.max_results,
+                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "filters": filters,
+                    "intent_profile": intent_for_search,
+                },
+                {
+                    "query": query_effective,
+                    "mode": mode,
+                    "max_results": payload.max_results,
+                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "filters": filters,
+                },
+                {
+                    "query": query_effective,
+                    "mode": mode,
+                    "max_results": payload.max_results,
+                    "candidate_multiplier": resolved_candidate_multiplier,
+                    **filters,
+                },
+                {
+                    "query": query_effective,
+                    "mode": mode,
+                    "limit": payload.max_results * resolved_candidate_multiplier,
+                    **filters,
+                },
+                {
+                    "query": query_effective,
+                    "limit": payload.max_results * resolved_candidate_multiplier,
+                    "domain": filters.get("domain"),
+                },
+            ],
+        )
+        if method_name is None:
+            raise HTTPException(status_code=500, detail="No compatible sqlite_client search API found.")
+        backend_payload = raw_result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     latency_ms = (time.perf_counter() - started) * 1000.0
 
-    if not isinstance(backend_payload, dict):
-        backend_payload = {}
-    backend_metadata = (
-        backend_payload.get("metadata")
-        if isinstance(backend_payload.get("metadata"), dict)
-        else {}
+    global_results, backend_metadata = _extract_search_payload_shared(backend_payload)
+    if kwargs_used and "intent_profile" not in kwargs_used:
+        preprocess_degrade_reasons.append("intent_profile_not_supported")
+    global_results, local_filter_reasons = _apply_local_filters_to_results_shared(
+        global_results,
+        filters,
     )
-
-    global_results_raw = backend_payload.get("results")
-    global_results = global_results_raw if isinstance(global_results_raw, list) else []
+    for reason in local_filter_reasons:
+        if reason not in preprocess_degrade_reasons:
+            preprocess_degrade_reasons.append(reason)
 
     session_results: List[Dict[str, Any]] = []
-    if include_session_queue:
+    if include_session_queue and payload.session_id:
         try:
             session_rows = await runtime_state.session_cache.search(
-                session_id=payload.session_id or "api-observability",
-                query=query,
+                session_id=payload.session_id,
+                query=query_effective,
                 limit=payload.max_results,
             )
             session_results = [
-                _session_row_to_result(row)
+                _normalize_search_item_shared(_session_row_to_result(row))
                 for row in session_rows
                 if isinstance(row, dict)
             ]
+            session_results, session_filter_reasons = _apply_local_filters_to_results_shared(
+                session_results,
+                filters,
+            )
+            for reason in session_filter_reasons:
+                if reason not in preprocess_degrade_reasons:
+                    preprocess_degrade_reasons.append(reason)
         except Exception:
             session_results = []
             preprocess_degrade_reasons.append("session_cache_lookup_failed")
+    elif include_session_queue and not payload.session_id:
+        preprocess_degrade_reasons.append("session_cache_requires_session_id")
 
     merged_results, session_first_metrics = _merge_session_global_results(
         session_results=session_results,
         global_results=global_results,
         limit=payload.max_results,
     )
+    merged_results, revalidation_metrics = await _revalidate_search_results_shared(
+        client=client,
+        results=merged_results,
+    )
+    if int(revalidation_metrics.get("revalidate_lookup_failed") or 0) > 0:
+        preprocess_degrade_reasons.append("path_revalidation_lookup_failed")
+    merged_results, post_filter_reasons = _apply_local_filters_to_results_shared(
+        merged_results,
+        filters,
+    )
+    for reason in post_filter_reasons:
+        if reason not in preprocess_degrade_reasons:
+            preprocess_degrade_reasons.append(reason)
+    merged_results = _sort_search_results_for_response_shared(merged_results)
+    session_first_metrics.update(revalidation_metrics)
 
     degrade_reasons = backend_payload.get("degrade_reasons")
     if not isinstance(degrade_reasons, list):
@@ -4460,7 +4581,9 @@ async def run_observability_search(payload: SearchConsoleRequest):
         if reason not in degrade_reasons:
             degrade_reasons.append(reason)
 
-    mode_applied = str(backend_payload.get("mode") or mode)
+    mode_applied = str(backend_metadata.get("mode") or mode)
+    if kwargs_used and "mode" not in kwargs_used:
+        mode_applied = "keyword"
     degraded = bool(backend_payload.get("degraded")) or bool(degrade_reasons)
     intent_profile_supported = "intent_profile_not_supported" not in degrade_reasons
     intent_applied = str(

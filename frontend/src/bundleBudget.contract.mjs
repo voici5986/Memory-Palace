@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const MAX_ENTRY_CHUNK_BYTES = 600 * 1024
+const MAX_ENTRY_CHUNK_BYTES = 500 * 1024
 const MAX_TOTAL_JS_BYTES = 650 * 1024
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const NPM_EXECUTABLE = process.platform === 'win32' ? 'npm.cmd' : 'npm'

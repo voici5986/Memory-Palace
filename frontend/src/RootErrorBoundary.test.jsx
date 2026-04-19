@@ -1,6 +1,6 @@
 import React from 'react';
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import RootErrorBoundary from './RootErrorBoundary';
 import i18n from './i18n';
@@ -42,5 +42,31 @@ describe('RootErrorBoundary', () => {
     expect(screen.getByText('请刷新页面后重试。')).toBeInTheDocument();
 
     await i18n.changeLanguage('en');
+  });
+
+  it('offers a refresh action from the fallback shell', () => {
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, reload },
+    });
+
+    try {
+      void i18n.changeLanguage('en');
+      render(
+        <RootErrorBoundary>
+          <ThrowOnRender />
+        </RootErrorBoundary>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('common.actions.refresh') }));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 });

@@ -120,8 +120,9 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 读写鉴权
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 - `backend/tests/test_reflection_workflow_service.py` — 验证 Dashboard `/browse` 写入可供 reflection workflow 继续使用，以及 `reflection execute` 进入 write lane 后的并发边界
+- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 需要显式 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `backend/tests/test_reflection_observability_summary.py` — 验证 `reflection_workflow` 统计在 summary 层是 restart-stable
-- `backend/tests/test_setup_api.py` — 验证 `openai` embedding backend、远端 `RETRIEVAL_EMBEDDING_DIM` 显式必填，以及 setup fail-closed 边界
+- `backend/tests/test_setup_api.py` — 验证 `openai` embedding backend、远端 `RETRIEVAL_EMBEDDING_DIM` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 setup fail-closed 边界
 - `frontend/src/App.test.jsx` — 验证 proxy-held auth 已生效时首启向导不误弹
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed
 
@@ -162,6 +163,7 @@ Authorization: Bearer <MCP_API_KEY>
 - `/setup/config` 的**写入能力只允许直连本机回环地址**；即使拿着有效 `MCP_API_KEY`，远端请求也不能直接改主机 `.env`
 - 向导接口只允许写入一组白名单 env 键，不支持任意文件写入
 - 现阶段只允许写本地 checkout 的 `.env`
+- `/setup/status` 现在会按当前运行时真实默认值返回检索摘要；如果相关 env 全缺失，本地运行态会显示成 `hash / 64`。首启向导里自动弹出的 `Profile A` 起步表单仍然只是前端引导口径，不是说这个 HTTP 状态接口会把真实运行态伪装成 `none`
 - 第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；留空会被后端直接拒绝，不再当成匿名自举
 - 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
 - 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
@@ -175,7 +177,8 @@ Authorization: Bearer <MCP_API_KEY>
 
 **新增测试锚点：**
 
-- `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填和 Docker fail-closed
+- `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 Docker fail-closed
+- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 需要显式 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `frontend/src/App.test.jsx` — 验证首启自动弹出、“只保存 Dashboard 密钥”交互，以及 proxy-held auth 已生效时不误弹
 - `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed

@@ -5,6 +5,12 @@ export function RootErrorFallback() {
   const appName = i18n.t('common.appName')
   const title = i18n.t('app.errorBoundary.title')
   const message = i18n.t('app.errorBoundary.message')
+  const refreshLabel = i18n.t('common.actions.refresh')
+
+  const handleRefresh = () => {
+    if (typeof window === 'undefined') return
+    window.location?.reload?.()
+  }
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10">
@@ -21,6 +27,13 @@ export function RootErrorFallback() {
         <p className="mt-3 text-base leading-7 text-slate-600">
           {message}
         </p>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          className="mt-6 inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400/60"
+        >
+          {refreshLabel}
+        </button>
       </section>
     </main>
   )

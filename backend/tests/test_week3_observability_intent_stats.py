@@ -226,6 +226,61 @@ async def test_observability_marks_strategy_applied_from_backend_metadata_on_leg
 
 
 @pytest.mark.asyncio
+async def test_observability_summary_prefers_rule_intent_and_strategy_on_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _LegacyIntentClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.reflection_lanes, "status", _write_lane_status
+    )
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    maintenance_api._search_events_loaded = False
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="When did we rebuild index?",
+        mode="hybrid",
+        include_session=False,
+    )
+    result = await maintenance_api.run_observability_search(payload)
+    summary = await maintenance_api.get_observability_summary()
+
+    assert result["intent"] == "temporal"
+    assert result["intent_applied"] == "unknown"
+    assert summary["search_stats"]["intent_breakdown"]["temporal"] == 1
+    assert summary["search_stats"]["strategy_hit_breakdown"][
+        "temporal_time_filtered"
+    ] == 1
+
+
+@pytest.mark.asyncio
 async def test_observability_search_scope_hint_applies_and_echoes_strategy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -254,6 +309,33 @@ async def test_observability_search_scope_hint_applies_and_echoes_strategy(
     assert result["scope_strategy_applied"] == "uri_prefix"
     assert result["scope_effective"] == {"domain": "core", "path_prefix": "agent"}
     assert fake_client.received_filters == {"domain": "core", "path_prefix": "agent"}
+
+
+@pytest.mark.asyncio
+async def test_observability_search_accepts_scope_hint_deep_as_interaction_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeIntentClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="deep compare release rationale",
+        mode="hybrid",
+        include_session=False,
+        scope_hint="deep",
+    )
+    result = await maintenance_api.run_observability_search(payload)
+
+    assert result["interaction_tier"] == "deep"
+    assert result["scope_hint"] is None
+    assert result["scope_hint_applied"] is False
+    assert result["scope_strategy_applied"] == "none"
+    assert fake_client.received_filters == {}
 
 
 @pytest.mark.asyncio
@@ -388,6 +470,62 @@ async def test_observability_search_events_are_persisted_across_memory_reset(
     summary = await maintenance_api.get_observability_summary()
     assert summary["search_stats"]["total_queries"] == 1
     assert summary["search_stats"]["intent_breakdown"]["temporal"] == 1
+
+
+@pytest.mark.asyncio
+async def test_observability_persisted_events_skip_invalid_entries_and_preserve_legacy_fallback_stats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeIntentClient()
+    fake_client.meta_store[maintenance_api._SEARCH_EVENTS_META_KEY] = (
+        '[{"timestamp":"2026-04-18T10:00:00Z","latency_ms":"oops","intent":"factual",'
+        '"intent_applied":"factual","strategy_template":"factual_high_precision",'
+        '"strategy_template_applied":"factual_high_precision"},'
+        '{"timestamp":"2026-04-18T10:01:00Z","latency_ms":12.5,"intent":"temporal",'
+        '"intent_applied":"unknown","strategy_template":"temporal_time_filtered",'
+        '"strategy_template_applied":"default"}]'
+    )
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.reflection_lanes, "status", _write_lane_status
+    )
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    maintenance_api._search_events_loaded = False
+
+    summary = await maintenance_api.get_observability_summary()
+
+    assert summary["search_stats"]["total_queries"] == 1
+    assert summary["search_stats"]["intent_breakdown"]["temporal"] == 1
+    assert summary["search_stats"]["strategy_hit_breakdown"][
+        "temporal_time_filtered"
+    ] == 1
 
 
 @pytest.mark.asyncio

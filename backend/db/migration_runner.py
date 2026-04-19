@@ -14,6 +14,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,9 @@ _ADD_COLUMN_PATTERN = re.compile(
     r"^ALTER\s+TABLE\s+.+\s+ADD\s+COLUMN\s+.+$",
     re.IGNORECASE | re.DOTALL,
 )
+_DEFAULT_MIGRATION_BUSY_TIMEOUT_MS = 5000
+_DEFAULT_MIGRATION_LOCKED_RETRIES = 3
+_MIGRATION_LOCKED_RETRY_DELAY_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ class MigrationRunner:
         with sqlite3.connect(self.database_file) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute(f"PRAGMA busy_timeout = {_DEFAULT_MIGRATION_BUSY_TIMEOUT_MS}")
             self._ensure_schema_table(conn)
 
             applied_map = self._load_applied_checksums(conn)
@@ -172,17 +177,7 @@ class MigrationRunner:
                         )
                     continue
 
-                self._execute_sql_script(conn, migration.path.read_text(encoding="utf-8"))
-                conn.execute(
-                    "INSERT INTO schema_migrations(version, applied_at, checksum) "
-                    "VALUES (?, ?, ?)",
-                    (
-                        migration.version,
-                        datetime.now(timezone.utc).isoformat(),
-                        migration.checksum,
-                    ),
-                )
-                conn.commit()
+                self._apply_migration_with_retry(conn, migration)
                 applied_versions.append(migration.version)
 
             return applied_versions
@@ -246,6 +241,34 @@ class MigrationRunner:
         cursor = conn.execute("SELECT version, checksum FROM schema_migrations")
         return {str(row["version"]): str(row["checksum"]) for row in cursor.fetchall()}
 
+    def _apply_migration_with_retry(
+        self, conn: sqlite3.Connection, migration: MigrationFile
+    ) -> None:
+        for attempt in range(_DEFAULT_MIGRATION_LOCKED_RETRIES):
+            try:
+                self._execute_sql_script(
+                    conn, migration.path.read_text(encoding="utf-8")
+                )
+                conn.execute(
+                    "INSERT INTO schema_migrations(version, applied_at, checksum) "
+                    "VALUES (?, ?, ?)",
+                    (
+                        migration.version,
+                        datetime.now(timezone.utc).isoformat(),
+                        migration.checksum,
+                    ),
+                )
+                conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                if not self._is_database_locked_error(exc):
+                    raise
+                if hasattr(conn, "rollback"):
+                    conn.rollback()
+                if attempt >= _DEFAULT_MIGRATION_LOCKED_RETRIES - 1:
+                    raise
+                time.sleep(_MIGRATION_LOCKED_RETRY_DELAY_SECONDS * (attempt + 1))
+
     @staticmethod
     def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
         for statement in MigrationRunner._iter_sql_statements(script):
@@ -262,22 +285,82 @@ class MigrationRunner:
         buffer: List[str] = []
         in_single_quote = False
         in_double_quote = False
-        previous = ""
+        in_line_comment = False
+        in_block_comment = False
+        index = 0
 
-        for char in script:
-            if char == "'" and not in_double_quote and previous != "\\":
-                in_single_quote = not in_single_quote
-            elif char == '"' and not in_single_quote and previous != "\\":
-                in_double_quote = not in_double_quote
+        while index < len(script):
+            char = script[index]
+            next_char = script[index + 1] if index + 1 < len(script) else ""
 
-            if char == ";" and not in_single_quote and not in_double_quote:
+            if in_line_comment:
+                if char == "\n":
+                    in_line_comment = False
+                index += 1
+                continue
+
+            if in_block_comment:
+                if char == "*" and next_char == "/":
+                    in_block_comment = False
+                    index += 2
+                    continue
+                index += 1
+                continue
+
+            if in_single_quote:
+                buffer.append(char)
+                if char == "'" and next_char == "'":
+                    buffer.append(next_char)
+                    index += 2
+                    continue
+                if char == "'":
+                    in_single_quote = False
+                index += 1
+                continue
+
+            if in_double_quote:
+                buffer.append(char)
+                if char == '"' and next_char == '"':
+                    buffer.append(next_char)
+                    index += 2
+                    continue
+                if char == '"':
+                    in_double_quote = False
+                index += 1
+                continue
+
+            if char == "-" and next_char == "-":
+                in_line_comment = True
+                index += 2
+                continue
+
+            if char == "/" and next_char == "*":
+                in_block_comment = True
+                index += 2
+                continue
+
+            if char == "'":
+                in_single_quote = True
+                buffer.append(char)
+                index += 1
+                continue
+
+            if char == '"':
+                in_double_quote = True
+                buffer.append(char)
+                index += 1
+                continue
+
+            if char == ";":
                 candidate = "".join(buffer).strip()
                 if candidate and not MigrationRunner._is_comment_only(candidate):
                     statements.append(candidate)
                 buffer = []
-            else:
-                buffer.append(char)
-            previous = char
+                index += 1
+                continue
+
+            buffer.append(char)
+            index += 1
 
         tail = "".join(buffer).strip()
         if tail and not MigrationRunner._is_comment_only(tail):
@@ -298,6 +381,11 @@ class MigrationRunner:
         if not _ADD_COLUMN_PATTERN.match(statement):
             return False
         return "duplicate column name" in str(exc).lower()
+
+    @staticmethod
+    def _is_database_locked_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database schema is locked" in message
 
 
 async def apply_pending_migrations(

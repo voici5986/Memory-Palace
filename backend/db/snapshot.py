@@ -51,6 +51,7 @@ _SNAPSHOT_RETENTION_MAX_AGE_DAYS = 90
 _SNAPSHOT_RETENTION_MAX_SESSIONS = 64
 logger = logging.getLogger(__name__)
 _SCOPE_MARKER_FILENAME = ".scope.json"
+_SCOPED_SESSION_DIRNAME = ".scoped"
 
 
 def _get_ctypes_module():
@@ -274,23 +275,97 @@ class SnapshotManager:
         """Get the directory path for a session."""
         safe_session_id = self._validate_session_id(session_id)
         return os.path.join(self.snapshot_dir, safe_session_id)
-    
-    def _get_resources_dir(self, session_id: str) -> str:
+
+    @staticmethod
+    def _scope_fingerprint(scope: Optional[Dict[str, str]] = None) -> str:
+        payload = scope or _resolve_current_database_scope()
+        return str(payload.get("database_fingerprint") or "").strip()
+
+    def _get_scoped_sessions_root(self, database_fingerprint: str) -> str:
+        return os.path.join(
+            self.snapshot_dir,
+            _SCOPED_SESSION_DIRNAME,
+            database_fingerprint,
+        )
+
+    def _get_scoped_session_dir(
+        self, session_id: str, database_fingerprint: str
+    ) -> str:
+        safe_session_id = self._validate_session_id(session_id)
+        return os.path.join(
+            self._get_scoped_sessions_root(database_fingerprint),
+            safe_session_id,
+        )
+
+    def _get_resources_dir(
+        self, session_id: str, *, session_dir: Optional[str] = None
+    ) -> str:
         """Get the resources subdirectory for a session."""
-        return os.path.join(self._get_session_dir(session_id), "resources")
-    
-    def _get_manifest_path(self, session_id: str) -> str:
+        resolved_session_dir = session_dir or self._resolve_session_dir(session_id)
+        return os.path.join(resolved_session_dir, "resources")
+
+    def _get_manifest_path(
+        self, session_id: str, *, session_dir: Optional[str] = None
+    ) -> str:
         """Get the manifest file path for a session."""
-        return os.path.join(self._get_session_dir(session_id), "manifest.json")
-    
-    def _get_snapshot_path(self, session_id: str, resource_id: str) -> str:
+        resolved_session_dir = session_dir or self._resolve_session_dir(session_id)
+        return os.path.join(resolved_session_dir, "manifest.json")
+
+    def _get_snapshot_path(
+        self,
+        session_id: str,
+        resource_id: str,
+        *,
+        session_dir: Optional[str] = None,
+    ) -> str:
         """Get the snapshot file path for a specific resource."""
         safe_id = self._sanitize_resource_id(resource_id)
-        return os.path.join(self._get_resources_dir(session_id), f"{safe_id}.json")
+        return os.path.join(
+            self._get_resources_dir(session_id, session_dir=session_dir),
+            f"{safe_id}.json",
+        )
 
-    def _get_scope_marker_path(self, session_id: str) -> str:
+    def _get_scope_marker_path(
+        self, session_id: str, *, session_dir: Optional[str] = None
+    ) -> str:
         """Persist session database scope outside manifest recovery paths."""
-        return os.path.join(self._get_session_dir(session_id), _SCOPE_MARKER_FILENAME)
+        resolved_session_dir = session_dir or self._resolve_session_dir(session_id)
+        return os.path.join(resolved_session_dir, _SCOPE_MARKER_FILENAME)
+
+    def _resolve_session_dir(
+        self, session_id: str, *, scope: Optional[Dict[str, str]] = None
+    ) -> str:
+        current_scope = scope or _resolve_current_database_scope()
+        current_fingerprint = self._scope_fingerprint(current_scope)
+        primary_dir = self._get_session_dir(session_id)
+        scoped_dir = (
+            self._get_scoped_session_dir(session_id, current_fingerprint)
+            if current_fingerprint
+            else primary_dir
+        )
+
+        if os.path.isdir(scoped_dir):
+            return scoped_dir
+        if not os.path.isdir(primary_dir):
+            return primary_dir
+        if scoped_dir == primary_dir:
+            return primary_dir
+
+        manifest_path = self._get_manifest_path(session_id, session_dir=primary_dir)
+        scope_marker_path = self._get_scope_marker_path(
+            session_id, session_dir=primary_dir
+        )
+        if not os.path.exists(manifest_path) and not os.path.exists(scope_marker_path):
+            return primary_dir
+
+        primary_manifest = self._load_manifest_from_dir(
+            session_id,
+            primary_dir,
+            current_scope=current_scope,
+        )
+        if self._manifest_matches_scope(primary_manifest, current_scope):
+            return primary_dir
+        return scoped_dir
 
     def _get_session_lock_path(self, session_id: str) -> str:
         """Store per-session write locks outside the session tree."""
@@ -470,8 +545,12 @@ class SnapshotManager:
             "database_label": label_match.group(1) if label_match else "",
         }
 
-    def _load_scope_marker(self, session_id: str) -> Optional[Dict[str, str]]:
-        scope_marker_path = self._get_scope_marker_path(session_id)
+    def _load_scope_marker(
+        self, session_id: str, *, session_dir: Optional[str] = None
+    ) -> Optional[Dict[str, str]]:
+        scope_marker_path = self._get_scope_marker_path(
+            session_id, session_dir=session_dir
+        )
         if not os.path.exists(scope_marker_path):
             return None
         try:
@@ -489,29 +568,43 @@ class SnapshotManager:
             "database_label": str(payload.get("database_label") or "").strip(),
         }
 
-    def _persist_scope_marker(self, session_id: str, manifest: Dict[str, Any]) -> None:
+    def _persist_scope_marker(
+        self,
+        session_id: str,
+        manifest: Dict[str, Any],
+        *,
+        session_dir: Optional[str] = None,
+    ) -> None:
         fingerprint = str(manifest.get("database_fingerprint") or "").strip()
         if not fingerprint:
             return
         _write_json_atomic(
-            self._get_scope_marker_path(session_id),
+            self._get_scope_marker_path(session_id, session_dir=session_dir),
             {
                 "database_fingerprint": fingerprint,
                 "database_label": str(manifest.get("database_label") or "").strip(),
             },
         )
-    
-    def _load_manifest(self, session_id: str) -> Dict[str, Any]:
-        """Load or create session manifest."""
-        manifest_path = self._get_manifest_path(session_id)
-        
+
+    def _load_manifest_from_dir(
+        self,
+        session_id: str,
+        session_dir: str,
+        *,
+        current_scope: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Load or create a manifest from a specific on-disk session directory."""
+        manifest_path = self._get_manifest_path(session_id, session_dir=session_dir)
+
         if os.path.exists(manifest_path):
             raw_manifest_text = ""
             try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
+                with open(manifest_path, "r", encoding="utf-8") as f:
                     raw_manifest_text = f.read()
                 manifest = json.loads(raw_manifest_text)
-                if isinstance(manifest, dict) and isinstance(manifest.get("resources"), dict):
+                if isinstance(manifest, dict) and isinstance(
+                    manifest.get("resources"), dict
+                ):
                     return manifest
                 raise ValueError("snapshot_manifest_invalid_payload")
             except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -521,12 +614,13 @@ class SnapshotManager:
                     exc,
                 )
                 recovered_scope = (
-                    self._load_scope_marker(session_id)
+                    self._load_scope_marker(session_id, session_dir=session_dir)
                     or self._extract_scope_from_manifest_text(raw_manifest_text)
                 )
                 rebuilt_manifest = self._rebuild_manifest_from_resources(
                     session_id,
                     scope=recovered_scope,
+                    session_dir=session_dir,
                 )
                 if rebuilt_manifest is not None:
                     if recovered_scope is not None:
@@ -536,7 +630,11 @@ class SnapshotManager:
                         )
                         try:
                             _write_json_atomic(manifest_path, rebuilt_manifest)
-                            self._persist_scope_marker(session_id, rebuilt_manifest)
+                            self._persist_scope_marker(
+                                session_id,
+                                rebuilt_manifest,
+                                session_dir=session_dir,
+                            )
                         except OSError as save_exc:
                             logger.warning(
                                 "Failed to persist rebuilt snapshot manifest for session %s: %s",
@@ -554,7 +652,17 @@ class SnapshotManager:
 
         return self._build_manifest_payload(
             session_id,
-            scope=_resolve_current_database_scope(),
+            scope=current_scope or _resolve_current_database_scope(),
+        )
+
+    def _load_manifest(self, session_id: str) -> Dict[str, Any]:
+        """Load or create the manifest visible to the current database scope."""
+        current_scope = _resolve_current_database_scope()
+        session_dir = self._resolve_session_dir(session_id, scope=current_scope)
+        return self._load_manifest_from_dir(
+            session_id,
+            session_dir,
+            current_scope=current_scope,
         )
 
     def _rebuild_manifest_from_resources(
@@ -562,9 +670,10 @@ class SnapshotManager:
         session_id: str,
         *,
         scope: Optional[Dict[str, str]] = None,
+        session_dir: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Best-effort manifest recovery from per-resource snapshot files."""
-        resources_dir = self._get_resources_dir(session_id)
+        resources_dir = self._get_resources_dir(session_id, session_dir=session_dir)
         if not os.path.isdir(resources_dir):
             return None
 
@@ -633,8 +742,10 @@ class SnapshotManager:
         )
 
     @staticmethod
-    def _manifest_matches_current_database(manifest: Dict[str, Any]) -> bool:
-        current_scope = _resolve_current_database_scope()
+    def _manifest_matches_scope(
+        manifest: Dict[str, Any], scope: Optional[Dict[str, str]] = None
+    ) -> bool:
+        current_scope = scope or _resolve_current_database_scope()
         manifest_fingerprint = str(manifest.get("database_fingerprint") or "").strip()
         current_fingerprint = str(current_scope.get("database_fingerprint") or "").strip()
         if not current_fingerprint:
@@ -644,6 +755,10 @@ class SnapshotManager:
             # expose after switching DATABASE_URL within the same checkout.
             return False
         return manifest_fingerprint == current_fingerprint
+
+    @staticmethod
+    def _manifest_matches_current_database(manifest: Dict[str, Any]) -> bool:
+        return SnapshotManager._manifest_matches_scope(manifest)
 
     def _warn_if_legacy_unscoped_session_hidden(
         self, session_id: str, manifest: Dict[str, Any]
@@ -672,28 +787,54 @@ class SnapshotManager:
         if not visible:
             self._warn_if_legacy_unscoped_session_hidden(session_id, manifest)
         return visible
-    
-    def _save_manifest(self, session_id: str, manifest: Dict[str, Any]):
+
+    def _save_manifest(
+        self,
+        session_id: str,
+        manifest: Dict[str, Any],
+        *,
+        session_dir: Optional[str] = None,
+        scope: Optional[Dict[str, str]] = None,
+    ):
         """Save session manifest."""
-        self._ensure_dir_exists(self._get_session_dir(session_id))
-        manifest_path = self._get_manifest_path(session_id)
-        scope = _resolve_current_database_scope()
-        manifest.setdefault("database_fingerprint", scope["database_fingerprint"])
-        manifest.setdefault("database_label", scope["database_label"])
+        resolved_scope = scope or _resolve_current_database_scope()
+        resolved_session_dir = session_dir or self._resolve_session_dir(
+            session_id, scope=resolved_scope
+        )
+        self._ensure_dir_exists(resolved_session_dir)
+        manifest_path = self._get_manifest_path(
+            session_id, session_dir=resolved_session_dir
+        )
+        manifest.setdefault(
+            "database_fingerprint", resolved_scope["database_fingerprint"]
+        )
+        manifest.setdefault("database_label", resolved_scope["database_label"])
 
         _write_json_atomic(manifest_path, manifest)
-        self._persist_scope_marker(session_id, manifest)
+        self._persist_scope_marker(
+            session_id,
+            manifest,
+            session_dir=resolved_session_dir,
+        )
 
     def _clear_session_unlocked(
-        self, session_id: str, manifest: Optional[Dict[str, Any]] = None
+        self,
+        session_id: str,
+        manifest: Optional[Dict[str, Any]] = None,
+        *,
+        session_dir: Optional[str] = None,
     ) -> int:
         """Delete one session tree while the caller already owns the write lock."""
-        session_dir = self._get_session_dir(session_id)
-        if not os.path.exists(session_dir):
+        resolved_session_dir = session_dir or self._resolve_session_dir(session_id)
+        if not os.path.exists(resolved_session_dir):
             return 0
-        payload = manifest if manifest is not None else self._load_manifest(session_id)
+        payload = (
+            manifest
+            if manifest is not None
+            else self._load_manifest_from_dir(session_id, resolved_session_dir)
+        )
         count = len(payload.get("resources", {}))
-        _force_remove(session_dir)
+        _force_remove(resolved_session_dir)
         return count
     
     def has_snapshot(self, session_id: str, resource_id: str) -> bool:
@@ -763,14 +904,25 @@ class SnapshotManager:
             True if snapshot was created, False if it already existed (and force=False)
         """
         with self._session_write_lock(session_id):
-            manifest = self._load_manifest(session_id)
-            if manifest.get("resources") and not self._manifest_matches_current_database(manifest):
-                self._clear_session_unlocked(session_id, manifest)
+            current_scope = _resolve_current_database_scope()
+            session_dir = self._resolve_session_dir(session_id, scope=current_scope)
+            manifest = self._load_manifest_from_dir(
+                session_id,
+                session_dir,
+                current_scope=current_scope,
+            )
+            if manifest.get("resources") and not self._manifest_matches_scope(
+                manifest, current_scope
+            ):
                 manifest = self._build_manifest_payload(
                     session_id,
-                    scope=_resolve_current_database_scope(),
+                    scope=current_scope,
                 )
-            snapshot_path = self._get_snapshot_path(session_id, resource_id)
+            snapshot_path = self._get_snapshot_path(
+                session_id,
+                resource_id,
+                session_dir=session_dir,
+            )
             if not force and (
                 resource_id in manifest.get("resources", {}) or os.path.exists(snapshot_path)
             ):
@@ -788,7 +940,9 @@ class SnapshotManager:
                     ):
                         return False
 
-            self._ensure_dir_exists(self._get_resources_dir(session_id))
+            self._ensure_dir_exists(
+                self._get_resources_dir(session_id, session_dir=session_dir)
+            )
             snapshot = {
                 "resource_id": resource_id,
                 "resource_type": resource_type,
@@ -804,7 +958,12 @@ class SnapshotManager:
                 "file": os.path.basename(snapshot_path),
                 "uri": snapshot_data.get("uri"),
             }
-            self._save_manifest(session_id, manifest)
+            self._save_manifest(
+                session_id,
+                manifest,
+                session_dir=session_dir,
+                scope=current_scope,
+            )
             self._garbage_collect_sessions(current_session_id=session_id)
             return True
     
@@ -848,29 +1007,52 @@ class SnapshotManager:
         
         if not os.path.exists(self.snapshot_dir):
             return sessions
-        
-        for session_id in os.listdir(self.snapshot_dir):
-            if session_id.startswith("."):
+
+        current_scope = _resolve_current_database_scope()
+        current_fingerprint = self._scope_fingerprint(current_scope)
+        seen_session_ids: set[str] = set()
+        candidate_roots = [self.snapshot_dir]
+        if current_fingerprint:
+            candidate_roots.append(self._get_scoped_sessions_root(current_fingerprint))
+
+        for root_dir in candidate_roots:
+            if not os.path.isdir(root_dir):
                 continue
-            try:
-                session_dir = self._get_session_dir(session_id)
-            except ValueError:
-                logger.warning("Skipping invalid snapshot session directory: %s", session_id)
-                continue
-            if os.path.isdir(session_dir):
-                manifest = self._load_manifest(session_id)
-                if not self._manifest_visible_for_current_database(session_id, manifest):
+            for session_id in os.listdir(root_dir):
+                if session_id.startswith(".") or session_id in seen_session_ids:
+                    continue
+                try:
+                    safe_session_id = self._validate_session_id(session_id)
+                except ValueError:
+                    logger.warning(
+                        "Skipping invalid snapshot session directory: %s", session_id
+                    )
+                    continue
+                session_dir = os.path.join(root_dir, safe_session_id)
+                if not os.path.isdir(session_dir):
+                    continue
+                manifest = self._load_manifest_from_dir(
+                    safe_session_id,
+                    session_dir,
+                    current_scope=current_scope,
+                )
+                if not self._manifest_matches_scope(manifest, current_scope):
+                    self._warn_if_legacy_unscoped_session_hidden(
+                        safe_session_id, manifest
+                    )
                     continue
                 resource_count = len(manifest.get("resources", {}))
-                
                 if resource_count == 0:
                     continue
 
-                sessions.append({
-                    "session_id": session_id,
-                    "created_at": manifest.get("created_at"),
-                    "resource_count": resource_count
-                })
+                seen_session_ids.add(safe_session_id)
+                sessions.append(
+                    {
+                        "session_id": safe_session_id,
+                        "created_at": manifest.get("created_at"),
+                        "resource_count": resource_count,
+                    }
+                )
         
         # Sort by creation time (newest first)
         sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -907,26 +1089,43 @@ class SnapshotManager:
             True if deleted, False if not found
         """
         with self._session_write_lock(session_id):
-            manifest = self._load_manifest(session_id)
+            session_dir = self._resolve_session_dir(session_id)
+            manifest = self._load_manifest_from_dir(session_id, session_dir)
             resource_meta = manifest.get("resources", {}).get(resource_id)
 
             if resource_meta and resource_meta.get("file"):
                 snapshot_path = os.path.join(
-                    self._get_resources_dir(session_id),
+                    self._get_resources_dir(session_id, session_dir=session_dir),
                     resource_meta["file"],
                 )
             else:
-                snapshot_path = self._get_snapshot_path(session_id, resource_id)
+                snapshot_path = self._get_snapshot_path(
+                    session_id,
+                    resource_id,
+                    session_dir=session_dir,
+                )
 
-            if not os.path.exists(snapshot_path):
-                return False
-
+            resource_removed = False
             if resource_id in manifest.get("resources", {}):
                 del manifest["resources"][resource_id]
+                resource_removed = True
                 if not manifest["resources"]:
-                    self._clear_session_unlocked(session_id, manifest)
+                    self._clear_session_unlocked(
+                        session_id,
+                        manifest,
+                        session_dir=session_dir,
+                    )
                 else:
-                    self._save_manifest(session_id, manifest)
+                    self._save_manifest(
+                        session_id,
+                        manifest,
+                        session_dir=session_dir,
+                    )
+
+            if not os.path.exists(snapshot_path):
+                if resource_removed:
+                    return True
+                return False
 
             if os.path.exists(snapshot_path):
                 _force_remove(snapshot_path)

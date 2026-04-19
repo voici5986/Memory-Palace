@@ -295,6 +295,8 @@ DATABASE_URL="sqlite+aiosqlite:////absolute/path/to/demo.db" # local db
 
 4. 或查找并释放被占用端口：
 
+   再补一个这轮修复过的小边界：`docker_one_click.sh` 在没有 `lsof` / `nc`、只能退回 Python socket probe 时，现在会按 `0.0.0.0` 做 wildcard bind 检查，而不是只试 `127.0.0.1`。说人话就是：如果端口其实已经被本机另一块 host IP 占住了，它现在也会被当成真实冲突，不要只盯着 loopback 监听看。
+
    ```bash
    # macOS / Linux
    lsof -i :8000

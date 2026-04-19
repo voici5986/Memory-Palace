@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Literal, Optional
 from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from db.sqlite_client import (
+    DEFAULT_EMBEDDING_BACKEND as _DEFAULT_RUNTIME_EMBEDDING_BACKEND,
+    DEFAULT_EMBEDDING_DIM as _DEFAULT_RUNTIME_EMBEDDING_DIM,
+)
 from shared_utils import (
     TRUTHY_ENV_VALUES as _TRUTHY_ENV_VALUES,
     env_bool as _env_bool,
@@ -151,16 +155,15 @@ def _read_optional_env(name: str) -> Optional[str]:
 
 
 def _refresh_setup_managed_env_from_file(target_env_path: Path) -> None:
+    process_env_overrides = _resolve_process_env_setup_overrides(target_env_path)
     if not target_env_path.exists():
         return
+
     parsed = dotenv_values(target_env_path)
-    process_env_overrides = _resolve_process_env_setup_overrides(target_env_path)
     for key in _SETUP_MANAGED_ENV_KEYS:
         if key in process_env_overrides:
             continue
-        if key not in parsed:
-            continue
-        value = parsed.get(key)
+        value = parsed.get(key) if key in parsed else None
         if value is None or value == "":
             os.environ.pop(key, None)
             continue
@@ -292,9 +295,20 @@ def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
 
 
 def _build_summary() -> Dict[str, Any]:
-    embedding_backend = (_read_optional_env("RETRIEVAL_EMBEDDING_BACKEND") or "hash").lower()
+    embedding_backend = (
+        _read_optional_env("RETRIEVAL_EMBEDDING_BACKEND")
+        or _DEFAULT_RUNTIME_EMBEDDING_BACKEND
+    ).lower()
     raw_embedding_dim = _read_optional_env("RETRIEVAL_EMBEDDING_DIM")
-    embedding_dim = int(raw_embedding_dim) if raw_embedding_dim and raw_embedding_dim.isdigit() else None
+    if raw_embedding_dim and raw_embedding_dim.isdigit():
+        embedding_dim = int(raw_embedding_dim)
+    elif embedding_backend == _DEFAULT_RUNTIME_EMBEDDING_BACKEND:
+        embedding_dim = _DEFAULT_RUNTIME_EMBEDDING_DIM
+    else:
+        embedding_dim = None
+    remote_embedding_dim_configured = (
+        embedding_backend not in _REMOTE_EMBEDDING_BACKENDS or embedding_dim is not None
+    )
     reranker_enabled = _env_bool("RETRIEVAL_RERANKER_ENABLED", False)
     write_guard_enabled = _env_bool("WRITE_GUARD_LLM_ENABLED", False)
     intent_llm_enabled = _env_bool("INTENT_LLM_ENABLED", False)
@@ -318,6 +332,7 @@ def _build_summary() -> Dict[str, Any]:
                     "ROUTER_EMBEDDING_MODEL",
                     "OPENAI_EMBEDDING_MODEL",
                 )
+                and remote_embedding_dim_configured
             )
         ),
         "reranker_enabled": reranker_enabled,

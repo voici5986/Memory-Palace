@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createEventSource, resolveSseUrl } from './sse';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('resolveSseUrl', () => {
   it('resolves relative SSE paths against an explicit base URL', () => {
@@ -12,6 +16,14 @@ describe('resolveSseUrl', () => {
   it('keeps absolute SSE endpoints intact', () => {
     expect(resolveSseUrl('http://127.0.0.1:8010/sse', 'http://127.0.0.1:5173')).toBe(
       'http://127.0.0.1:8010/sse'
+    );
+  });
+
+  it('keeps same-origin path prefixes from configured API bases when resolving default SSE path', () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/memory-palace/api/');
+
+    expect(resolveSseUrl('/sse', 'http://127.0.0.1:5173')).toBe(
+      'http://127.0.0.1:5173/memory-palace/sse'
     );
   });
 });

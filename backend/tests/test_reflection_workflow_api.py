@@ -32,6 +32,48 @@ class _ReflectionClientStub:
         return {"deleted_memory_id": memory_id}
 
 
+class _ReflectionNamespaceClientStub(_ReflectionClientStub):
+    def __init__(self) -> None:
+        super().__init__()
+        self.memories: dict[int, dict[str, str]] = {}
+        self.paths: dict[tuple[str, str], int] = {}
+
+    def seed_path(self, *, memory_id: int, domain: str, path: str, content: str) -> None:
+        self.memories[memory_id] = {"content": content, "domain": domain, "path": path}
+        self.paths[(domain, path)] = memory_id
+
+    async def remove_path(self, path: str, domain: str = "notes"):
+        key = (domain, path)
+        memory_id = self.paths.get(key)
+        if memory_id is None:
+            raise ValueError("path not found")
+        prefix = f"{path}/"
+        for item_domain, item_path in self.paths.keys():
+            if item_domain != domain or item_path == path:
+                continue
+            if item_path.startswith(prefix):
+                raise ValueError("path still has child path(s)")
+        self.paths.pop(key, None)
+        return {"removed_uri": f"{domain}://{path}", "memory_id": memory_id}
+
+    async def permanently_delete_memory(
+        self,
+        memory_id: int,
+        *,
+        require_orphan: bool = False,
+    ):
+        if memory_id not in self.memories:
+            raise ValueError("memory not found")
+        if require_orphan and any(value == memory_id for value in self.paths.values()):
+            raise PermissionError("memory still has active paths")
+        self.deleted_memory_ids.append(memory_id)
+        del self.memories[memory_id]
+        for key, value in list(self.paths.items()):
+            if value == memory_id:
+                self.paths.pop(key, None)
+        return {"deleted_memory_id": memory_id}
+
+
 def _build_client(*, raise_server_exceptions: bool = True) -> TestClient:
     app = FastAPI()
     app.include_router(maintenance_api.router)
@@ -92,6 +134,43 @@ def test_reflection_prepare_registers_learn_job(monkeypatch: pytest.MonkeyPatch)
     assert "reflect-job-prepare" in maintenance_api._LEARN_JOBS
 
 
+def test_reflection_workflow_service_resolver_refreshes_stale_cached_callable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _service_first(**kwargs):
+        _ = kwargs
+        return {"service": "first"}
+
+    async def _service_second(**kwargs):
+        _ = kwargs
+        return {"service": "second"}
+
+    _service_first.__module__ = "mcp_server"
+    _service_second.__module__ = "mcp_server"
+
+    modules = [
+        types.SimpleNamespace(run_reflection_workflow_service=_service_first),
+        types.SimpleNamespace(run_reflection_workflow_service=_service_second),
+    ]
+    import_calls: list[str] = []
+
+    def _fake_import_module(name: str):
+        import_calls.append(name)
+        return modules.pop(0)
+
+    monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", None)
+    monkeypatch.setattr(
+        maintenance_api.importlib, "import_module", _fake_import_module
+    )
+
+    first = asyncio.run(maintenance_api._resolve_reflection_workflow_service())
+    second = asyncio.run(maintenance_api._resolve_reflection_workflow_service())
+
+    assert first is _service_first
+    assert second is _service_second
+    assert import_calls == ["mcp_server", "mcp_server"]
+
+
 def test_reflection_execute_rollback_updates_reflection_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -138,7 +217,20 @@ def test_reflection_execute_rollback_updates_reflection_summary(
                     "uri": "notes://corrections/session-reflect/learn-123",
                     "path": "corrections/session-reflect/learn-123",
                 },
-                "created_namespace_memories": [],
+                "created_namespace_memories": [
+                    {
+                        "memory_id": 1,
+                        "domain": "notes",
+                        "path": "corrections",
+                        "uri": "notes://corrections",
+                    },
+                    {
+                        "memory_id": 2,
+                        "domain": "notes",
+                        "path": "corrections/session-reflect",
+                        "uri": "notes://corrections/session-reflect",
+                    },
+                ],
                 "review_snapshot": {
                     "session_id": "session-reflect",
                     "resource_id": "notes://corrections/session-reflect/learn-123",
@@ -186,18 +278,29 @@ def test_reflection_execute_rollback_updates_reflection_summary(
 def test_reflection_job_rollback_route_delegates_to_review_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class _MetaOnlyClient:
-        async def set_runtime_meta(self, key: str, value: str) -> None:
-            _ = key, value
-
-        async def get_runtime_meta(self, key: str):
-            _ = key
-            return None
-
     tracker = ImportLearnAuditTracker()
     headers = {"X-MCP-API-Key": "reflection-secret"}
     rollback_calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: _MetaOnlyClient())
+    client_stub = _ReflectionNamespaceClientStub()
+    client_stub.seed_path(
+        memory_id=1,
+        domain="notes",
+        path="corrections",
+        content="namespace root",
+    )
+    client_stub.seed_path(
+        memory_id=2,
+        domain="notes",
+        path="corrections/session-reflect",
+        content="namespace session",
+    )
+    client_stub.seed_path(
+        memory_id=7,
+        domain="notes",
+        path="corrections/session-reflect/learn-123",
+        content="reflection leaf",
+    )
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client_stub)
     monkeypatch.setattr(maintenance_api.runtime_state, "import_learn_tracker", tracker)
     monkeypatch.setattr(maintenance_api, "_LEARN_JOBS", {})
     monkeypatch.setenv("MCP_API_KEY", "reflection-secret")
@@ -232,7 +335,20 @@ def test_reflection_job_rollback_route_delegates_to_review_snapshot(
                     "uri": "notes://corrections/session-reflect/learn-123",
                     "path": "corrections/session-reflect/learn-123",
                 },
-                "created_namespace_memories": [],
+                "created_namespace_memories": [
+                    {
+                        "memory_id": 1,
+                        "domain": "notes",
+                        "path": "corrections",
+                        "uri": "notes://corrections",
+                    },
+                    {
+                        "memory_id": 2,
+                        "domain": "notes",
+                        "path": "corrections/session-reflect",
+                        "uri": "notes://corrections/session-reflect",
+                    },
+                ],
                 "review_snapshot": {
                     "session_id": "session-reflect",
                     "resource_id": "notes://corrections/session-reflect/learn-123",
@@ -247,6 +363,8 @@ def test_reflection_job_rollback_route_delegates_to_review_snapshot(
 
     async def _fake_rollback_resource(session_id: str, resource_id: str, request):
         rollback_calls.append((session_id, resource_id, request.task_description))
+        client_stub.paths.pop(("notes", "corrections/session-reflect/learn-123"), None)
+        client_stub.memories.pop(7, None)
         return {
             "resource_id": resource_id,
             "resource_type": "path",
@@ -290,6 +408,18 @@ def test_reflection_job_rollback_route_delegates_to_review_snapshot(
 
     assert rollback.status_code == 200
     assert rollback.json()["status"] == "rolled_back"
+    rollback_summary = rollback.json()["rollback"]
+    assert (rollback_summary.get("namespace_cleanup") or {}).get("removed_paths") == [
+        "notes://corrections/session-reflect",
+        "notes://corrections",
+    ]
+    summary = asyncio.run(maintenance_api.runtime_state.import_learn_tracker.summary())
+    assert summary.get("operation_decision_breakdown", {}).get(
+        "reflection_workflow|rolled_back", 0
+    ) == 1
+    assert summary.get("operation_decision_breakdown", {}).get(
+        "learn_rollback|rolled_back", 0
+    ) == 0
     assert rollback_calls == [
         (
             "session-reflect",
@@ -297,6 +427,9 @@ def test_reflection_job_rollback_route_delegates_to_review_snapshot(
             "rollback reflection workflow",
         )
     ]
+    assert client_stub.paths == {}
+    assert 1 not in client_stub.memories
+    assert 2 not in client_stub.memories
 
 
 def test_reflection_invalid_mode_returns_422(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -371,6 +504,7 @@ def test_reflection_rollback_requires_job_id(monkeypatch: pytest.MonkeyPatch) ->
             json={
                 "mode": "rollback",
                 "reason": "missing job id",
+                "session_id": "session-reflect",
             },
         )
 
@@ -378,6 +512,33 @@ def test_reflection_rollback_requires_job_id(monkeypatch: pytest.MonkeyPatch) ->
     detail = response.json()["detail"]
     assert detail["error"] == "reflection_workflow_invalid_request"
     assert detail["reason"] == "job_id_required"
+    assert detail["mode"] == "rollback"
+
+
+def test_reflection_rollback_requires_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    headers = {"X-MCP-API-Key": "reflection-secret"}
+    monkeypatch.setenv("MCP_API_KEY", "reflection-secret")
+
+    async def _service(**kwargs):
+        raise AssertionError("service should not be called without session_id")
+
+    monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", _service)
+
+    with _build_client(raise_server_exceptions=False) as client:
+        response = client.post(
+            "/maintenance/learn/reflection",
+            headers=headers,
+            json={
+                "mode": "rollback",
+                "reason": "missing session id",
+                "job_id": "reflect-job-execute",
+            },
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["error"] == "reflection_workflow_invalid_request"
+    assert detail["reason"] == "session_id_required"
     assert detail["mode"] == "rollback"
 
 
@@ -407,23 +568,20 @@ def test_reflection_mode_rollback_delegates_to_learn_job_rollback(
         )
 
     monkeypatch.setattr(maintenance_api, "_REFLECTION_WORKFLOW_SERVICE", _service)
-    monkeypatch.setattr(
-        maintenance_api,
-        "_rollback_job",
-        lambda job_id, payload, prefer_learn, allow_fallback, not_found_error: asyncio.sleep(
-            0,
-            result={
-                "ok": True,
-                "status": "rolled_back",
-                "job_id": job_id,
-                "job_type": "learn",
-                "reason": payload.reason,
-                "prefer_learn": prefer_learn,
-                "allow_fallback": allow_fallback,
-                "not_found_error": not_found_error,
-            },
-        ),
-    )
+    async def _rollback_job_stub(**kwargs):
+        payload = kwargs["payload"]
+        return {
+            "ok": True,
+            "status": "rolled_back",
+            "job_id": kwargs["job_id"],
+            "job_type": "learn",
+            "reason": payload.reason,
+            "prefer_learn": kwargs["prefer_learn"],
+            "allow_fallback": kwargs["allow_fallback"],
+            "not_found_error": kwargs["not_found_error"],
+        }
+
+    monkeypatch.setattr(maintenance_api, "_rollback_job", _rollback_job_stub)
 
     with _build_client() as client:
         response = client.post(
@@ -433,6 +591,7 @@ def test_reflection_mode_rollback_delegates_to_learn_job_rollback(
                 "mode": "rollback",
                 "reason": "rollback reflection workflow",
                 "job_id": "reflect-job-execute",
+                "session_id": "session-reflect",
             },
         )
 
@@ -452,9 +611,107 @@ def test_reflection_mode_rollback_delegates_to_learn_job_rollback(
             "mode": "rollback",
             "job_id": "reflect-job-execute",
             "reason": "rollback reflection workflow",
-            "session_id": "",
+            "session_id": "session-reflect",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_rollback_handler_forwards_expected_session_and_actor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, str | bool | None]] = []
+
+    async def _rollback_job_stub(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "status": "rolled_back", "job_id": kwargs["job_id"]}
+
+    monkeypatch.setattr(maintenance_api, "_rollback_job", _rollback_job_stub)
+
+    payload = await maintenance_api._reflection_workflow_rollback_handler(
+        job_id="reflect-job-execute",
+        reason_text="rollback reflection workflow",
+        session_id="session-reflect",
+        actor_id="actor-a",
+    )
+
+    assert payload == {
+        "ok": True,
+        "status": "rolled_back",
+        "job_id": "reflect-job-execute",
+    }
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["job_id"] == "reflect-job-execute"
+    assert isinstance(call["payload"], maintenance_api.ImportRollbackRequest)
+    assert call["payload"].reason == "rollback reflection workflow"
+    assert call["prefer_learn"] is True
+    assert call["allow_fallback"] is False
+    assert call["not_found_error"] == "learn_job_not_found"
+    assert call["expected_session_id"] == "session-reflect"
+    assert call["expected_actor_id"] == "actor-a"
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_rollback_handler_rejects_session_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        maintenance_api,
+        "_LEARN_JOBS",
+        {
+            "reflect-job-execute": {
+                "job_id": "reflect-job-execute",
+                "job_type": "learn",
+                "status": "executed",
+                "session_id": "session-a",
+                "actor_id": "actor-a",
+                "created_memories": [{"memory_id": 7, "uri": "notes://leaf"}],
+            }
+        },
+    )
+
+    with pytest.raises(maintenance_api.HTTPException) as exc_info:
+        await maintenance_api._reflection_workflow_rollback_handler(
+            job_id="reflect-job-execute",
+            reason_text="rollback reflection workflow",
+            session_id="session-b",
+            actor_id=None,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["error"] == "import_job_session_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_rollback_handler_rejects_actor_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        maintenance_api,
+        "_LEARN_JOBS",
+        {
+            "reflect-job-execute": {
+                "job_id": "reflect-job-execute",
+                "job_type": "learn",
+                "status": "executed",
+                "session_id": "session-a",
+                "actor_id": "actor-a",
+                "created_memories": [{"memory_id": 7, "uri": "notes://leaf"}],
+            }
+        },
+    )
+
+    with pytest.raises(maintenance_api.HTTPException) as exc_info:
+        await maintenance_api._reflection_workflow_rollback_handler(
+            job_id="reflect-job-execute",
+            reason_text="rollback reflection workflow",
+            session_id="session-a",
+            actor_id="actor-b",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["error"] == "import_job_actor_mismatch"
 
 
 def test_learn_trigger_execute_routes_through_write_lane(

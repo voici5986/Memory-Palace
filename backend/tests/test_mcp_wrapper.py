@@ -408,3 +408,34 @@ def test_forward_stream_chunked_normalizes_crlf_across_chunk_boundaries() -> Non
     )
 
     assert destination.getvalue() == b"line1\nline2\rline3"
+
+
+def test_terminate_process_on_io_error_terminates_and_kills_stubborn_process() -> None:
+    module = _load_module()
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.terminate_calls = 0
+            self.kill_calls = 0
+            self.wait_timeouts: list[float] = []
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_timeouts.append(float(timeout or 0.0))
+            raise subprocess.TimeoutExpired(cmd="backend", timeout=timeout or 0.0)
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+
+    process = _FakeProcess()
+
+    module._terminate_process_on_io_error(process, wait_timeout=0.25)
+
+    assert process.terminate_calls == 1
+    assert process.wait_timeouts == [0.25]
+    assert process.kill_calls == 1

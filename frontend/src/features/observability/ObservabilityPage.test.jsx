@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
+import { formatDateTime as formatDateTimeValue } from '../../lib/format';
 import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
 import ObservabilityPage from './ObservabilityPage';
 
@@ -160,6 +161,41 @@ describe('ObservabilityPage', () => {
     expect(screen.getByText('策略 时序过滤')).toBeInTheDocument();
     expect(screen.getByText('降级 否')).toBeInTheDocument();
     expect(screen.getByText('会话队列')).toBeInTheDocument();
+  });
+
+  it('formats result timestamps instead of rendering raw ISO strings', async () => {
+    const user = userEvent.setup();
+    api.runObservabilitySearch.mockResolvedValueOnce({
+      results: [
+        {
+          uri: 'core://agent/date-check',
+          memory_id: 8,
+          snippet: 'timestamp result',
+          metadata: {
+            source: 'global',
+            priority: 0,
+            updated_at: '2026-01-01T00:00:00Z',
+          },
+          scores: { final: 0.5 },
+        },
+      ],
+    });
+
+    render(<ObservabilityPage />);
+
+    await user.click(screen.getByRole('button', { name: /Run Diagnostic Search/i }));
+
+    const expected = formatDateTimeValue('2026-01-01T00:00:00Z', 'en', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText('2026-01-01T00:00:00Z')).not.toBeInTheDocument();
   });
 
   it('uses unified retry endpoint when retry API is available', async () => {

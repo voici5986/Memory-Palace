@@ -109,6 +109,38 @@ class _ConcurrentNamespaceRaceClient(_ReflectionClient):
         return await super().create_memory(**kwargs)
 
 
+class _SnapshotFailureCleanupClient(_ReflectionClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted_memory_ids: list[int] = []
+
+    async def remove_path(self, path: str, domain: str = "notes"):
+        key = (str(domain or "notes"), str(path or "").strip("/"))
+        memory = self._paths.get(key)
+        if not isinstance(memory, dict):
+            raise ValueError("path not found")
+        prefix = f"{key[1]}/"
+        for item_domain, item_path in self._paths.keys():
+            if item_domain != key[0] or item_path == key[1]:
+                continue
+            if item_path.startswith(prefix):
+                raise ValueError("path still has child path(s)")
+        self._paths.pop(key, None)
+        return {"removed_uri": f"{key[0]}://{key[1]}", "memory_id": memory.get("id")}
+
+    async def permanently_delete_memory(
+        self,
+        memory_id: int,
+        *,
+        require_orphan: bool = False,
+    ):
+        for payload in self._paths.values():
+            if int(payload.get("id") or 0) == memory_id and require_orphan:
+                raise PermissionError("memory still has active paths")
+        self.deleted_memory_ids.append(memory_id)
+        return {"deleted_memory_id": memory_id}
+
+
 @pytest.mark.asyncio
 async def test_reflection_prepare_returns_reviewable_plan(
     monkeypatch: pytest.MonkeyPatch,
@@ -479,13 +511,11 @@ async def test_reflection_workflow_service_delegates_rollback_mode(
             "job_id": job_id,
         }
 
-    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
-
     payload = await mcp_server.run_reflection_workflow_service(
         mode="rollback",
         source="session_summary",
         reason="rollback reflection workflow",
-        session_id=None,
+        session_id="explicit-session",
         actor_id="reviewer-a",
         job_id="reflect-job-1234",
         rollback_handler=_rollback_handler,
@@ -500,10 +530,77 @@ async def test_reflection_workflow_service_delegates_rollback_mode(
         {
             "job_id": "reflect-job-1234",
             "reason_text": "rollback reflection workflow",
-            "session_id": "ambient-session",
+            "session_id": "explicit-session",
             "actor_id": "reviewer-a",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_reflection_workflow_service_requires_explicit_session_id_for_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "get_session_id", lambda: "ambient-session")
+
+    payload = await mcp_server.run_reflection_workflow_service(
+        mode="rollback",
+        source="session_summary",
+        reason="reject missing rollback session id",
+        session_id=None,
+        job_id="reflect-job-1234",
+        rollback_handler=lambda **kwargs: asyncio.sleep(0, result=kwargs),
+    )
+
+    assert payload["ok"] is False
+    assert payload["prepared"] is False
+    assert payload["executed"] is False
+    assert payload["reason"] == "session_id_invalid"
+    assert payload["validation_error"] == "session_id is required"
+    assert payload["session_id"] == ""
+
+
+@pytest.mark.asyncio
+async def test_reflection_execute_snapshot_failure_cleans_up_created_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SnapshotFailureCleanupClient()
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "import_learn_tracker",
+        ImportLearnAuditTracker(),
+    )
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker("Session compaction notes:\n- force snapshot cleanup"),
+    )
+
+    async def _snapshot_path_create(
+        uri: str,
+        memory_id: int,
+        operation_type: str = "create",
+        target_uri: str | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> bool:
+        _ = uri, memory_id, operation_type, target_uri, session_id
+        raise RuntimeError("snapshot backend unavailable")
+
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _snapshot_path_create)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await mcp_server.run_reflection_workflow_service(
+            mode="execute",
+            source="session_summary",
+            reason="force snapshot cleanup",
+            session_id="s-reflection-snapshot-failure",
+            client=client,
+        )
+
+    assert "snapshot_create_failed_after_write:RuntimeError" in str(exc_info.value)
+    assert client._paths == {}
+    assert client.deleted_memory_ids == [3, 2, 1]
 
 
 @pytest.mark.asyncio

@@ -686,6 +686,42 @@ describe('App routing', () => {
     expect(within(translatedDialog).getByDisplayValue('typed-key-123')).toBeInTheDocument();
   });
 
+  it('hydrates the real hash retrieval state when setup is opened manually', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/memory');
+    setupApi.getSetupStatus.mockResolvedValue({
+      ok: true,
+      apply_supported: true,
+      apply_reason: 'local_env_file',
+      write_supported: true,
+      write_reason: 'local_env_file',
+      target_label: '.env',
+      restart_required: true,
+      restart_targets: ['backend', 'sse'],
+      summary: {
+        dashboard_auth_configured: true,
+        allow_insecure_local: false,
+        embedding_backend: 'hash',
+        embedding_configured: true,
+        reranker_enabled: false,
+        reranker_configured: false,
+        write_guard_enabled: false,
+        write_guard_configured: false,
+        intent_llm_enabled: false,
+        intent_llm_configured: false,
+      },
+    });
+
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('app.auth.setApiKey') }));
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole('combobox')).toHaveValue('hash');
+    });
+  });
+
   it('starts the setup assistant on the documented Profile A baseline instead of an unnamed hash state', async () => {
     clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');

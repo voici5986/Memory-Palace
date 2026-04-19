@@ -459,8 +459,30 @@ def test_wrapper_binding_ok_accepts_documented_manual_fallbacks(
     venv_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.shutil, "which", lambda command: str(venv_python) if command == "python" else None)
 
     assert module._wrapper_binding_ok(
+        ["python", str(project_root / "backend" / "mcp_wrapper.py")],
+        allow_relative=False,
+    )
+
+
+def test_wrapper_binding_ok_rejects_python_wrapper_when_python_resolves_outside_repo_venv(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    venv_python = project_root / "backend" / ".venv" / "bin" / "python"
+    other_python = tmp_path / "bin" / "python"
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    other_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    other_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(module, "project_root", lambda: project_root)
+    monkeypatch.setattr(module.shutil, "which", lambda command: str(other_python) if command == "python" else None)
+
+    assert not module._wrapper_binding_ok(
         ["python", str(project_root / "backend" / "mcp_wrapper.py")],
         allow_relative=False,
     )

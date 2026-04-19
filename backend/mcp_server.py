@@ -1618,6 +1618,26 @@ async def run_explicit_learn_service(
                     f"{type(snapshot_exc).__name__};rollback_failed:"
                     f"{type(rollback_exc).__name__}"
                 ) from snapshot_exc
+            namespace_cleanup = await _cleanup_created_namespace_after_failed_write(
+                learn_client,
+                created_namespace_memories,
+            )
+            namespace_cleanup_issues = namespace_cleanup.get("issues") or []
+            if namespace_cleanup_issues:
+                issue_types = ",".join(
+                    sorted(
+                        {
+                            str(item.get("reason") or "namespace_cleanup_incomplete")
+                            for item in namespace_cleanup_issues
+                            if isinstance(item, dict)
+                        }
+                    )
+                )
+                raise RuntimeError(
+                    "snapshot_create_failed_after_write:"
+                    f"{type(snapshot_exc).__name__};namespace_cleanup_incomplete:"
+                    f"{issue_types or 'unknown'}"
+                ) from snapshot_exc
             raise RuntimeError(
                 f"snapshot_create_failed_after_write:{type(snapshot_exc).__name__}"
             ) from snapshot_exc
@@ -1702,17 +1722,36 @@ async def run_reflection_workflow_service(
 
     normalized_reason = str(reason or "").strip()
     if normalized_mode == "rollback":
-        raw_session_id = (
-            get_session_id()
-            if session_id is None
-            else str(session_id)
-        )
+        raw_session_id = "" if session_id is None else str(session_id)
+        if not raw_session_id:
+            return {
+                "ok": False,
+                "mode": normalized_mode,
+                "source": str(source or "").strip() or "session_summary",
+                "reason": "session_id_invalid",
+                "validation_error": "session_id is required",
+                "prepared": False,
+                "executed": False,
+                "session_id": raw_session_id,
+            }
+        try:
+            normalized_session_id = SnapshotManager._validate_session_id(raw_session_id)
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "mode": normalized_mode,
+                "source": str(source or "").strip() or "session_summary",
+                "reason": "session_id_invalid",
+                "validation_error": str(exc),
+                "prepared": False,
+                "executed": False,
+                "session_id": raw_session_id,
+            }
         normalized_job_id = str(job_id or "").strip()
         if not normalized_job_id:
             raise ValueError("reflection workflow rollback requires job_id")
         if not callable(rollback_handler):
             raise RuntimeError("reflection workflow rollback unavailable")
-        normalized_session_id = str(raw_session_id).strip() or None
         return await rollback_handler(
             job_id=normalized_job_id,
             reason_text=normalized_reason or "manual_rollback",
@@ -2094,6 +2133,70 @@ async def _ensure_parent_path_exists(
                 )
         current_path = next_path
     return domain, parent_path, created_nodes
+
+
+async def _cleanup_created_namespace_after_failed_write(
+    client: Any,
+    created_namespace_memories: List[Dict[str, Any]],
+) -> Dict[str, List[Dict[str, Any]] | List[str] | List[int]]:
+    remove_path = getattr(client, "remove_path", None)
+    permanently_delete_memory = getattr(client, "permanently_delete_memory", None)
+    if not callable(remove_path) or not callable(permanently_delete_memory):
+        return {
+            "removed_paths": [],
+            "deleted_memory_ids": [],
+            "issues": (
+                [{"reason": "namespace_cleanup_methods_unavailable"}]
+                if created_namespace_memories
+                else []
+            ),
+        }
+
+    removed_paths: List[str] = []
+    deleted_memory_ids: List[int] = []
+    issues: List[Dict[str, Any]] = []
+    for entry in reversed(created_namespace_memories):
+        if not isinstance(entry, dict):
+            continue
+        domain = str(entry.get("domain") or "notes").strip().lower() or "notes"
+        path = str(entry.get("path") or "").strip().strip("/")
+        uri = str(entry.get("uri") or (f"{domain}://{path}" if path else ""))
+        memory_id = _safe_int(entry.get("memory_id"), default=0)
+        if not path:
+            continue
+        try:
+            remove_result = await remove_path(path, domain=domain)
+            removed_paths.append(uri or f"{domain}://{path}")
+        except Exception as exc:
+            issues.append(
+                {
+                    "uri": uri or f"{domain}://{path}",
+                    "reason": str(exc) or type(exc).__name__,
+                }
+            )
+            continue
+        removed_memory_id = 0
+        if isinstance(remove_result, dict):
+            removed_memory_id = _safe_int(remove_result.get("memory_id"), default=0)
+        target_memory_id = removed_memory_id or memory_id
+        if target_memory_id <= 0:
+            continue
+        try:
+            await permanently_delete_memory(target_memory_id, require_orphan=True)
+            deleted_memory_ids.append(target_memory_id)
+        except Exception as exc:
+            issues.append(
+                {
+                    "uri": uri or f"{domain}://{path}",
+                    "memory_id": target_memory_id,
+                    "reason": str(exc) or type(exc).__name__,
+                }
+            )
+    return {
+        "removed_paths": removed_paths,
+        "deleted_memory_ids": deleted_memory_ids,
+        "issues": issues,
+    }
 
 
 _AUTO_FLUSH_IN_PROGRESS: set[str] = set()
@@ -3498,6 +3601,8 @@ def _recent_read_state_token(
         "disclosure": memory.get("disclosure"),
         "created_at": memory.get("created_at"),
         "content": memory.get("content"),
+        "tags": memory.get("tags"),
+        "metadata": memory.get("metadata"),
         "children_token": _recent_read_children_token(children),
     }
     return hashlib.sha256(
@@ -5439,7 +5544,7 @@ async def search_memory(
             try:
                 session_results = await runtime_state.session_cache.search(
                     session_id=get_session_id(),
-                    query=query_value,
+                    query=query_effective,
                     limit=resolved_max_results,
                 )
             except Exception:
@@ -5457,7 +5562,12 @@ async def search_memory(
         )
         if int(revalidation_metrics.get("revalidate_lookup_failed") or 0) > 0:
             degraded_reasons.append("path_revalidation_lookup_failed")
-        ordered_results = _sort_search_results_for_response(revalidated_results)
+        filtered_revalidated_results, post_filter_reasons = _apply_local_filters_to_results(
+            revalidated_results,
+            normalized_filters,
+        )
+        degraded_reasons.extend(post_filter_reasons)
+        ordered_results = _sort_search_results_for_response(filtered_revalidated_results)
         session_first_metrics.update(revalidation_metrics)
         final_results = ordered_results[:resolved_max_results]
         session_before = int(session_first_metrics.get("session_contributed") or 0)

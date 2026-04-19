@@ -24,5 +24,12 @@
   },
   "gist": {
     "rouge_l_gte": 0.4
+  },
+  "prompt_safety": {
+    "contract_pass_rate_gte": 1.0
+  },
+  "reflection_lane": {
+    "timeout_degrade_correct_eq": 1,
+    "tasks_total_gte": 2
   }
 }

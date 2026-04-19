@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from filelock import FileLock
 
+import db.migration_runner as migration_runner_module
 from db.migration_runner import MigrationRunner
 from db.sqlite_client import SQLiteClient
 
@@ -363,3 +364,92 @@ async def test_migration_runner_skips_in_memory_database(tmp_path: Path) -> None
     )
     applied = await runner.apply_pending()
     assert applied == []
+
+
+def test_migration_runner_iter_sql_statements_ignores_semicolons_inside_comments_and_quotes() -> None:
+    script = """
+    INSERT INTO test_table(value) VALUES('it''s;ok'); -- trailing comment; keep together
+    /* block comment; still not a statement boundary */
+    INSERT INTO test_table(value) VALUES('done');
+    """
+
+    statements = MigrationRunner._iter_sql_statements(script)
+
+    assert statements == [
+        "INSERT INTO test_table(value) VALUES('it''s;ok')",
+        "INSERT INTO test_table(value) VALUES('done')",
+    ]
+
+
+def test_migration_runner_retries_database_locked_and_sets_busy_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "busy.db"
+    _create_legacy_memories_table(db_path)
+
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir(parents=True, exist_ok=True)
+    (migrations_dir / "0001_test.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY);",
+        encoding="utf-8",
+    )
+
+    executed_sql: list[str] = []
+
+    class _FakeCursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return list(self._rows)
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.row_factory = None
+            self._migration_attempts = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def execute(self, sql: str, params=()):
+            normalized = " ".join(sql.split())
+            executed_sql.append(normalized)
+            if normalized == "PRAGMA foreign_keys = ON":
+                return _FakeCursor([])
+            if normalized.startswith("PRAGMA busy_timeout ="):
+                return _FakeCursor([])
+            if normalized.startswith("CREATE TABLE IF NOT EXISTS schema_migrations"):
+                return _FakeCursor([])
+            if normalized == "SELECT version, checksum FROM schema_migrations":
+                return _FakeCursor([])
+            if normalized == "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY)":
+                self._migration_attempts += 1
+                if self._migration_attempts == 1:
+                    raise sqlite3.OperationalError("database is locked")
+                return _FakeCursor([])
+            if normalized.startswith("INSERT INTO schema_migrations(version, applied_at, checksum)"):
+                return _FakeCursor([])
+            raise AssertionError(f"unexpected SQL: {normalized!r}")
+
+        def commit(self) -> None:
+            executed_sql.append("COMMIT")
+
+        def rollback(self) -> None:
+            executed_sql.append("ROLLBACK")
+
+    monkeypatch.setattr(
+        migration_runner_module.sqlite3,
+        "connect",
+        lambda _path: _FakeConnection(),
+    )
+
+    runner = MigrationRunner(_sqlite_url(db_path), migrations_dir=migrations_dir)
+
+    assert runner._apply_pending_sync() == ["0001"]
+    assert any(sql.startswith("PRAGMA busy_timeout =") for sql in executed_sql)
+    assert executed_sql.count(
+        "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY)"
+    ) == 2

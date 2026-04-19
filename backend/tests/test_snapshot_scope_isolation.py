@@ -141,7 +141,7 @@ def test_snapshot_manager_filters_sessions_by_current_database_scope(
     assert manager.get_snapshot("session-a", "notes://alpha") is None
 
 
-def test_snapshot_manager_resets_session_scope_when_same_session_id_is_reused_across_databases(
+def test_snapshot_manager_isolates_reused_session_ids_by_database_scope(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -172,11 +172,7 @@ def test_snapshot_manager_resets_session_scope_when_same_session_id_is_reused_ac
         },
     ) is True
 
-    manifest = json.loads(
-        (tmp_path / "snapshots" / session_id / "manifest.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    manifest = manager._load_manifest(session_id)
     sessions = manager.list_sessions()
     snapshots = manager.list_snapshots(session_id)
 
@@ -185,6 +181,51 @@ def test_snapshot_manager_resets_session_scope_when_same_session_id_is_reused_ac
     assert set(manifest["resources"]) == {"notes://beta"}
     assert [item["resource_id"] for item in snapshots] == ["notes://beta"]
     assert manager.get_snapshot(session_id, "notes://alpha") is None
+
+
+def test_snapshot_manager_preserves_other_database_session_on_session_id_collision(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(str(tmp_path / "snapshots"))
+    db_a = tmp_path / "scope-a.db"
+    db_b = tmp_path / "scope-b.db"
+    session_id = "shared-session"
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(db_a))
+    assert manager.create_snapshot(
+        session_id,
+        "notes://alpha",
+        "path",
+        {
+            "uri": "notes://alpha",
+            "operation_type": "create",
+        },
+    ) is True
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(db_b))
+    assert manager.create_snapshot(
+        session_id,
+        "notes://beta",
+        "path",
+        {
+            "uri": "notes://beta",
+            "operation_type": "create",
+        },
+    ) is True
+
+    assert [item["resource_id"] for item in manager.list_snapshots(session_id)] == [
+        "notes://beta"
+    ]
+    assert manager.get_snapshot(session_id, "notes://beta") is not None
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(db_a))
+    assert [item["resource_id"] for item in manager.list_snapshots(session_id)] == [
+        "notes://alpha"
+    ]
+    restored = manager.get_snapshot(session_id, "notes://alpha")
+    assert restored is not None
+    assert restored["data"]["uri"] == "notes://alpha"
 
 
 def test_snapshot_manager_hides_legacy_unscoped_sessions_when_database_scope_is_set(
@@ -260,7 +301,11 @@ def test_snapshot_manager_serializes_same_session_manifest_updates(
     failures: list[Exception] = []
     results: dict[str, bool] = {}
 
-    def delayed_save_manifest(target_session_id: str, manifest: dict[str, object]) -> None:
+    def delayed_save_manifest(
+        target_session_id: str,
+        manifest: dict[str, object],
+        **kwargs,
+    ) -> None:
         nonlocal save_call_count
         with save_call_guard:
             save_call_count += 1
@@ -270,7 +315,7 @@ def test_snapshot_manager_serializes_same_session_manifest_updates(
             assert release_first_save.wait(timeout=2)
         elif target_session_id == session_id and current_call == 2:
             second_save_started.set()
-        original_save_manifest(target_session_id, manifest)
+        original_save_manifest(target_session_id, manifest, **kwargs)
 
     def create_named_snapshot(name: str) -> None:
         try:
@@ -453,7 +498,11 @@ def test_delete_snapshot_keeps_resource_file_when_manifest_save_fails(
 
     original_save_manifest = manager._save_manifest
 
-    def _failing_save_manifest(_session_id: str, _manifest: dict[str, object]) -> None:
+    def _failing_save_manifest(
+        _session_id: str,
+        _manifest: dict[str, object],
+        **_kwargs,
+    ) -> None:
         raise RuntimeError("save_failed")
 
     manager._save_manifest = _failing_save_manifest  # type: ignore[method-assign]
@@ -463,6 +512,30 @@ def test_delete_snapshot_keeps_resource_file_when_manifest_save_fails(
 
     manager._save_manifest = original_save_manifest  # type: ignore[method-assign]
     assert resource_path.exists()
+
+
+def test_delete_snapshot_removes_manifest_entry_when_resource_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(str(tmp_path / "snapshots"))
+    session_id = "ghost-session"
+    uri = "notes://ghost"
+
+    assert manager.create_snapshot(
+        session_id,
+        uri,
+        "path",
+        {"uri": uri, "operation_type": "create"},
+    )
+
+    manifest = manager._load_manifest(session_id)
+    resource_file = manifest["resources"][uri]["file"]
+    resource_path = tmp_path / "snapshots" / session_id / "resources" / resource_file
+    resource_path.unlink()
+
+    assert manager.delete_snapshot(session_id, uri) is True
+    assert manager.list_snapshots(session_id) == []
+    assert (tmp_path / "snapshots" / session_id).exists() is False
 
 
 def test_snapshot_manager_sanitize_resource_id_uses_sha256_hash_suffix(

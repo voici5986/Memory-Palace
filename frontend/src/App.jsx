@@ -5,10 +5,6 @@ import clsx from 'clsx';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 
-import ReviewPage from './features/review/ReviewPage';
-import MemoryBrowser from './features/memory/MemoryBrowser';
-import MaintenancePage from './features/maintenance/MaintenancePage';
-import ObservabilityPage from './features/observability/ObservabilityPage';
 import FluidBackground from './components/FluidBackground';
 import SetupAssistantModal, {
   SETUP_ASSISTANT_DISMISSED_STORAGE_KEY,
@@ -23,6 +19,11 @@ import {
   isEdgeBrowserProfile,
 } from './lib/browserProfile';
 import { CHINESE_LOCALE, DEFAULT_LOCALE } from './i18n';
+
+const ReviewPage = React.lazy(() => import('./features/review/ReviewPage'));
+const MemoryBrowser = React.lazy(() => import('./features/memory/MemoryBrowser'));
+const MaintenancePage = React.lazy(() => import('./features/maintenance/MaintenancePage'));
+const ObservabilityPage = React.lazy(() => import('./features/observability/ObservabilityPage'));
 
 const ABSOLUTE_URL_PATTERN = /^([a-z][a-z\d+\-.]*:)?\/\//i;
 
@@ -291,6 +292,16 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
       {/* Main Area */}
       <div className="relative z-10 flex-1 min-h-0 overflow-hidden px-6 pb-6 pt-2">
         <div className="h-full w-full max-w-7xl mx-auto">
+          <React.Suspense
+            fallback={(
+              <div
+                role="status"
+                className="flex h-full items-center justify-center rounded-[32px] border border-white/40 bg-white/35 text-sm font-medium text-[color:var(--palace-muted)] backdrop-blur-xl"
+              >
+                {t('common.states.loading')}
+              </div>
+            )}
+          >
             <Routes key={routesKey}>
               <Route path="/" element={<Navigate to="/memory" replace />} />
               <Route path="/review" element={<ReviewPage />} />
@@ -299,6 +310,7 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
               <Route path="/observability" element={<ObservabilityPage />} />
               <Route path="*" element={<Navigate to="/memory" replace />} />
             </Routes>
+          </React.Suspense>
         </div>
       </div>
     </div>
@@ -311,6 +323,8 @@ function App() {
   const [authRevision, setAuthRevision] = React.useState(0);
   const [setupOpen, setSetupOpen] = React.useState(false);
   const [setupStatusProbe, setSetupStatusProbe] = React.useState(null);
+  const [setupOpenMode, setSetupOpenMode] = React.useState('manual');
+  const setupProbeRequestRef = React.useRef(0);
   const routerBasename = resolveAppBasename();
 
   const readDismissedState = React.useCallback(() => {
@@ -350,12 +364,14 @@ function App() {
           return;
         }
         if (readDismissedState() === '1') return;
+        setSetupOpenMode('auto');
         setSetupOpen(true);
       })
       .catch((error) => {
         if (cancelled) return;
         setSetupStatusProbe({ kind: 'error', error });
         if (readDismissedState() === '1') return;
+        setSetupOpenMode('auto');
         setSetupOpen(true);
       });
 
@@ -367,10 +383,23 @@ function App() {
   const handleOpenSetup = React.useCallback(() => {
     clearDismissedState();
     setSetupStatusProbe(null);
+    setSetupOpenMode('manual');
     setSetupOpen(true);
+    const requestId = setupProbeRequestRef.current + 1;
+    setupProbeRequestRef.current = requestId;
+    void getSetupStatus()
+      .then((status) => {
+        if (setupProbeRequestRef.current !== requestId) return;
+        setSetupStatusProbe({ kind: 'success', payload: status });
+      })
+      .catch((error) => {
+        if (setupProbeRequestRef.current !== requestId) return;
+        setSetupStatusProbe({ kind: 'error', error });
+      });
   }, [clearDismissedState]);
 
   const handleCloseSetup = React.useCallback(() => {
+    setupProbeRequestRef.current += 1;
     persistDismissedState(true);
     setSetupOpen(false);
   }, [persistDismissedState]);
@@ -402,6 +431,7 @@ function App() {
         open={setupOpen}
         authState={authState}
         initialStatusProbe={setupStatusProbe}
+        preferBaselineProfile={setupOpenMode === 'auto'}
         onAuthUpdated={handleAuthUpdated}
         onClose={handleCloseSetup}
       />

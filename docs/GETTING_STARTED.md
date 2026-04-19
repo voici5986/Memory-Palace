@@ -167,7 +167,7 @@ bash scripts/apply_profile.sh macos b
 >
 > 如果你已经准备好模型服务，并且明确要更高质量的深检索，再考虑升级到 `Profile C/D`：它需要你在 `.env` 中把 Embedding / Reranker 链路填好；如果还要启用 LLM 辅助的 write guard / gist / intent routing，再继续填写 `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、可选的 `INTENT_LLM_*`。详见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
 >
-> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router / openai` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。对 `Profile C/D` 来说，真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为只点了预设就把表单伪装成已经可保存。`Profile C` 预填的是本地 router 调试地址 `http://127.0.0.1:8001/v1`，它本身不是占位符；`Profile D` 预填的是远端模板地址 `https://router.example.com/v1`，保存前必须换成真实值。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都必须填一个真实的正整数 `embedding_dim`，向导也不会再替你猜一个 `1024`。`Profile A` 现在也会在向导里直接显示出来，它对应的仍然是默认 `keyword + none` 基线。
+> 现在通过首启配置向导在 `Profile B/C/D`、或 `hash / api / router / openai` 之间来回切时，当前表单里已经隐藏掉的旧字段会一起清掉，不会再把上一档没显示出来的 router/API 值顺手带着保存。这里说的是**本次保存 payload** 会跟着收干净，不等于后端会替你做任意历史配置清理。对 `Profile C/D` 来说，真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为只点了预设就把表单伪装成已经可保存。`Profile C` 预填的是本地 router 调试地址 `http://127.0.0.1:8001/v1`，它本身不是占位符；`Profile D` 预填的是远端模板地址 `https://router.example.com/v1`，保存前必须换成真实值。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都必须填一个真实的正整数 `embedding_dim`，向导也不会再替你猜一个 `1024`。`Profile A` 现在也会在向导里直接显示出来，它对应的仍然是默认 `keyword + none` 基线。这里再补一个容易混淆的小边界：首启自动弹出时，向导仍按这个文档基线来展示；但如果你是手动打开，或者 `/setup/status` 已经拿到了当前运行态，表单会回填真实状态。当前代码下，完全没配检索 env 的本地运行态会按后端真实默认值显示成 `hash / 64`，不再额外伪装成 `none`。
 >
 > 这里要特别注意：这不是“无感切档”。B 默认是本地 hash 向量，C/D 则依赖你配置的真实 embedding 维度。只要你切了 embedding backend / model / dimension，旧索引就可能不能直接复用。更稳的做法是先备份，再用 `index_status()` 检查；如果出现维度不一致告警，执行 `rebuild_index(wait=true)`，或者直接用新库验证。
 >
@@ -276,7 +276,7 @@ VITE v7.x.x  ready in xxx ms
 > 如果你配置了 `MCP_API_KEY`，打开页面后请点右上角 `设置 API 密钥`（英文模式下会显示 `Set API key`），在向导里输入同一把 key；如果你只想先让 Dashboard 鉴权通过，优先选择“只保存 Dashboard 密钥”即可。
 > 如果你启用了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，本机回环地址上的直连请求可直接访问这些受保护数据接口。
 
-> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。`Profile C` 预填的 `http://127.0.0.1:8001/v1` 是允许直接保存的真实本地 router 地址；真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。现在真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为点了 C/D 预设就把表单伪装成已经可保存。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都会继续要求一个真实的正整数 `embedding_dim`。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你本机确实要直连其它 private IP 字面量，还要额外补上 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的 base/model 补齐，或者先把 reranker 关掉。如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。
+> 如果你选择“只保存 Dashboard 密钥”，这把 key 会保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在只会帮你填一组建议字段，不代表 router 一定可达、embedding 维度已经对齐、或旧索引已经自动迁移。`Profile C` 预填的 `http://127.0.0.1:8001/v1` 是允许直接保存的真实本地 router 地址；真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。现在真正保存到本地 `.env` 前，向导也会继续卡住缺失的远端必填字段，不会因为点了 C/D 预设就把表单伪装成已经可保存。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都会继续要求一个真实的正整数 `embedding_dim`。`/embeddings`、`/rerank`、`/chat/completions` 这类常见 API 后缀会自动归一化；格式不对或指到 link-local 的 provider base 会在保存前直接拦下。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你本机确实要直连其它 private IP 字面量，还要额外补上 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的 base/model 补齐，或者先把 reranker 关掉。如果你刚切了 embedding backend / model / dimension，也别忘了重启后端，必要时重建索引。手动打开向导时，当前代码会优先回填 `/setup/status` 的真实运行态；只有首启自动弹出且仍处在文档基线时，才继续用 `Profile A` 的起步表单。
 >
 > 现在向导在 `hash / api / router / openai` 之间来回切时，也会把已经隐藏掉的旧字段一起清掉；如果你切到远端 embedding backend，保存时只会写入你明确提供的 `RETRIEVAL_EMBEDDING_DIM`。这能减少“看起来已经切档，实际还带着上一档残留字段”的情况，但它不等于自动替你验证 provider 一定可达。
 >
@@ -298,7 +298,7 @@ VITE v7.x.x  ready in xxx ms
 >
 > 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起代理到本机 SSE 进程；不需要再手动改 CORS。
 >
-> 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。
+> 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。当前前端里那层轻量 `EventSource` helper 也会跟着这个前缀去解析 `/sse`，所以带 basename 的部署不需要再额外把 SSE 手工改回站点根路径。
 >
 > 当前前端对这条路径也补过一轮实际行为复核：如果你把 `VITE_API_BASE_URL` 指到一个带前缀的 API 根路径，或者指到你自己的跨源 API 地址，浏览器里保存的 Dashboard 鉴权 key 现在也会继续附加到 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求上；但它仍然不会把这把 key 发到无关第三方绝对 URL。
 
@@ -528,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `984 passed, 22 skipped`；frontend `168 passed`；`npm run typecheck` 通过；前端 build 通过；repo-local live MCP e2e 也已通过。本轮还补跑了 A/B/C/D 路径的小样本本地 benchmark spot-check。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `1007 passed, 22 skipped`；frontend `172 passed`；`npm run typecheck`、前端 build、`npm run test:bundle-budget` 均通过；主 compose / GHCR / override 组合的 config 检查也都通过。本轮还补跑了本机隔离的 Profile B HTTP/proxy live probe，以及一条真实本地 C 路径检索验证（`1024` 维 embedding + reranker）。repo-local live MCP e2e、Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 

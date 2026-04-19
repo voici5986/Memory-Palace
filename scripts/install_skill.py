@@ -505,7 +505,8 @@ def _wrapper_binding_ok(command_parts: list[str], *, allow_relative: bool) -> bo
     if expected_python and _same_path(command, expected_python) and args[0] in python_wrapper_candidates:
         return True
     if _looks_like_python_command(command) and args[0] in python_wrapper_candidates:
-        return True
+        resolved_python = _normalized(shutil.which(command) or "")
+        return bool(expected_python and resolved_python and _same_path(resolved_python, expected_python))
     return False
 
 

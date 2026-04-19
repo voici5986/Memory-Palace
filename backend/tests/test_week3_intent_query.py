@@ -540,6 +540,7 @@ async def test_observability_search_exposes_session_first_metrics(
         query="index diagnostics",
         mode="hybrid",
         include_session=True,
+        session_id="obs-session-1",
     )
     response = await maintenance_api.run_observability_search(payload)
 
@@ -550,6 +551,39 @@ async def test_observability_search_exposes_session_first_metrics(
     assert metrics["dedup_dropped"] == 1
     assert metrics["session_contributed"] == 1
     assert metrics["global_contributed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_observability_search_requires_explicit_session_id_for_session_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeSearchClient()
+    session_calls = 0
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _session_search(*_args: Any, **_kwargs: Any):
+        nonlocal session_calls
+        session_calls += 1
+        return []
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.session_cache, "search", _session_search
+    )
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="index diagnostics",
+        mode="hybrid",
+        include_session=True,
+    )
+    response = await maintenance_api.run_observability_search(payload)
+
+    assert response["ok"] is True
+    assert response["counts"]["session"] == 0
+    assert session_calls == 0
 
 
 @pytest.mark.asyncio
@@ -574,6 +608,7 @@ async def test_observability_search_marks_degrade_when_session_cache_fails(
         query="index diagnostics",
         mode="hybrid",
         include_session=True,
+        session_id="obs-session-2",
     )
     response = await maintenance_api.run_observability_search(payload)
 
@@ -706,7 +741,7 @@ async def test_intent_llm_can_use_fallback_chat_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_observability_session_cache_uses_original_query(
+async def test_observability_session_cache_uses_rewritten_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_client = _FakeSearchClient()
@@ -734,5 +769,5 @@ async def test_observability_session_cache_uses_original_query(
     response = await maintenance_api.run_observability_search(payload)
 
     assert response["ok"] is True
-    assert captured["query"] == "Why did index rebuild fail?"
+    assert captured["query"] == "why did index rebuild fail"
     assert captured["session_id"] == "api-observability"

@@ -159,6 +159,8 @@ import sys
 port = int(sys.argv[1])
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
+    # docker compose publishes host ports without a loopback-only host IP, so
+    # probe the wildcard bind instead of only 127.0.0.1.
     sock.bind(("0.0.0.0", port))
 except OSError as exc:
     if exc.errno == errno.EADDRINUSE:

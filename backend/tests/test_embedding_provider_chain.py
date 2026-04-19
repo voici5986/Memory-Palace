@@ -228,7 +228,7 @@ async def test_private_literal_embedding_base_is_ignored_without_allowlist(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
-    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.88.1.144:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
     monkeypatch.delenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", raising=False)
@@ -256,15 +256,15 @@ async def test_private_literal_embedding_base_is_allowed_with_allowlist(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
-    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.88.1.144:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "dim-check-model")
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "16")
-    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.88.0.0/16")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.0/8")
 
     client = SQLiteClient(_sqlite_url(tmp_path / "embedding-private-base-allowed.db"))
     await client.init_db()
 
-    assert client._embedding_api_base == "http://10.88.1.144:11435/v1"
+    assert client._embedding_api_base == "http://10.0.0.8:11435/v1"
 
     await client.close()
 

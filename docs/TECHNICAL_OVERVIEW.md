@@ -55,7 +55,7 @@ backend/
 - **`mcp_server.py`**：实现 9 个 MCP 工具，包括 URI 解析（`domain://path` 格式）、快照管理、write guard 决策、会话缓存、异步索引入队等核心逻辑。同时提供系统 URI（`system://boot`、`system://index`、`system://index-lite`、`system://audit`、`system://recent`）资源。当前公开支持的 MCP 入口是 `stdio` 和 SSE：`stdio` 直接连工具进程；远程访问则通过 `/sse + /messages` 这条 SSE 链路，并继续受 API Key 与网络侧安全控制约束。`search_memory` 现在还会把极端 `candidate_multiplier` 再压回一个硬上限，并通过 metadata 暴露实际生效的 `candidate_limit_applied`；在 session-first 合并之后，最终返回结果也会再按对外暴露的 `score` 做一次稳定排序，避免出现“顺序和分数字段不一致”的返回契约；如果调用方只关心结果本身，也可以传 `verbose=false` 省掉高噪音调试字段。最终结果回包前的 path 状态复核，现在也会优先走批量查询，减少结果较多时逐条回查 SQLite 的额外开销；如果复核 lookup 自己出错，当前实现会直接丢掉这条结果，并在回包里带上降级信号，而不是继续 fail-open 把可能过期的结果照常返回。`fast` interaction tier 传下去的 candidate cap 现在也会继续压住 `temporal/causal` 这类 intent widening，不会到了 SQLite 层又被悄悄抬高。`create_memory` 在 write guard 临时异常或降级导致 fail-closed 时，当前返回里也会明确标出 `retryable` / `retry_hint`，避免调用方把“临时不可用”误读成“永远不能创建”。`compact_context` / auto-flush 这条摘要落盘路径现在还会额外走一层基于数据库文件的 session 级进程锁，避免两个本地进程同时压同一条 session 时重复写入。reflection prepare 的共享任务当前还会显式跟踪 waiter 数量：最后一个等待方取消后，后台 task 会一起回收，不再留下孤儿 prepare；import/learn meta persist locks 也改成按 event loop 的弱引用缓存，避免 loop 生命周期结束后字典还一直涨。
 - **`runtime_state.py`**：管理写入 lane（串行化写操作）、索引 worker（异步队列处理索引重建任务）、vitality 衰减调度、cleanup review 审批流程和 sleep consolidation 调度等运行时状态。当前 session-first 检索缓存与 flush tracker 都采用“**单 session 限长 + 总 session 数上限**”的进程内边界，避免长时间运行后按 session 数无限增长；session-first 命中缓存还会惰性清理过期条目，避免旧命中长期占着容量。`SessionRecentReadCache` 这条最近读取缓存现在也按 LRU 语义刷新命中顺序，不再是“读过但淘汰顺序不变”。
 - **`run_sse.py`**：SSE 传输层，负责 API Key 鉴权和 `/sse`、`/messages` 两条链路的会话管理。当前实现会在客户端断开后清理 session；如果你继续拿旧的 `session_id` 往 `/messages` 发请求，服务端会明确返回 `404/410`，而不是假装 `202 Accepted`。它现在还会在受信代理链路下优先按 `X-Forwarded-For` / `X-Real-IP` 识别真实客户端地址来做 `/messages` burst limit，并默认发送 15 秒 heartbeat ping。传输层的 host/origin 校验现在默认保留本机回环 allowlist；如果你确实需要远程 hostname / origin 通过校验，可以显式补 `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`，而不是依赖非回环监听地址去“自动放开”。仓库当前保留两种使用方式：本地可独立运行 `run_sse.py` 做 standalone 调试；Docker 默认路径则把同一套 SSE 入口直接挂进 `main.py` 的 backend 进程，通过前端代理暴露。
-- **`setup.py`**：首启配置与本地 `.env` 写入口。当前 `/setup/status` 和 `/setup/config` 在判断 setup 管理变量时，会把“真正的进程显式覆盖”和“服务启动时只是从 `.env` 读进来的值”分开看；所以 status/save 不会再把 `.env` 启动值误判成 process override，本地保存后也能把当前进程里的 setup 管理配置刷新到新值。`/setup/status` 的可写性探测现在也是纯检查：只看状态不会为了探测先创建目标父目录。第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；provider API base 也会先做归一化和校验，像 `/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉，而格式不对或指到 link-local 的地址会直接拒绝。
+- **`setup.py`**：首启配置与本地 `.env` 写入口。当前 `/setup/status` 和 `/setup/config` 在判断 setup 管理变量时，会把“真正的进程显式覆盖”和“服务启动时只是从 `.env` 读进来的值”分开看；所以 status/save 不会再把 `.env` 启动值误判成 process override，本地保存后也能把当前进程里的 setup 管理配置刷新到新值。`/setup/status` 的可写性探测现在也是纯检查：只看状态不会为了探测先创建目标父目录。第一次往本地 `.env` 保存时，`Dashboard API key` 现在必须非空；provider API base 也会先做归一化和校验，像 `/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉，而格式不对或指到 link-local 的地址会直接拒绝。检索相关 env 全缺失时，`/setup/status` 现在也会按运行时真实默认值汇总成 `hash / 64`，不再额外伪装成 `none`。
 - **`db/sqlite_client.py`**：SQLite 数据库操作层，包含记忆 CRUD、keyword/semantic/hybrid 三种检索模式、write_guard 逻辑（支持语义匹配 + 关键词匹配 + LLM 决策三级判定）、gist 生成与缓存、vitality 评分与衰减、embedding 获取（支持远程 API 和本地 hash 两种模式）、reranker 集成。数据库初始化现在还会用基于数据库文件路径的 `.init.lock` 做进程级串行化，避免 `backend` / `sse` 首次并发启动时互相抢库；`:memory:` 这类非文件目标不会生成这个锁。keyword fallback 的 `LIKE` 查询现在会转义 `%` 和 `_`，避免把通配符当普通搜索词时误扫出一大片不相关结果。运行时如果读到无效的 `chat / embedding / reranker` API base，当前实现会按 fail-closed 处理：忽略这条 base 并走降级/回退，而不是继续拿它发请求；默认 factual 意图现在也显式映射到 `factual_high_precision` 模板。
 - **`db/migration_runner.py`**：负责发现和执行 SQL migration，并记录版本与 checksum。当前 checksum 归一化不仅会处理 `CRLF/LF`，也会剥离 UTF-8 BOM，所以同一份 migration 只是被 Windows/Notepad 改了文件头，不会被误判成 schema drift。
 
@@ -100,6 +100,7 @@ backend/
 
 - snapshot 文件仍然位于仓库级 `snapshots/` 目录；
 - 但会话列表、快照列表和快照读取会按**当前数据库作用域**过滤，避免你在同一 checkout 下切换 `DATABASE_URL`、临时 SQLite 文件或 Docker 数据卷后，把另一份库的 rollback 会话混进当前审查列表；
+- 如果同一个 `session_id` 在另一份数据库作用域里已经有旧快照，当前作用域不会再因为 fingerprint 不匹配就把那棵旧 session 目录物理删掉；它会继续留在原作用域下，只有你切回那份数据库时才重新可见；
 - 同一个 `session_id` 下的 snapshot 写路径现在会串行化，`manifest.json` 和单个快照 JSON 文件也会通过原子替换落盘；同一套快照目录还会做保守的 session 级 retention/GC：按 age/count 清理旧 session、保护当前 session、对拿不到锁的旧 session 先跳过；所以多个本地进程共用同一个 checkout 时，活跃 session 不会为了抢锁被误删，快照元数据也更不容易丢条目或出现半写入 JSON；
 - 如果 `manifest.json` 损坏，后端现在会优先使用 session 侧记录的数据库作用域去重建；只有在能保住原始作用域时才会把重建结果写回。拿不到可靠作用域时，这条会话会先保持隐藏，也不会被一次只读的会话列表请求自动删掉；
 - 没有数据库作用域标记的 legacy snapshot 会话，默认不会继续暴露在当前 Review 列表里；当前实现还会对这类“被隐藏的老会话”补一条一次性 warning，避免升级后看起来像快照凭空消失。
@@ -170,9 +171,11 @@ backend/
 
 - `POST /maintenance/learn/reflection` 的 `prepare` 仍然只是准备态；真正会落库的 `execute` 现在会进入同一条 write lane，和其他写操作保持一致的串行化语义
 - reflection execute 成功后，当前 learn job 会同时带上对应的 review snapshot 信息；`/maintenance/learn/jobs/{job_id}/rollback` 这条维护接口现在会继续委托给 review rollback，而不是绕开 review 语义自己删数据
+- reflection rollback 现在必须显式带 `session_id`；后台会先拿这个 `session_id`（以及有值时的 `actor_id`）和 learn job 本身做一致性校验，不再默默回退到 ambient session
+- 如果 reflection execute 的 rollback 先走了 review snapshot，后端现在还会继续对自动创建的 reflection namespace 做 best-effort cleanup，避免只回滚 leaf path 却把空父路径永远留在库里
 - 如果同一个 `session_id`、`source`、`reason`、`content` 被并发 `prepare`，现在会复用同一个 prepared review，而不是为同一批内容生成多个 review ID
 - `/maintenance/observability/summary` 里的 `reflection_workflow` 统计现在会合并持久化 summary，重启后 summary 计数口径稳定；这里说的是 summary 稳定，不是把所有明细事件都永久保留下来
-- 如果调用方显式传了空白或只含空格的 `session_id`，reflection workflow 现在会直接按 `session_id_invalid` fail-closed；只有真的没传 `session_id` 时，才会回退到 ambient session
+- 如果调用方显式传了空白或只含空格的 `session_id`，reflection workflow 现在会直接按 `session_id_invalid` fail-closed；rollback 这条路径也一样，不再接受 ambient session fallback
 
 当前后端默认不会公开 `http://127.0.0.1:8000/docs`；直接访问一般会得到 `404`。接口说明优先看这里、[TOOLS.md](TOOLS.md) 和 `backend/tests/` 里的接口测试。
 
@@ -249,9 +252,9 @@ frontend/src/
 - 如果服务端 Dashboard 鉴权已经生效，尤其是标准 Docker proxy-held key 路径，首启配置向导现在不会只因为浏览器本地还没保存 key 就自己误弹
 - 浏览器里保存的 Dashboard 鉴权现在走当前浏览器会话的 `sessionStorage`；若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但只会在确认 `localStorage` 里还是那份旧值时才删除它，避免多标签页同时迁移时误删新值。通过 Setup Assistant 保存本地 `.env` 时，如果表单里带了当前 key，前端也会把这把 key 一并落到浏览器会话；如果这次保存把 key 清空，旧的浏览器侧保存值也会一起清掉
 - Setup Assistant 现在在 `Profile B/C/D`、以及 `hash / api / router / openai` 这些切换之间，会把当前已经隐藏的旧字段一起清掉，减少把上一档残留的 router/API 值继续带进本次保存的情况；切到远端 embedding backend 时，只有你明确填写了真实的 `RETRIEVAL_EMBEDDING_DIM` 才会保存，不会再继续沿用旧 `64`，也不会替你猜一个 `1024`。`/setup/config` 也已经支持 `openai` embedding backend
-- Setup Assistant 现在也会把 `Profile A` 直接显示出来；它对应的还是默认 `keyword + none` 基线，不是新增的一条独立高阶配置档
+- Setup Assistant 现在也会把 `Profile A` 直接显示出来；它对应的还是默认 `keyword + none` 基线，不是新增的一条独立高阶配置档。这里要注意一个当前实现的小边界：首启自动弹出时仍按这个文档基线展示，但手动打开、或 `/setup/status` 已经拿到真实运行态时，表单会优先回填当前状态；在完全没配检索 env 的本地运行态下，这个真实状态现在会显示成 `hash / 64`
 - Setup Assistant 现在一打开就会优先把焦点放到 Dashboard API key 输入框；`Escape` 可以直接关闭，`Tab/Shift+Tab` 会在弹窗内部循环，不会把键盘焦点甩到弹窗外面
-- 前端现在还额外抽出了一层轻量 `EventSource` helper（`frontend/src/lib/sse.js`）；repo-local Vite 的 `/sse` 代理继续保留，主要就是给本地同源 EventSource / MCP 调试复用
+- 前端现在还额外抽出了一层轻量 `EventSource` helper（`frontend/src/lib/sse.js`）；repo-local Vite 的 `/sse` 代理继续保留，主要就是给本地同源 EventSource / MCP 调试复用。如果你给前端配了带前缀的 `VITE_API_BASE_URL`，这层 helper 现在也会按同一个前缀去解析 `/sse`，而不是偷偷退回站点根路径
 - `Maintenance` 页的 vitality cleanup confirm 现在不是“失败就一律把 prepared review 清空”；像 `401`、超时、网络错误这类更像临时失败的情况，会保留当前 prepared review，方便修完鉴权或网络后直接重试
 - Memory 页的“离开未保存编辑”和“删除路径”现在都走 fail-closed 确认逻辑；如果宿主环境不支持原生 `confirm()`，动作会被直接拦下，并给出页内错误提示，而不是静默继续
 
