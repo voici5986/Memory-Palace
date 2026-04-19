@@ -10,6 +10,7 @@ class _FakeIntentClient:
     def __init__(self) -> None:
         self.meta_store: Dict[str, str] = {}
         self.received_filters: Dict[str, Any] = {}
+        self.received_mode: str | None = None
 
     def preprocess_query(self, query: str) -> Dict[str, Any]:
         rewritten = " ".join(query.lower().replace("?", "").split())
@@ -57,7 +58,7 @@ class _FakeIntentClient:
         intent_profile: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         _ = query
-        _ = mode
+        self.received_mode = mode
         _ = max_results
         _ = candidate_multiplier
         self.received_filters = dict(filters)
@@ -336,6 +337,29 @@ async def test_observability_search_accepts_scope_hint_deep_as_interaction_tier(
     assert result["scope_hint_applied"] is False
     assert result["scope_strategy_applied"] == "none"
     assert fake_client.received_filters == {}
+
+
+@pytest.mark.asyncio
+async def test_observability_search_uses_configured_default_mode_when_not_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeIntentClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(maintenance_api, "_DEFAULT_SEARCH_MODE", "semantic")
+
+    payload = maintenance_api.SearchConsoleRequest(
+        query="When did we rebuild index?",
+        include_session=False,
+    )
+    result = await maintenance_api.run_observability_search(payload)
+
+    assert fake_client.received_mode == "semantic"
+    assert result["query"] == "When did we rebuild index?"
 
 
 @pytest.mark.asyncio

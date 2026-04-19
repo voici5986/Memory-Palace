@@ -169,9 +169,10 @@ backend/
 
 和这轮 reflection 修复直接相关的边界也补一句：
 
+- `/maintenance/observability/search` 如果请求里没有显式传 `mode`，后台现在会按 `SEARCH_DEFAULT_MODE` 走；只有调用方明确带了 `mode`，才会覆盖这个默认值
 - `POST /maintenance/learn/reflection` 的 `prepare` 仍然只是准备态；真正会落库的 `execute` 现在会进入同一条 write lane，和其他写操作保持一致的串行化语义
 - reflection execute 成功后，当前 learn job 会同时带上对应的 review snapshot 信息；`/maintenance/learn/jobs/{job_id}/rollback` 这条维护接口现在会继续委托给 review rollback，而不是绕开 review 语义自己删数据
-- reflection rollback 现在必须显式带 `session_id`；后台会先拿这个 `session_id`（以及有值时的 `actor_id`）和 learn job 本身做一致性校验，不再默默回退到 ambient session
+- reflection rollback 现在不再依赖 ambient session。调用方如果已经知道 `session_id`，后台仍会拿这个 `session_id`（以及有值时的 `actor_id`）和 learn job 本身做一致性校验；如果 rollback 只带了 learn `job_id`，后台会先从这条 job 里恢复原始 `session_id` 再继续
 - 如果 reflection execute 的 rollback 先走了 review snapshot，后端现在还会继续对自动创建的 reflection namespace 做 best-effort cleanup，避免只回滚 leaf path 却把空父路径永远留在库里
 - 如果同一个 `session_id`、`source`、`reason`、`content` 被并发 `prepare`，现在会复用同一个 prepared review，而不是为同一批内容生成多个 review ID
 - `/maintenance/observability/summary` 里的 `reflection_workflow` 统计现在会合并持久化 summary，重启后 summary 计数口径稳定；这里说的是 summary 稳定，不是把所有明细事件都永久保留下来
@@ -358,15 +359,15 @@ Docker 端口环境变量：
 
 相关文件：
 
-- Compose 文件：`docker-compose.yml`（frontend healthcheck 在探测 `127.0.0.1:8080` 前会先显式 unset `http_proxy/https_proxy/all_proxy/no_proxy` 这一组环境变量，避免容器继承宿主代理后把本机探活误导到代理链路）
+- Compose 文件：`docker-compose.yml`、`docker-compose.ghcr.yml`（`docker-compose.yml` 里的 frontend healthcheck 在探测 `127.0.0.1:8080` 前会先显式 unset `http_proxy/https_proxy/all_proxy/no_proxy` 这一组环境变量，避免容器继承宿主代理后把本机探活误导到代理链路；`docker-compose.ghcr.yml` 会继续显式把 backend 绑到 `0.0.0.0`，让 GHCR 路径和本地 compose 保持同一套健康检查前提）
 - 镜像定义：`deploy/docker/Dockerfile.backend`（基于 `python:3.11-slim`）、`deploy/docker/Dockerfile.frontend`（构建阶段 `node:22-alpine`，运行阶段 `nginxinc/nginx-unprivileged:1.27-alpine`）
-- Backend 健康检查脚本：`deploy/docker/backend-healthcheck.py`（容器内对 `/health` 做二次检查，要求返回 payload 的 `status == "ok"`；默认超时 `5` 秒，可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整）
+- Backend 健康检查脚本：`deploy/docker/backend-healthcheck.py`（容器内对 `/health` 做二次检查，要求返回 payload 的 `status == "ok"`；默认超时 `5` 秒，可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整；backend 镜像现在会把这条检查接进 Docker `HEALTHCHECK`，GHCR 发布前也会先确认 helper 已经打进镜像）
 - Nginx 配置模板：`deploy/docker/nginx.conf.template`（仅对受保护的 Dashboard API 路径和 `/sse` / `/messages` 注入 `X-MCP-API-Key`，并对 `/index.html` 返回 no-store/no-cache/must-revalidate，减少前端更新后继续命中旧入口页面；前端入口脚本会先对代理持有的 key 做一次特殊字符转义，并拒绝剩余 ASCII 控制字符，再生成最终 Nginx 配置）
 - 入口脚本：`deploy/docker/backend-entrypoint.sh`、`deploy/docker/frontend-entrypoint.sh`（后端入口脚本在 root 场景下如果找不到 `gosu` 会直接 fail-closed）
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
-- 分享前检查：`scripts/pre_publish_check.sh`
+- 分享前检查：`scripts/pre_publish_check.sh`（会拦截已跟踪的 `.audit` / `.playwright-mcp` 工件，也会扫描 tracked 文件里的本地 endpoint / key 模式，例如 `sk-local-*`、以及带端口的 loopback / private provider 地址；仓库自己的前端 loopback health probe 不会被误报）
 
-当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 实测 backend `966 passed, 20 skipped`、frontend `165 passed`，前端 typecheck 和 build 通过，repo-local live MCP e2e 也已通过。repo-local `Profile B` 这轮还实际跑了 backend + frontend + 真实浏览器 setup/maintenance smoke；另外也补跑了一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke。Docker one-click 的 `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 重新实测 backend `1017 passed, 22 skipped`、frontend `173 passed`，前端 typecheck / build、`bash scripts/pre_publish_check.sh`，以及 `docker compose -f docker-compose.ghcr.yml config` 都通过。repo-local macOS `Profile B` 这轮还实际补跑了真实浏览器 smoke；另外也补跑了一条带显式 private-target allowlist 的本地 C/D retrieval + reranker + LLM smoke。repo-local live MCP e2e、Docker one-click `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
 
 ---
 

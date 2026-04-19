@@ -22,6 +22,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import List, Tuple
+from urllib.parse import unquote
 
 try:
     from dotenv import dotenv_values
@@ -98,21 +99,55 @@ def _normalize_env_string_value(value: str | None) -> str:
     return normalized.strip()
 
 
-def _normalize_sqlite_database_url_path(value: str | None) -> str:
-    normalized = _normalize_env_string_value(value).replace("\\", "/")
-    if not normalized:
-        return ""
+def _decode_percent_escaped_value(value: str) -> str:
+    decoded = value
+    for _ in range(3):
+        unquoted = unquote(decoded)
+        if unquoted == decoded:
+            break
+        decoded = unquoted
+    return decoded
 
-    normalized = normalized.casefold()
-    if not normalized.startswith(SQLITE_DATABASE_URL_SCHEME):
-        return ""
+
+def _split_sqlite_database_url_path(value: str | None) -> tuple[str, bool]:
+    normalized = _decode_percent_escaped_value(
+        _normalize_env_string_value(value)
+    ).replace("\\", "/")
+    if not normalized:
+        return "", False
+
+    if not normalized.casefold().startswith(SQLITE_DATABASE_URL_SCHEME):
+        return "", False
 
     path = normalized[len(SQLITE_DATABASE_URL_SCHEME) :]
-    return f"/{path.lstrip('/')}"
+    if re.match(r"^///[A-Za-z]:/.*", path):
+        return path[3:], True
+    if re.match(r"^[A-Za-z]:/.*", path):
+        return path, True
+    if path.startswith("////"):
+        return f"/{path.lstrip('/')}", True
+    if path.startswith("///"):
+        return path[3:], False
+    if path.startswith("/") and not path.startswith("//"):
+        return path, True
+    return path.lstrip("/"), False
+
+
+def _normalize_sqlite_database_url_path(value: str | None) -> str:
+    path, _ = _split_sqlite_database_url_path(value)
+    return path.casefold()
+
+
+def _sqlite_database_url_is_relative(value: str | None) -> bool:
+    path, is_absolute = _split_sqlite_database_url_path(value)
+    return bool(path) and not is_absolute
 
 
 def is_docker_internal_database_url(value: str | None) -> bool:
-    normalized_path = _normalize_sqlite_database_url_path(value)
+    normalized_path, is_absolute = _split_sqlite_database_url_path(value)
+    if not is_absolute:
+        return False
+    normalized_path = normalized_path.casefold()
     return any(
         normalized_path.startswith(prefix)
         for prefix in DOCKER_INTERNAL_SQLITE_PREFIXES
@@ -218,6 +253,18 @@ def build_runtime_env() -> dict[str, str]:
         print(
             "The DATABASE_URL path must be a normalized host absolute path and must not "
             "contain '..' segments.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if _sqlite_database_url_is_relative(effective_database_url):
+        print(
+            "Refusing to start repo-local stdio MCP with relative DATABASE_URL: "
+            f"{_normalize_env_string_value(effective_database_url)}",
+            file=sys.stderr,
+        )
+        print(
+            "The DATABASE_URL path must be a normalized host absolute path.",
             file=sys.stderr,
         )
         raise SystemExit(1)

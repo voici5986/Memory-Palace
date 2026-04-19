@@ -505,6 +505,8 @@ const en = {
     summaryError: 'Failed to load observability summary',
     diagnosticSearchFailed: 'Diagnostic search failed',
     messages: {
+      jobTarget: 'job {{jobId}}',
+      syncTarget: 'sync',
       rebuildRequested: 'Rebuild requested ({{job}})',
       rebuildFailed: 'Rebuild failed: {{detail}}',
       sleepRequested: 'Sleep consolidation requested ({{job}})',

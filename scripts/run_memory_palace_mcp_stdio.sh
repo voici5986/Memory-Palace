@@ -317,30 +317,70 @@ format_sqlite_absolute_url() {
 }
 
 normalize_sqlite_database_url_path() {
-  local value
+  local info
+  info="$(sqlite_database_url_path_info "${1:-}")"
+  printf '%s' "${info%%|*}" | tr '[:upper:]' '[:lower:]'
+}
+
+sqlite_database_url_path_info() {
+  local value previous pass path scheme_prefix
   value="$(normalize_env_value "${1:-}")"
+  previous=""
+  for pass in 1 2 3; do
+    [[ "${value}" == *%* ]] || break
+    [[ "${value}" != "${previous}" ]] || break
+    previous="${value}"
+    value="${value//\\/\\\\}"
+    value="$(printf '%b' "${value//%/\\x}")"
+  done
   value="$(normalize_path_slashes "${value}")"
-  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
-  if [[ "${value}" != sqlite+aiosqlite:* ]]; then
-    printf '%s' ""
+  if [[ "$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')" != sqlite+aiosqlite:* ]]; then
+    printf '%s' "|0"
     return 0
   fi
 
-  value="${value#sqlite+aiosqlite:}"
-  while [[ "${value}" == /* ]]; do
-    value="${value#/}"
-  done
-  printf '/%s' "${value}"
+  scheme_prefix="sqlite+aiosqlite:"
+  path="${value:${#scheme_prefix}}"
+  if [[ "${path}" =~ ^///[A-Za-z]:/.*$ ]]; then
+    printf '%s|1' "${path:3}"
+  elif [[ "${path}" =~ ^[A-Za-z]:/.*$ ]]; then
+    printf '%s|1' "${path}"
+  elif [[ "${path}" == ////* ]]; then
+    while [[ "${path}" == /* ]]; do
+      path="${path#/}"
+    done
+    printf '/%s|1' "${path}"
+  elif [[ "${path}" == ///* ]]; then
+    printf '%s|0' "${path:3}"
+  elif [[ "${path}" == /* && "${path}" != //* ]]; then
+    printf '%s|1' "${path}"
+  else
+    while [[ "${path}" == /* ]]; do
+      path="${path#/}"
+    done
+    printf '%s|0' "${path}"
+  fi
 }
 
 is_docker_internal_database_url() {
   local normalized_path
-  normalized_path="$(normalize_sqlite_database_url_path "${1:-}")"
+  local info
+  info="$(sqlite_database_url_path_info "${1:-}")"
+  if [[ "${info##*|}" != "1" ]]; then
+    return 1
+  fi
+  normalized_path="$(printf '%s' "${info%%|*}" | tr '[:upper:]' '[:lower:]')"
   local prefix
   for prefix in "${DOCKER_INTERNAL_SQLITE_PREFIXES[@]}"; do
     [[ "${normalized_path}" == "${prefix}"* ]] && return 0
   done
   return 1
+}
+
+database_url_is_relative() {
+  local info
+  info="$(sqlite_database_url_path_info "${1:-}")"
+  [[ -n "${info%%|*}" && "${info##*|}" == "0" ]]
 }
 
 database_url_has_parent_reference() {
@@ -387,6 +427,12 @@ fi
 if database_url_has_parent_reference "${effective_database_url}"; then
   echo "Refusing to start repo-local stdio MCP with parent-directory DATABASE_URL: ${effective_database_url}" >&2
   echo "The DATABASE_URL path must be a normalized host absolute path and must not contain '..' segments." >&2
+  exit 1
+fi
+
+if database_url_is_relative "${effective_database_url}"; then
+  echo "Refusing to start repo-local stdio MCP with relative DATABASE_URL: ${effective_database_url}" >&2
+  echo "The DATABASE_URL path must be a normalized host absolute path." >&2
   exit 1
 fi
 

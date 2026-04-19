@@ -262,6 +262,12 @@ const translateObservabilityToken = (t, group, value, fallback = '-') => {
 const translateObservabilityBoolean = (t, value) =>
   t(`observability.booleans.${value ? 'true' : 'false'}`);
 
+const formatObservabilityRequestTarget = (t, jobId) => (
+  jobId
+    ? t('observability.messages.jobTarget', { jobId: String(jobId) })
+    : t('observability.messages.syncTarget')
+);
+
 const parseOptionalNonNegativeInteger = (rawValue, label, t) => {
   const normalized = String(rawValue ?? '').trim();
   if (!normalized) return null;
@@ -624,8 +630,8 @@ export default function ObservabilityPage() {
         reason: 'observability_console',
         wait: false,
       });
-      const jobId = data?.job_id ? `job ${data.job_id}` : 'sync';
-      setRebuildMessage(t('observability.messages.rebuildRequested', { job: jobId }));
+      const requestTarget = formatObservabilityRequestTarget(t, data?.job_id);
+      setRebuildMessage(t('observability.messages.rebuildRequested', { job: requestTarget }));
       await loadSummary();
     } catch (err) {
       setRebuildMessage(t('observability.messages.rebuildFailed', { detail: extractApiError(err) }));
@@ -642,8 +648,8 @@ export default function ObservabilityPage() {
         reason: 'observability_console',
         wait: false,
       });
-      const jobId = data?.job_id ? `job ${data.job_id}` : 'sync';
-      setRebuildMessage(t('observability.messages.sleepRequested', { job: jobId }));
+      const requestTarget = formatObservabilityRequestTarget(t, data?.job_id);
+      setRebuildMessage(t('observability.messages.sleepRequested', { job: requestTarget }));
       await loadSummary();
     } catch (err) {
       setRebuildMessage(t('observability.messages.sleepFailed', { detail: extractApiError(err) }));
@@ -746,8 +752,8 @@ export default function ObservabilityPage() {
           throw err;
         }
       }
-      const requestedJob = payload?.job_id ? `job ${payload.job_id}` : 'sync';
-      setRebuildMessage(t('observability.messages.retryRequested', { job: requestedJob }));
+      const requestTarget = formatObservabilityRequestTarget(t, payload?.job_id);
+      setRebuildMessage(t('observability.messages.retryRequested', { job: requestTarget }));
       await loadSummary();
     } catch (err) {
       setRebuildMessage(t('observability.messages.retryFailed', {

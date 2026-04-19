@@ -53,9 +53,10 @@
 
 - **多语言检索现在更少丢信号了**：本地 `hash embedding`、`MMR` 去重和 session-first cache 现在都能更一致地保留中日韩与混合 Latin 文本，并会把 `ＡＰＩ` 这类全角 Latin 归一到和 `API` 同一条检索路径里。
 - **本地 C/D 的 Docker 联调不那么脆了**：对 `docker_one_click.sh/.ps1 --allow-runtime-env-injection` 来说，模板占位符校验现在会先延后到运行时注入落盘之后，再继续做 fail-closed 检查；缺失必填值时仍然会直接拦下。
-- **repo-local wrapper 现在会更一致地拦住 Docker sqlite 容器路径**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`，所以像 `sqlite+aiosqlite://///app/data/...` 这类值不会再被误放过。
+- **repo-local wrapper 现在会更一致地拦住本地 sqlite 误配**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，拒绝相对 sqlite 路径，也会把常见的 URL 编码容器路径先解开，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`。说人话就是：像 `sqlite+aiosqlite:///demo.db`、`sqlite+aiosqlite://///app/data/...`、`sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这类值，现在都不会再被误放过。
 - **Docker 基础镜像现在也收得更紧了**：仓库自带的 Dockerfile 现在把基础镜像 digest 一起锁住了，后面重建时不容易再因为上游 tag 漂了而悄悄变样。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `984 passed, 22 skipped`；前端 `168 passed`；前端 `npm run build` 和 `npm run typecheck` 都通过；repo-local live MCP e2e 也通过（`14/14`）。这一轮还补跑了 A/B/C/D 路径的小样本本地 benchmark spot-check。原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 这轮仍未重跑，继续保留目标环境复验边界。
+- **GHCR 发布镜像现在会先自查 backend 健康脚本了**：backend 镜像现在自带 Docker 级别的 `HEALTHCHECK`，`docker-compose.ghcr.yml` 里的 backend 也继续明确绑在 `0.0.0.0`，发布工作流还会在 push 前先检查 `/usr/local/bin/backend-healthcheck.py` 是否真的在镜像里而且可执行。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `1017 passed, 22 skipped`；前端 `173 passed`；前端 `npm run build`、`npm run typecheck` 和 `bash scripts/pre_publish_check.sh` 都通过；`docker compose -f docker-compose.ghcr.yml config` 也通过。这一轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke，以及一条带显式 private-target allowlist 的本地 C/D retrieval + reranker + LLM smoke。repo-local live MCP e2e、原生 Windows、原生 Linux 宿主 runtime 与 Docker one-click `Profile C/D` 这轮没有重跑，继续保留目标环境复验边界。
 - **private provider 字面量地址现在不会再被默认信任**：像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认可用；其它 private IP 字面量现在必须通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式 allowlist 才能继续使用。link-local 和格式错误地址仍然会 fail-close。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection 后台清理现在更收口了**：同一个 session、source、reason、content 的并发 `prepare` 请求，仍然会复用同一个 prepared review；如果最后一个等待方先走掉了，后端现在也会把这条已经没人等的后台 prepare 一起取消，不再让它自己继续跑完。
@@ -65,13 +66,15 @@
 - **Maintenance 里的孤儿记忆清理现在更顺手了**：孤儿记忆卡片现在可以直接用键盘聚焦，并用 `Enter` / `Space` 展开；批量删除也会并行发出少量请求，同时继续保留逐条失败和部分成功的提示。
 - **真实 benchmark 产物现在更诚实地记录降级了**：真实 A/B/C/D runner 现在会同时记录查询阶段和建索引阶段的降级信息；对 D 档位来说，`reranker` 配置缺失或响应无效都不会再被算成“干净通过”。
 - **本地验证报告现在更收口了**：skill / MCP smoke 报告会脱敏常见 secret、session token 和本地绝对路径，并在宿主支持时改用更私有的文件权限。
+- **分享前检查现在会更主动拦住本地工件了**：`scripts/pre_publish_check.sh` 现在会直接拦截已跟踪的 `.audit` / `.playwright-mcp` 工件，也会扫描 tracked 文件里的本地 endpoint/key 模式，比如 `sk-local-*`、以及带端口的 loopback/private provider 地址；仓库自己在 compose 里用来探测前端健康的 `127.0.0.1:8080` 这条合法探针不会再被误报。
+- **Observability 成功提示现在不再把英文词夹进中文里了**：重建、睡眠整合、任务重试这些成功提示现在会先走本地化 token，再拼进最终消息，所以中文界面里不会再看到生硬的 `job` / `sync` 片段。
 - **共用本地 SQLite 时，路径删除更稳了**：`delete_memory` 现在会把当前 path 状态读取、删除前 snapshot 取值和 path 删除都放进同一条 SQLite 写事务，而不是拆成多个独立数据库会话。
 - **回滚不再抹平 alias 自己的 metadata**：`rollback_to_memory(..., restore_path_metadata=True)` 现在只恢复当前选中 path 的 metadata，不会再把 alias 自己的 `priority` / `disclosure` 一起覆盖掉。
 - **metadata-only 回滚现在会按当前 path 状态 fail-close 了**：后端在真正恢复 `priority` / `disclosure` 前，会在 write lane 里再确认一次当前 path 指向和当前 metadata。要是 path 中途没了，现在会直接返回 `404`；要是 path 指向或 metadata 已经先变了，现在会返回 `409`，不再默默覆盖较新的状态，也不会再冒一个笼统的 `500`。
 - **Windows 运维脚本边界更稳了**：`apply_profile.sh` 现在能更安全地规范化从 PowerShell / WSL / Git Bash 传进来的 Windows 绝对目标路径，`docker_one_click.ps1` 现在也会用 UTF-8 without BOM 回写生成出来的 Docker env 文件。
 - **provider-chain 的缓存恢复更合理了**：对 fail-open embedding provider chain 来说，前一次远端失败后，后续请求现在可以复用 fallback/provider 的缓存结果，而不是总把后面的 provider 全部重打一遍。
 - **repo-local 校验现在更偏保守口径**：`evaluate_memory_palace_skill.py` 现在能更正确地解析常见 dotenv 风格的 `DATABASE_URL`，`gemini_live` 改成了显式 opt-in（`MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`），user-scope 绑定漂移或 Gemini 登录/鉴权提示也会被记成环境 `PARTIAL`，而不是直接当成仓库主链路失败。
-- **`session_id` 现在真正按 fail-close 处理了**：前后空白和控制类字符不会再先被归一化再继续往下走。说人话就是：像 `' abc'`、`'abc '`、`'\tabc'` 这种值，不会再被悄悄当成 `abc`。
+- **reflection rollback 现在既更可审计，也更兼容旧调用方式了**：这条回滚现在不再依赖 ambient session。调用方如果已经知道 `session_id`，后端仍然会拿它去和 learn job 做一致性校验；如果 rollback 只带了 learn `job_id`，后端现在会先从这条 job 里恢复出原始 `session_id` 再继续做回滚。明确传入空白或只含空格的 `session_id` 仍然会 fail-close。
 - **公开 `priority` 契约现在统一了**：MCP 工具入口不再先把 `True`、`False`、`1.9` 这类值强转成整数，再交给底层更严格的 SQLite 校验。说人话就是：非整数优先级现在会在公开工具路径上更早被拦下。
 - **Dashboard 鉴权现在会跟着配置好的 API base 走**：如果你把 `VITE_API_BASE_URL` 指到带前缀的路径，或者你自己的 API 域名，浏览器里保存的 Dashboard key 现在也会继续附加到 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求上；但它仍然**不会**被发到无关第三方绝对 URL。
 - **repo-local skill mirrors 已重新对齐**：canonical `memory-palace` skill 和 `.agent/.cursor` mirrors 现在重新一致，`python scripts/sync_memory_palace_skill.py --check` 在当前仓库状态下会返回 `PASS`。
@@ -406,7 +409,7 @@ DATABASE_URL=sqlite+aiosqlite:////absolute/path/to/demo.db
 DATABASE_URL=sqlite+aiosqlite:///C:/absolute/path/to/demo.db
 ```
 
-> 不要把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...`，或任何 `/data/...` 这类容器内 sqlite 路径，直接写进本地 `.env`。`/app/...`、`/data/...` 都是容器内路径，不是你宿主机上的真实文件路径；repo-local `stdio` wrapper 现在会明确拒绝这种配置。本地 `stdio` 请改成宿主机绝对路径；如果你就是要复用 Docker 那边的数据和服务，请直接改连 Docker 暴露的 `/sse`。
+> 不要把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...`，或任何 `/data/...` 这类容器内 sqlite 路径，直接写进本地 `.env`。`/app/...`、`/data/...` 都是容器内路径，不是你宿主机上的真实文件路径；像 `sqlite+aiosqlite:///demo.db` 这种相对 sqlite 路径，或 `sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这种把容器路径做了 URL 编码的写法，本地 repo-local `stdio` wrapper 现在也会一并拒绝。本地 `stdio` 请改成宿主机绝对路径；如果你就是要复用 Docker 那边的数据和服务，请直接改连 Docker 暴露的 `/sse`。
 
 如果你想立刻在本地使用 Dashboard，或者直接调用 `/browse` / `/review` / `/maintenance`，请先把下面二选一写进 `.env`，再启动后端：
 
@@ -573,7 +576,7 @@ python run_sse.py
 > - 原生 Windows：优先 `backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL：优先 `scripts/run_memory_palace_mcp_stdio.sh`
 >
-> 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`、`sqlite+aiosqlite://///app/data/memory_palace.db`、大写 `/APP/...` 变体，或你自己改成 `/data/...` 的变体），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。repo-local `stdio` wrapper 现在也不再只依赖 `python-dotenv` 才能读取 `.env`；如果本地启动仍然失败，更常见的原因已经变成 `.env` 内容或路径本身有问题，而不是少装了这个额外包。
+> 这两条 launcher 都会优先复用当前仓库的 `backend/.venv` 和 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` 里的 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`、`sqlite+aiosqlite://///app/data/memory_palace.db`、大写 `/APP/...` 变体、你自己改成 `/data/...` 的变体，或 `sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这种 URL 编码变体），它都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。像 `sqlite+aiosqlite:///demo.db` 这种相对 sqlite 路径，现在也不会再被放过。repo-local `stdio` wrapper 现在也不再只依赖 `python-dotenv` 才能读取 `.env`；如果本地启动仍然失败，更常见的原因已经变成 `.env` 内容或路径本身有问题，而不是少装了这个额外包。
 >
 > 对 shell wrapper 这条路径（`macOS / Linux / Git Bash / WSL`）来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：就算当前 shell 默认编码不太友好，本地 stdio 也更不容易因为编码问题变成乱码或直接报错。
 >

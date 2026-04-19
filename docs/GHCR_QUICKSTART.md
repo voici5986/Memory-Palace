@@ -43,6 +43,8 @@ docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 > 这里默认走的是 **Profile B**。
+>
+> 当前这条 GHCR 路径还会额外依赖 backend 镜像里的健康检查脚本。官方发布出来的 backend 镜像现在自带 `/usr/local/bin/backend-healthcheck.py`；如果你用的是自己缓存的旧镜像、私有镜像代理，或者手工 retag 过的镜像，先确认这一份 helper 还在，不然 frontend 可能会一直等 backend 变 healthy。
 
 ---
 
@@ -59,6 +61,8 @@ docker compose -f docker-compose.ghcr.yml up -d
 ```bash
 curl -fsS http://127.0.0.1:18000/health
 ```
+
+这一步如果还没过，frontend 可能暂时还不会起来。当前 compose 会先等 backend healthcheck 通过，再继续放行 frontend。
 
 如果你想再确认一下 Docker 下的首启向导是不是正常处于“说明模式”：
 

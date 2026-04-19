@@ -114,6 +114,16 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=ref,event=tag
 
+      - name: Build backend image for healthcheck validation
+        if: matrix.service == 'backend'
+        run: docker build -f deploy/docker/Dockerfile.backend -t memory-palace-backend-healthcheck:${{ github.sha }} .
+
+      - name: Verify backend healthcheck helper is executable
+        if: matrix.service == 'backend'
+        run: |
+          docker run --rm --entrypoint /bin/sh memory-palace-backend-healthcheck:${{ github.sha }} -c \
+            'test -f /usr/local/bin/backend-healthcheck.py && test -x /usr/local/bin/backend-healthcheck.py'
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:

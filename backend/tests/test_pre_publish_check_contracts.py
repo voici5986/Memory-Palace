@@ -36,6 +36,46 @@ def _run_command(
     )
 
 
+def _init_pre_publish_repo(tmp_path: Path) -> Path:
+    project_root = tmp_path / "repo"
+    script_path = project_root / "scripts" / "pre_publish_check.sh"
+    _write_shell_script(
+        script_path,
+        (PROJECT_ROOT / "scripts" / "pre_publish_check.sh").read_text(
+            encoding="utf-8"
+        ),
+    )
+    (project_root / ".env.example").write_text("MCP_API_KEY=\n", encoding="utf-8")
+
+    baseline_manifest = (
+        project_root / "backend" / "tests" / "benchmark" / "baseline_manifest.md"
+    )
+    baseline_manifest.parent.mkdir(parents=True, exist_ok=True)
+    baseline_manifest.write_text("# baseline\n", encoding="utf-8")
+
+    thresholds = (
+        project_root / "backend" / "tests" / "benchmark" / "thresholds_v1.json"
+    )
+    thresholds.write_text("{}\n", encoding="utf-8")
+
+    init_result = _run_command(["git", "init"], cwd=project_root)
+    assert init_result.returncode == 0, init_result.stderr
+
+    add_result = _run_command(
+        [
+            "git",
+            "add",
+            "scripts/pre_publish_check.sh",
+            ".env.example",
+            "backend/tests/benchmark/baseline_manifest.md",
+            "backend/tests/benchmark/thresholds_v1.json",
+        ],
+        cwd=project_root,
+    )
+    assert add_result.returncode == 0, add_result.stderr
+    return project_root
+
+
 def test_pre_publish_check_uses_cross_platform_python_scans_and_env_globs() -> None:
     script_text = (PROJECT_ROOT / "scripts" / "pre_publish_check.sh").read_text(
         encoding="utf-8"
@@ -53,6 +93,11 @@ def test_pre_publish_check_uses_cross_platform_python_scans_and_env_globs() -> N
     assert 'MSYS2_ARG_CONV_EXCL="*"' in script_text
     assert 'xargs -0 rg -l -n --no-messages' not in script_text
     assert "rg -n '^[A-Z0-9_]*API_KEY=.+$' .env.example" not in script_text
+    assert '".audit"' in script_text
+    assert '".playwright-mcp"' in script_text
+    assert "local_endpoint_key_scan" in script_text
+    assert "sk-local-" in script_text
+    assert "127\\.0\\.0\\.1" in script_text
     assert '".pytest_cache"' in script_text
     assert 'git ls-files --others --exclude-standard' in script_text
 
@@ -211,6 +256,8 @@ def test_repo_ignore_rules_cover_local_review_reports_and_local_scan_artifacts()
     assert "code_review_report.md" in gitignore_text
     assert "security_best_practices_report.md" in gitignore_text
     assert ".tmp_tracked_files.txt" in gitignore_text
+    assert ".audit/" in gitignore_text
+    assert ".playwright-mcp/" in gitignore_text
 
     for expected in (
         ".codex/",
@@ -227,3 +274,92 @@ def test_repo_ignore_rules_cover_local_review_reports_and_local_scan_artifacts()
         "frontend/dist/",
     ):
         assert expected in dockerignore_text
+
+
+def test_pre_publish_check_fails_for_tracked_audit_artifacts(tmp_path: Path) -> None:
+    project_root = _init_pre_publish_repo(tmp_path)
+    audit_path = project_root / ".audit" / "review.md"
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_path.write_text("tracked audit artifact\n", encoding="utf-8")
+
+    add_result = _run_command(["git", "add", ".audit/review.md"], cwd=project_root)
+    assert add_result.returncode == 0, add_result.stderr
+
+    result = _run_command(["bash", "scripts/pre_publish_check.sh"], cwd=project_root)
+
+    assert result.returncode != 0
+    assert "以下敏感/本地产物已被跟踪，请先移出版本库: .audit/review.md" in result.stdout
+    assert "RESULT: FAIL" in result.stdout
+
+
+def test_pre_publish_check_fails_for_tracked_local_endpoint_key_patterns(
+    tmp_path: Path,
+) -> None:
+    project_root = _init_pre_publish_repo(tmp_path)
+    leak_path = project_root / "notes" / "local-config.md"
+    leak_path.parent.mkdir(parents=True, exist_ok=True)
+    leak_path.write_text(
+        "RETRIEVAL_EMBEDDING_API_BASE=http://10.0.0.8:11435/v1\n"
+        "MCP_API_KEY=sk-local-demo-token\n",
+        encoding="utf-8",
+    )
+
+    add_result = _run_command(["git", "add", "notes/local-config.md"], cwd=project_root)
+    assert add_result.returncode == 0, add_result.stderr
+
+    result = _run_command(["bash", "scripts/pre_publish_check.sh"], cwd=project_root)
+
+    assert result.returncode != 0
+    assert "本地 endpoint/key 模式" in result.stdout
+    assert "  - notes/local-config.md" in result.stdout
+    assert "RESULT: FAIL" in result.stdout
+
+
+def test_pre_publish_check_fails_for_tracked_loopback_endpoint_patterns(
+    tmp_path: Path,
+) -> None:
+    project_root = _init_pre_publish_repo(tmp_path)
+    leak_path = project_root / "notes" / "loopback-config.md"
+    leak_path.parent.mkdir(parents=True, exist_ok=True)
+    leak_path.write_text(
+        "WRITE_GUARD_LLM_API_BASE=http://127.0.0.1:8318/v1/chat/completions\n",
+        encoding="utf-8",
+    )
+
+    add_result = _run_command(
+        ["git", "add", "notes/loopback-config.md"], cwd=project_root
+    )
+    assert add_result.returncode == 0, add_result.stderr
+
+    result = _run_command(["bash", "scripts/pre_publish_check.sh"], cwd=project_root)
+
+    assert result.returncode != 0
+    assert "本地 endpoint/key 模式" in result.stdout
+    assert "  - notes/loopback-config.md" in result.stdout
+    assert "RESULT: FAIL" in result.stdout
+
+
+def test_pre_publish_check_allows_compose_frontend_loopback_healthcheck(
+    tmp_path: Path,
+) -> None:
+    project_root = _init_pre_publish_repo(tmp_path)
+    compose_path = project_root / "docker-compose.yml"
+    compose_path.write_text(
+        "services:\n"
+        "  frontend:\n"
+        "    healthcheck:\n"
+        "      test:\n"
+        "        - CMD-SHELL\n"
+        "        - wget -q -O /dev/null http://127.0.0.1:8080/\n",
+        encoding="utf-8",
+    )
+
+    add_result = _run_command(["git", "add", "docker-compose.yml"], cwd=project_root)
+    assert add_result.returncode == 0, add_result.stderr
+
+    result = _run_command(["bash", "scripts/pre_publish_check.sh"], cwd=project_root)
+
+    assert result.returncode == 0
+    assert "本地 endpoint/key 模式" in result.stdout
+    assert "docker-compose.yml" not in result.stdout
+    assert "RESULT: PASS" in result.stdout

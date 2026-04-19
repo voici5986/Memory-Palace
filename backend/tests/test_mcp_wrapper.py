@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import importlib.util
+import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -178,6 +180,52 @@ def test_build_runtime_env_rejects_parent_directory_database_url(
     assert "must not contain '..' segments" in captured.err
 
 
+def test_build_runtime_env_rejects_relative_database_url(
+    monkeypatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DATABASE_URL=sqlite+aiosqlite:///relative/memory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    captured = capsys.readouterr()
+
+    assert str(excinfo.value) == "1"
+    assert "relative DATABASE_URL" in captured.err
+    assert "host absolute path" in captured.err
+
+
+def test_build_runtime_env_rejects_urlencoded_docker_internal_database_url(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DATABASE_URL=sqlite+aiosqlite:////%2Fapp%2Fdata%2Fmemory_palace.db\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    assert str(excinfo.value) == "1"
+
+
 def test_build_runtime_env_uses_last_database_url_from_env_file_when_runtime_value_is_missing(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -349,6 +397,39 @@ def test_normalize_env_string_value_strips_quotes_and_whitespace() -> None:
         == "sqlite+aiosqlite:////tmp/demo.db"
     )
     assert module._normalize_env_string_value("  '30'  ") == "30"
+
+
+def _run_stdio_wrapper(database_url: str) -> subprocess.CompletedProcess[str]:
+    project_root = Path(__file__).resolve().parents[2]
+    script_path = project_root / "scripts" / "run_memory_palace_mcp_stdio.sh"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = database_url
+    return subprocess.run(
+        ["bash", str(script_path)],
+        cwd=project_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+
+
+def test_repo_local_stdio_wrapper_rejects_relative_database_url() -> None:
+    result = _run_stdio_wrapper("sqlite+aiosqlite:///relative/memory_palace.db")
+
+    assert result.returncode == 1
+    assert "relative DATABASE_URL" in result.stderr
+    assert "host absolute path" in result.stderr
+
+
+def test_repo_local_stdio_wrapper_rejects_urlencoded_docker_internal_database_url() -> None:
+    result = _run_stdio_wrapper(
+        "sqlite+aiosqlite:////%2Fapp%2Fdata%2Fmemory_palace.db"
+    )
+
+    assert result.returncode == 1
+    assert "Docker-internal DATABASE_URL" in result.stderr
 
 
 def test_read_stream_chunk_prefers_read1_when_available() -> None:

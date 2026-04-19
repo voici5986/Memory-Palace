@@ -43,6 +43,8 @@ docker compose -f docker-compose.ghcr.yml up -d
 ```
 
 > This uses **Profile B** by default.
+>
+> This GHCR path now also depends on the backend image carrying its healthcheck helper. The official backend image now ships `/usr/local/bin/backend-healthcheck.py`; if you are using an older cached image, a private mirror, or a manually retagged image, verify that helper is still present first, or the frontend can keep waiting on backend health forever.
 
 ---
 
@@ -59,6 +61,8 @@ Check backend health first:
 ```bash
 curl -fsS http://127.0.0.1:18000/health
 ```
+
+If this check is still failing, the frontend may not start yet. The current compose path waits for the backend healthcheck to pass before it lets the frontend continue.
 
 If you also want to confirm that the first-run assistant is correctly staying in Docker guidance mode:
 

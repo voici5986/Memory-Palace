@@ -226,6 +226,39 @@ describe('ObservabilityPage', () => {
     expect(await screen.findByText(/Retry requested/i)).toBeInTheDocument();
   });
 
+  it('localizes retry, rebuild, and sleep success targets in zh-CN', async () => {
+    const failedJob = {
+      job_id: 'job-zh-retry-source',
+      status: 'failed',
+      task_type: 'reindex_memory',
+      memory_id: 12,
+      reason: 'failed-job',
+    };
+    await i18n.changeLanguage('zh-CN');
+    api.getObservabilitySummary
+      .mockResolvedValueOnce(buildSummary({ recentJobs: [failedJob], timestamp: '2026-01-01T00:00:00Z' }))
+      .mockResolvedValue(buildSummary({ recentJobs: [failedJob], timestamp: '2026-01-01T00:00:01Z' }));
+    api.triggerIndexRebuild.mockResolvedValueOnce({ job_id: 'job-rebuild-zh' });
+    api.triggerSleepConsolidation.mockResolvedValueOnce({});
+    api.retryIndexJob.mockResolvedValueOnce({ job_id: 'job-retry-zh' });
+
+    const user = userEvent.setup();
+    render(<ObservabilityPage />);
+
+    await user.click(await screen.findByRole('button', { name: '重建索引' }));
+    expect(await screen.findByText('已请求重建（任务 job-rebuild-zh）')).toBeInTheDocument();
+    expect(screen.queryByText('已请求重建（job job-rebuild-zh）')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '睡眠整合' }));
+    expect(await screen.findByText('已请求睡眠整合（同步）')).toBeInTheDocument();
+    expect(screen.queryByText('已请求睡眠整合（sync）')).not.toBeInTheDocument();
+
+    const jobCard = await getJobCardById('job-zh-retry-source');
+    await user.click(within(jobCard).getByRole('button', { name: '重试' }));
+    expect(await screen.findByText('已请求重试（任务 job-retry-zh）')).toBeInTheDocument();
+    expect(screen.queryByText('已请求重试（job job-retry-zh）')).not.toBeInTheDocument();
+  });
+
   it('does not refetch summary when only the language changes', async () => {
     render(<ObservabilityPage />);
 

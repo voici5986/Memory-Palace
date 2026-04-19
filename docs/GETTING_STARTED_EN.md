@@ -137,7 +137,7 @@ bash scripts/apply_profile.sh macos b
 >
 > In addition, the backend itself now fail-closes when the **active** remote retrieval configuration still contains placeholder values. If you bypass `apply_profile.*`, copy a `profile c/d` template by hand, and leave values such as `host.docker.internal:PORT`, `replace-with-your-key`, `your-embedding-model-id`, or `your-reranker-model-id` in place, startup stops immediately instead of continuing with an obviously invalid embedding / reranker config.
 >
-> One easy mistake to avoid: do not copy the `DATABASE_URL` from `.env.docker`, or any container-only sqlite path such as `/app/data/...` or `/data/...`, into your local `.env`. Those paths only exist inside the container; local `stdio` MCP on the host will fail with them.
+> One easy mistake to avoid: do not copy the `DATABASE_URL` from `.env.docker`, or any container-only sqlite path such as `/app/data/...` or `/data/...`, into your local `.env`. Those paths only exist inside the container; relative sqlite values such as `sqlite+aiosqlite:///demo.db` and percent-escaped container forms such as `sqlite+aiosqlite:////%2Fapp%2Fdata/...` are rejected now as well, so local `stdio` MCP on the host still needs a host-accessible absolute path.
 
 #### Key Configuration Items
 
@@ -522,7 +522,7 @@ If you just cloned the GitHub repository, it is normal if you don't see these tw
 
 > The checks here focus on "getting the system running"; if you need additional local Markdown validation summaries, run the validation scripts mentioned above.
 >
-> Current real verification snapshot for this repository session: backend tests `1007 passed, 22 skipped`; frontend `172 passed`; `npm run typecheck`, frontend build, and `npm run test:bundle-budget` all passed; the main compose / GHCR / override config checks also passed. This round also reran an isolated local Profile B HTTP/proxy live probe plus one real local C-path retrieval check (`1024`-d embedding + reranker). Repo-local live MCP e2e, Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths still keep explicit target-environment recheck boundaries.
+> Current real verification snapshot for this repository session: backend tests `1017 passed, 22 skipped`; frontend `173 passed`; `npm run typecheck`, the frontend build, `bash scripts/pre_publish_check.sh`, and `docker compose -f docker-compose.ghcr.yml config` all passed. This round also reran a repo-local macOS `Profile B` real-browser smoke plus one local C/D retrieval + reranker + LLM smoke behind an explicit private-target allowlist. Repo-local live MCP e2e, Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths still keep explicit target-environment recheck boundaries.
 
 ### 5.1 Health Check
 
@@ -614,7 +614,7 @@ python mcp_server.py
 > - native Windows: `python backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL: `bash scripts/run_memory_palace_mcp_stdio.sh`
 >
-> These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, `sqlite+aiosqlite://///app/data/memory_palace.db`, an uppercase `/APP/...` form, or a `/data/...` variant, they refuse to start on purpose. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
+> These repo-local wrappers keep the same boundary conditions: they depend on the local `backend/.venv`, reuse the current repository `.env` / `DATABASE_URL` first, and also keep using `RETRIEVAL_REMOTE_TIMEOUT_SEC` from that same `.env` when it is set; if you leave it unset, the repo-local default remains `8` seconds. They only fall back to the repo's default SQLite path when neither a local `.env` nor `.env.docker` exists. If the repository only has `.env.docker`, or if a local `.env` / explicit `DATABASE_URL` still points at a Docker-internal path such as `sqlite+aiosqlite:////app/data/memory_palace.db`, `sqlite+aiosqlite://///app/data/memory_palace.db`, an uppercase `/APP/...` form, a `/data/...` variant, or a percent-escaped form such as `sqlite+aiosqlite:////%2Fapp%2Fdata/...`, they refuse to start on purpose. Relative sqlite values such as `sqlite+aiosqlite:///demo.db` are rejected as well. In a Docker-only setup, prefer the exposed `/sse` endpoint instead.
 >
 > On the shell-wrapper path, `run_memory_palace_mcp_stdio.sh` also exports `PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` before it starts Python. In plain language: a non-UTF-8 locale is less likely to break local stdio traffic.
 >

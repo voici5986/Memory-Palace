@@ -503,6 +503,8 @@ const zhCN = {
     summaryError: '加载观测概览失败',
     diagnosticSearchFailed: '诊断搜索失败',
     messages: {
+      jobTarget: '任务 {{jobId}}',
+      syncTarget: '同步',
       rebuildRequested: '已请求重建（{{job}}）',
       rebuildFailed: '重建失败：{{detail}}',
       sleepRequested: '已请求睡眠整合（{{job}}）',

@@ -120,7 +120,7 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_sensitive_api_auth.py` — Review 与 Browse 读写鉴权
 - `backend/tests/test_review_rollback.py` — Review 操作携带鉴权测试
 - `backend/tests/test_reflection_workflow_service.py` — 验证 Dashboard `/browse` 写入可供 reflection workflow 继续使用，以及 `reflection execute` 进入 write lane 后的并发边界
-- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 需要显式 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
+- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 在已知 `session_id` 时会继续做一致性校验，只带 `job_id` 时会先恢复原始 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `backend/tests/test_reflection_observability_summary.py` — 验证 `reflection_workflow` 统计在 summary 层是 restart-stable
 - `backend/tests/test_setup_api.py` — 验证 `openai` embedding backend、远端 `RETRIEVAL_EMBEDDING_DIM` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 setup fail-closed 边界
 - `frontend/src/App.test.jsx` — 验证 proxy-held auth 已生效时首启向导不误弹
@@ -178,7 +178,7 @@ Authorization: Bearer <MCP_API_KEY>
 **新增测试锚点：**
 
 - `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 Docker fail-closed
-- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 需要显式 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
+- `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 在已知 `session_id` 时会继续做一致性校验，只带 `job_id` 时会先恢复原始 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `frontend/src/App.test.jsx` — 验证首启自动弹出、“只保存 Dashboard 密钥”交互，以及 proxy-held auth 已生效时不误弹
 - `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed
@@ -207,7 +207,7 @@ Authorization: Bearer <MCP_API_KEY>
 | 前端代理鉴权 | 由 Nginx 在服务端转发 `X-MCP-API-Key`，浏览器侧不保存真实 key；当前仅对受保护的 `/api/maintenance/*`、`/api/review/*`、`/api/browse/*`、`/api/setup/*` 以及 `/sse` / `/messages` 路径注入该头，通用 `/api/*` 不再一律附加；生成配置前会先转义代理持有 key 里的特殊字符 | `deploy/docker/nginx.conf.template` |
 | 禁止提权 | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
 | 数据持久化 | Docker Volumes 默认按 compose project 隔离：`<compose-project>_data` → `/app/data`，`<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
-| 健康检查（后端） | `python /usr/local/bin/backend-healthcheck.py`；脚本内部会请求 `http://127.0.0.1:8000/health`，并要求返回 payload 的 `status == "ok"`；请求超时可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整 | `docker-compose.yml` 中的 `backend.healthcheck`、`deploy/docker/backend-healthcheck.py` |
+| 健康检查（后端） | `python /usr/local/bin/backend-healthcheck.py`；脚本内部会请求 `http://127.0.0.1:8000/health`，并要求返回 payload 的 `status == "ok"`；请求超时可通过 `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` 调整。backend 镜像现在也会把这条检查接进 Docker `HEALTHCHECK` | `docker-compose.yml` 中的 `backend.healthcheck`、`deploy/docker/backend-healthcheck.py`、`deploy/docker/Dockerfile.backend` |
 | 健康检查（前端） | `wget -q -O - http://127.0.0.1:8080/` | `docker-compose.yml` 中的 `frontend.healthcheck` |
 
 ---
@@ -226,7 +226,7 @@ Authorization: Bearer <MCP_API_KEY>
    bash scripts/pre_publish_check.sh
    ```
 
-   该脚本会检查：常见本地敏感产物 / 工具配置 / 本地报告是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。它更像“分享前仓库卫生检查”；如果只是发现本地文件存在，通常会给 `WARN`，不是直接 `FAIL`。
+   该脚本会检查：常见本地敏感产物 / 工具配置 / 本地报告是否存在、是否被 git 跟踪、已跟踪文件中的密钥模式、个人绝对路径泄露、`.env.example` 的 API key 占位状态。当前还会额外拦截已跟踪的 `.audit` / `.playwright-mcp` 工件，并扫描 tracked 文件里的本地 endpoint / key 模式（例如 `sk-local-*`、以及带端口的 loopback / private provider 地址）。它更像“分享前仓库卫生检查”；如果只是发现本地文件存在，通常会给 `WARN`，不是直接 `FAIL`。
 
 1. **检查工作区状态** — 确认无意外暴露：
 

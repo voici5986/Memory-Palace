@@ -167,6 +167,11 @@ _DEFAULT_INTERACTION_TIER = (
 )
 if _DEFAULT_INTERACTION_TIER not in _ALLOWED_INTERACTION_TIERS:
     _DEFAULT_INTERACTION_TIER = "fast"
+_DEFAULT_SEARCH_MODE = (
+    str(os.getenv("SEARCH_DEFAULT_MODE") or "keyword").strip().lower() or "keyword"
+)
+if _DEFAULT_SEARCH_MODE not in _ALLOWED_SEARCH_MODES:
+    _DEFAULT_SEARCH_MODE = "keyword"
 _DEFAULT_SEARCH_CANDIDATE_MULTIPLIER = _shared_env_int(
     "SEARCH_DEFAULT_CANDIDATE_MULTIPLIER",
     4,
@@ -193,7 +198,7 @@ ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
 
 class SearchConsoleRequest(BaseModel):
     query: str = Field(min_length=1)
-    mode: str = Field(default="hybrid")
+    mode: Optional[str] = Field(default=None)
     max_results: int = Field(default=8, ge=1, le=50)
     candidate_multiplier: int = Field(default=4, ge=1, le=20)
     include_session: bool = True
@@ -3597,11 +3602,15 @@ async def trigger_reflection_workflow(payload: ReflectionWorkflowRequest):
     normalized_mode_lower = normalized_mode.lower()
     normalized_source = str(payload.source or "").strip() or "session_summary"
     normalized_reason = str(payload.reason or "").strip()
+    normalized_job_id = str(payload.job_id or "").strip()
     normalized_session_id = str(payload.session_id or "").strip()
+    if normalized_mode_lower == "rollback" and not normalized_session_id and normalized_job_id:
+        rollback_job = await _get_learn_job(normalized_job_id)
+        if isinstance(rollback_job, dict):
+            normalized_session_id = str(rollback_job.get("session_id") or "").strip()
     normalized_actor_id = (
         str(payload.actor_id).strip() if payload.actor_id is not None else None
     ) or None
-    normalized_job_id = str(payload.job_id or "").strip()
     if normalized_mode_lower in {"prepare", "execute"} and not normalized_session_id:
         raise HTTPException(
             status_code=422,
@@ -4286,7 +4295,10 @@ async def run_observability_search(payload: SearchConsoleRequest):
     if not query:
         raise HTTPException(status_code=422, detail="query must not be empty")
 
-    mode = payload.mode.strip().lower()
+    mode_provided = "mode" in payload.model_fields_set
+    mode = _DEFAULT_SEARCH_MODE
+    if mode_provided:
+        mode = str(payload.mode or "").strip().lower()
     if mode not in _ALLOWED_SEARCH_MODES:
         raise HTTPException(
             status_code=422,

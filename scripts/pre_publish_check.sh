@@ -79,7 +79,7 @@ build_personal_path_scan_regex() {
   local python_cmd
   python_cmd="$(resolve_python_cmd)" || return 1
 
-  MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" - <<'PY'
+  MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" -c '
 import os
 import re
 import subprocess
@@ -126,7 +126,7 @@ for candidate in candidates:
     )
 
 print("|".join(parts))
-PY
+'
 }
 
 check_local_artifacts() {
@@ -142,6 +142,8 @@ check_local_artifacts() {
     ".mcp.json"
     ".mcp.json.bak"
     ".playwright-cli"
+    ".playwright-mcp"
+    ".audit"
     ".tmp"
     ".pytest_cache"
     "demo.db"
@@ -204,6 +206,8 @@ check_tracked_forbidden_paths() {
     ".mcp.json"
     ".mcp.json.bak"
     ".playwright-cli"
+    ".playwright-mcp"
+    ".audit"
     ".tmp"
     ".pytest_cache"
     "demo.db"
@@ -302,7 +306,7 @@ scan_tracked_files() {
 
   local output
   output="$(
-    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" - "${python_root}" "${scan_key}" "${regex}" <<'PY'
+    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" -c '
 import re
 import subprocess
 import sys
@@ -311,6 +315,10 @@ from pathlib import Path
 root = Path(sys.argv[1]).resolve()
 scan_key = sys.argv[2]
 pattern = re.compile(sys.argv[3], re.MULTILINE)
+safe_compose_loopback_pattern = re.compile(
+    r"(?:https?://)?(?:127\.0\.0\.1|localhost):8080(?:/[^\s\"<>)]*)?",
+    re.MULTILINE,
+)
 tracked_output = subprocess.run(
     ["git", "-C", str(root), "ls-files", "-z"],
     check=True,
@@ -324,18 +332,30 @@ for item in tracked_output:
     relative = item.decode("utf-8", "replace")
     if scan_key == "secret_scan" and relative == "scripts/pre_publish_check.sh":
         continue
+    if scan_key == "local_endpoint_key_scan":
+        if relative in {"scripts/pre_publish_check.sh", "README.md", "README_CN.md"}:
+            continue
+        if relative.startswith(("backend/", "frontend/", "docs/", "scripts/", "deploy/")):
+            continue
     path = root / relative
     if not path.is_file():
         continue
     text = path.read_text(encoding="utf-8", errors="replace")
     if scan_key == "personal_path_scan":
         text = text.replace("\\", "/")
+    if (
+        scan_key == "local_endpoint_key_scan"
+        and relative in {"docker-compose.yml", "docker-compose.ghcr.yml"}
+    ):
+        scrubbed = safe_compose_loopback_pattern.sub("", text)
+        if not pattern.search(scrubbed):
+            continue
     if pattern.search(text):
         hits.add(relative)
 
 if hits:
     print("\n".join(sorted(hits)))
-PY
+    ' "${python_root}" "${scan_key}" "${regex}"
   )" || {
     fail "${label} 扫描执行失败"
     return
@@ -367,7 +387,7 @@ check_env_example_api_keys() {
 
   local output
   output="$(
-    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" - "${python_root}" <<'PY'
+    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" -c '
 import re
 import sys
 from pathlib import Path
@@ -395,7 +415,7 @@ for lineno, raw_line in enumerate(
 
 if hits:
     print("\n".join(hits))
-PY
+    ' "${python_root}"
   )" || {
     fail ".env.example 占位检查执行失败"
     return
@@ -451,7 +471,7 @@ check_public_doc_local_references_tracked() {
 
   local issues
   issues="$(
-    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" - "${python_root}" <<'PY'
+    MSYS2_ARG_CONV_EXCL="*" "${python_cmd}" -c '
 import re
 import subprocess
 import sys
@@ -474,7 +494,7 @@ docs = [
     )
 ]
 markdown_link = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-html_src = re.compile(r"""src=["']([^"']+)["']""")
+html_src = re.compile(r"src=[\"\x27]([^\"\x27]+)[\"\x27]")
 issues = set()
 
 def normalize_target(raw: str) -> str:
@@ -507,7 +527,7 @@ for doc in docs:
 
 if issues:
     print("\n".join(sorted(issues)))
-PY
+    ' "${python_root}"
   )"
 
   if [[ -n "${issues}" ]]; then
@@ -533,22 +553,28 @@ scan_tracked_files \
   "密钥/凭证模式" \
   'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN PGP PRIVATE KEY BLOCK-----'
 
+print_section "5) 本地 endpoint/key 模式扫描（仅扫描已跟踪文件）"
+scan_tracked_files \
+  "local_endpoint_key_scan" \
+  "本地 endpoint/key 模式" \
+  'sk-local-[A-Za-z0-9_-]{4,}|(?:https?://)?(?:127\.0\.0\.1|localhost|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.[0-9]{1,3}\.[0-9]{1,3})(?::[0-9]{2,5})(?:/[^\s"<>)]*)?'
+
 PERSONAL_PATH_SCAN_REGEX="$(build_personal_path_scan_regex || true)"
 if [[ -n "${PERSONAL_PATH_SCAN_REGEX}" ]]; then
-  print_section "5) 个人路径泄露扫描（仅扫描已跟踪文件）"
+  print_section "6) 个人路径泄露扫描（仅扫描已跟踪文件）"
   scan_tracked_files \
     "personal_path_scan" \
     "个人绝对路径（当前环境）" \
     "${PERSONAL_PATH_SCAN_REGEX}"
 fi
 
-print_section "6) .env.example 占位检查"
+print_section "7) .env.example 占位检查"
 check_env_example_api_keys
 
-print_section "7) 公开基线文件检查"
+print_section "8) 公开基线文件检查"
 check_required_public_files_tracked
 
-print_section "8) 公开文档引用检查"
+print_section "9) 公开文档引用检查"
 check_public_doc_local_references_tracked
 
 echo

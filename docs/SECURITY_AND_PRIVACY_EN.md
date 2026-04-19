@@ -120,7 +120,7 @@ The above authentication logic is covered in the following test files in the cur
 - `backend/tests/test_sensitive_api_auth.py` — Review and Browse read/write authentication
 - `backend/tests/test_review_rollback.py` — Review operation authentication test
 - `backend/tests/test_reflection_workflow_service.py` — verifies Dashboard `/browse` writes can seed the reflection workflow and that reflection `execute` still enters the write lane
-- `backend/tests/test_reflection_workflow_api.py` — verifies reflection rollback requires an explicit `session_id` and still performs best-effort namespace cleanup after the review rollback path
+- `backend/tests/test_reflection_workflow_api.py` — verifies reflection rollback still checks an explicitly supplied `session_id`, can recover the original `session_id` when only `job_id` is provided, and still performs best-effort namespace cleanup after the review rollback path
 - `backend/tests/test_reflection_observability_summary.py` — verifies `reflection_workflow` summary counters stay restart-stable
 - `backend/tests/test_setup_api.py` — verifies loopback access, remote auth, explicit remote embedding-dimension requirements, runtime-default `/setup/status` summary, and Docker fail-closed behavior
 
@@ -173,7 +173,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 **New validation anchors:**
 
 - `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, explicit remote embedding-dimension requirements, the runtime-default `/setup/status` summary, and Docker fail-closed behavior
-- `backend/tests/test_reflection_workflow_api.py` — Verifies reflection rollback requires an explicit `session_id` and still performs best-effort namespace cleanup after the review rollback path
+- `backend/tests/test_reflection_workflow_api.py` — Verifies reflection rollback still checks an explicitly supplied `session_id`, can recover the original `session_id` when only `job_id` is provided, and still performs best-effort namespace cleanup after the review rollback path
 - `frontend/src/App.test.jsx` — Verifies first-run auto-open behavior, including the browser-only Dashboard-key flow on the proxy-backed path
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — Verifies the Memory page blocks destructive actions when confirm is unavailable
 - `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path
@@ -203,7 +203,7 @@ The following security configurations can be directly verified in the project's 
 | Frontend proxy authentication | Nginx forwards `X-MCP-API-Key` at the server side; the real key is not stored on the browser side. The proxy now injects that header only for protected `/api/maintenance/*`, `/api/review/*`, `/api/browse/*`, `/api/setup/*` routes plus `/sse` / `/messages`, instead of attaching it to every `/api/*` request. Special characters in the proxy-held key are escaped before the final config is generated | `deploy/docker/nginx.conf.template` |
 | Prohibit privilege escalation | `security_opt: no-new-privileges:true` | `docker-compose.yml` |
 | Data persistence | Docker volumes are isolated per compose project by default: `<compose-project>_data` → `/app/data`, `<compose-project>_snapshots` → `/app/snapshots` | `docker-compose.yml` |
-| Health check (Backend) | `python /usr/local/bin/backend-healthcheck.py`; internally it requests `http://127.0.0.1:8000/health` and requires the payload to report `status == "ok"`. The request timeout can be tuned with `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC` | `backend.healthcheck` in `docker-compose.yml`, `deploy/docker/backend-healthcheck.py` |
+| Health check (Backend) | `python /usr/local/bin/backend-healthcheck.py`; internally it requests `http://127.0.0.1:8000/health` and requires the payload to report `status == "ok"`. The request timeout can be tuned with `MEMORY_PALACE_BACKEND_HEALTHCHECK_TIMEOUT_SEC`. The backend image now also wires this into Docker `HEALTHCHECK` | `backend.healthcheck` in `docker-compose.yml`, `deploy/docker/backend-healthcheck.py`, `deploy/docker/Dockerfile.backend` |
 | Health check (Frontend) | `wget -q -O - http://127.0.0.1:8080/` | `frontend.healthcheck` in `docker-compose.yml` |
 
 ---
@@ -222,7 +222,7 @@ Before sharing the project, delivering environments, or official release, please
    bash scripts/pre_publish_check.sh
    ```
 
-   The script checks: common local sensitive artifacts / tool configs / local reports presence, git tracking status, key patterns in tracked files, personal absolute path leaks, and `.env.example` API key placeholder status. It's more like a "repository hygiene check before sharing"; finding local files usually results in a `WARN` rather than a `FAIL`.
+   The script checks: common local sensitive artifacts / tool configs / local reports presence, git tracking status, key patterns in tracked files, personal absolute path leaks, and `.env.example` API key placeholder status. It now also blocks tracked `.audit` / `.playwright-mcp` artifacts and scans tracked files for local-only endpoint/key patterns such as `sk-local-*` plus loopback/private provider bases with ports. It's more like a "repository hygiene check before sharing"; finding local files usually results in a `WARN` rather than a `FAIL`.
 
 1. **Check Workspace Status** — Confirm no accidental exposure:
 

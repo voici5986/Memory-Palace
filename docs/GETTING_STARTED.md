@@ -93,7 +93,7 @@ cp .env.example .env
 >
 > 这条 URL 的斜杠数量是有平台差异的：`macOS / Linux` 这类绝对路径通常是 `sqlite+aiosqlite:////...`，`Windows` 盘符路径通常是 `sqlite+aiosqlite:///C:/...`。如果你是手改 `.env`，不要把这两种写法混在一起。
 >
-> 还有一个很常见的误配：不要把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...`，或任何 `/data/...` 这类容器内 sqlite 路径，直接抄进本地 `.env`。`/app/...`、`/data/...` 都是容器内路径，不是你宿主机上的数据库文件路径；repo-local `stdio` wrapper 会明确拒绝这种配置。本地 `stdio` 请改成宿主机绝对路径；如果你就是要复用 Docker 那边的数据和服务，请直接改连 Docker 暴露的 `/sse`。
+> 还有一个很常见的误配：不要把 Docker / GHCR 路径里的 `sqlite+aiosqlite:////app/data/...`，或任何 `/data/...` 这类容器内 sqlite 路径，直接抄进本地 `.env`。`/app/...`、`/data/...` 都是容器内路径，不是你宿主机上的数据库文件路径；像 `sqlite+aiosqlite:///demo.db` 这种相对 sqlite 路径，或 `sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这种把容器路径做了 URL 编码的写法，本地 repo-local `stdio` wrapper 现在也会一并拒绝。本地 `stdio` 请改成宿主机绝对路径；如果你就是要复用 Docker 那边的数据和服务，请直接改连 Docker 暴露的 `/sse`。
 
 也可以使用 Profile 脚本快速生成带有默认配置的 `.env`：
 
@@ -528,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `1007 passed, 22 skipped`；frontend `172 passed`；`npm run typecheck`、前端 build、`npm run test:bundle-budget` 均通过；主 compose / GHCR / override 组合的 config 检查也都通过。本轮还补跑了本机隔离的 Profile B HTTP/proxy live probe，以及一条真实本地 C 路径检索验证（`1024` 维 embedding + reranker）。repo-local live MCP e2e、Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `1017 passed, 22 skipped`；frontend `173 passed`；`npm run typecheck`、前端 build、`bash scripts/pre_publish_check.sh` 和 `docker compose -f docker-compose.ghcr.yml config` 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke，以及一条带显式 private-target allowlist 的本地 C/D retrieval + reranker + LLM smoke。repo-local live MCP e2e、Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
@@ -622,7 +622,7 @@ python mcp_server.py
 > - 原生 Windows：`python backend/mcp_wrapper.py`
 > - macOS / Linux / Git Bash / WSL：`bash scripts/run_memory_palace_mcp_stdio.sh`
 >
-> 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`、`sqlite+aiosqlite://///app/data/memory_palace.db`、大写 `/APP/...` 变体，或你自己改成 `/data/...` 的变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。
+> 这两条 repo-local wrapper 的边界保持一致：都依赖本地 `backend/.venv`，优先复用当前仓库的 `.env` / `DATABASE_URL`；如果 `.env` 里已经设置了 `RETRIEVAL_REMOTE_TIMEOUT_SEC`，它们也会继续复用这个值；没设置时 repo-local 默认仍是 `8` 秒。只有在仓库里既没有本地 `.env`、也没有 `.env.docker` 时，才会回退到仓库默认 SQLite 路径。若仓库里只有 `.env.docker`，或者本地 `.env` / 显式 `DATABASE_URL` 仍写成 Docker 容器内路径（例如 `sqlite+aiosqlite:////app/data/memory_palace.db`、`sqlite+aiosqlite://///app/data/memory_palace.db`、大写 `/APP/...` 变体、你自己改成 `/data/...` 的变体，或 `sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这种 URL 编码变体），它们都会明确拒绝启动，并提示你改走 Docker 暴露的 `/sse` 或改回宿主机绝对路径。像 `sqlite+aiosqlite:///demo.db` 这种相对 sqlite 路径，现在也不会再被放过。
 >
 > 对 shell wrapper 这条路径来说，`run_memory_palace_mcp_stdio.sh` 现在还会在启动 Python 前先导出 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。说人话就是：如果当前 shell 不是 UTF-8 默认环境，本地 stdio 也更不容易因为编码问题出错。
 >
