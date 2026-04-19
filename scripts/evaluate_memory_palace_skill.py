@@ -1427,11 +1427,22 @@ def smoke_gemini_live_suite() -> CheckResult:
         guard_target_uri = ""
     guard_has_block = any(token in guard_create_output for token in ['"guard_action": "NOOP"', '"guard_action": "UPDATE"', '"guard_action": "DELETE"'])
     guard_followup_calls = guard_calls[guard_create_index + 1 :] if guard_create_index >= 0 else []
+    guard_has_read_followup = any(
+        _tool_name_matches(call.get("name"), "read_memory")
+        for call in guard_followup_calls
+    )
+    guard_has_search_followup = any(
+        _tool_name_matches(call.get("name"), "search_memory")
+        for call in guard_followup_calls
+    )
     guard_has_followup = any(
         _tool_name_matches(call.get("name"), expected_name)
         for call in guard_followup_calls
         for expected_name in ("read_memory", "update_memory", "search_memory")
     )
+    guard_known_uri_fast_path = True
+    if guard_target_uri:
+        guard_known_uri_fast_path = guard_has_read_followup and not guard_has_search_followup
     guard_duplicate_created = _memory_exists(db_path, guard_uri)
     guard_no_false_success = f"SUCCESS {guard_uri}" not in guard_proc.stdout and not guard_duplicate_created
     guard_resolved_to_existing_target = bool(guard_target_uri) and f"SUCCESS {guard_target_uri}" in guard_proc.stdout
@@ -1460,11 +1471,14 @@ def smoke_gemini_live_suite() -> CheckResult:
         f"guard_target_uri={guard_target_uri or 'missing'}",
         f"guard_user_visible_block={guard_user_visible_block}",
         f"guard_followup={guard_has_followup}",
+        f"guard_known_uri_fast_path={guard_known_uri_fast_path}",
         f"guard_resolved_to_existing_target={guard_resolved_to_existing_target}",
     ]
 
     guard_safe = (guard_no_false_success or guard_resolved_to_existing_target) and (guard_has_block or guard_user_visible_block)
     if create_ok and update_ok and guard_safe:
+        if guard_target_uri and not guard_known_uri_fast_path:
+            return CheckResult("PARTIAL", "Gemini live 写入与更新通过，但 guard 分支未走 known-URI fast path", "\n".join(details))
         if guard_has_followup:
             return CheckResult("PASS", "Gemini live 写入/更新/守卫链路通过", "\n".join(details))
         return CheckResult("PASS", "Gemini live 写入/更新通过，guard 已安全阻断（未稳定观测到 follow-up）", "\n".join(details))

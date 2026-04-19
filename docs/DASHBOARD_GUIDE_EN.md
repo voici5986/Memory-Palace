@@ -302,7 +302,7 @@ The subtitle reads: *Track search latency, degrade reasons, cache hits, and inde
 | Card | Meaning |
 |------|---------|
 | **Queries** | Total number of search requests the system has handled |
-| **Latency** | Average search response time in milliseconds — lower is better |
+| **Latency** | Average search response time in milliseconds — lower is better. The small hint below it shows the localized **P95** latency, so you can compare normal latency vs. slow-tail latency at a glance. |
 | **Cache Hit Ratio** | Percentage of searches served from cache — higher is better (means repeated queries don't need recalculation) |
 | **Index Latency** | Average time for index operations |
 | **Cleanup p95** | 95th percentile cleanup time (the "worst-case" speed for cleanup operations) |
@@ -347,7 +347,9 @@ After running a search, this section shows:
 
 - **latency**: How many milliseconds the search took
 - **mode**: The actual retrieval mode used
+- **interaction tier**: Whether this search stayed on the fast path or escalated to the deep path
 - **intent**: The query intent or applied intent label returned by the backend
+- **intent LLM attempted**: Whether the backend actually tried the LLM-based intent classifier during this diagnostic run
 - **strategy**: Which search strategy was selected
 - **degraded**: Whether the backend marked this search as degraded; if so, the specific reasons are shown here
 - **Result list**: Each result shows its match score, content snippet, source path, and update metadata
@@ -361,6 +363,7 @@ Displays the system's current operational status:
 - Queue depth (how many tasks are waiting)
 - Last worker error message
 - Sleep consolidation status
+- Reflection workflow counters (prepared / executed / rolled back), so you can see whether review-driven reflection actions are only queued, actually executed, or already rolled back
 
 ### 📋 Index Task Queue
 

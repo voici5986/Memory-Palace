@@ -256,6 +256,120 @@ def resolve_interaction_tier(
     return value, filters_copy, scope_hint_value
 
 
+def _normalize_domain_filter(
+    value: Any,
+    *,
+    allowed_domains: Optional[Iterable[str]] = None,
+) -> Optional[str]:
+    if value is None:
+        return None
+    domain_value = str(value).strip().lower()
+    if not domain_value:
+        return None
+    if allowed_domains is None:
+        return domain_value
+    allowed_list = [
+        str(item).strip().lower()
+        for item in allowed_domains
+        if str(item).strip()
+    ]
+    allowed = frozenset(allowed_list)
+    if domain_value not in allowed:
+        raise ValueError(
+            f"Unknown domain '{domain_value}'. "
+            f"Valid domains: {', '.join(allowed_list)}"
+        )
+    return domain_value
+
+
+def _split_uri_filter(value: str) -> Tuple[str, str]:
+    domain_part, path_part = str(value).split("://", 1)
+    domain = str(domain_part).strip().lower()
+    path_prefix = str(path_part).strip().strip("/")
+    if not domain:
+        raise ValueError("URI filter must include a non-empty domain.")
+    return domain, path_prefix
+
+
+def normalize_search_filters(
+    raw_filters: Optional[Dict[str, Any]],
+    *,
+    allowed_domains: Optional[Iterable[str]] = None,
+    allow_priority_alias: bool = False,
+) -> Dict[str, Any]:
+    if raw_filters is None:
+        return {}
+    if not isinstance(raw_filters, dict):
+        raise ValueError(
+            "filters must be an object with optional fields: "
+            "domain/path_prefix/max_priority/updated_after."
+        )
+
+    allowed_domains_list = [
+        str(item).strip().lower()
+        for item in (allowed_domains or [])
+        if str(item).strip()
+    ]
+
+    allowed_keys = {"domain", "path_prefix", "max_priority", "updated_after"}
+    if allow_priority_alias:
+        allowed_keys.add("priority")
+    unknown = set(raw_filters.keys()) - allowed_keys
+    if unknown:
+        raise ValueError(
+            f"Unknown filters: {', '.join(sorted(unknown))}. "
+            f"Allowed: {', '.join(sorted(allowed_keys))}."
+        )
+
+    normalized: Dict[str, Any] = {}
+
+    domain_value = _normalize_domain_filter(
+        raw_filters.get("domain"),
+        allowed_domains=allowed_domains_list,
+    )
+    if domain_value:
+        normalized["domain"] = domain_value
+
+    path_prefix = raw_filters.get("path_prefix")
+    if path_prefix is not None:
+        path_value = str(path_prefix).strip()
+        if path_value:
+            if "://" in path_value:
+                parsed_domain, parsed_path = _split_uri_filter(path_value)
+                normalized_domain = _normalize_domain_filter(
+                    parsed_domain,
+                    allowed_domains=allowed_domains_list,
+                )
+                if normalized_domain:
+                    normalized.setdefault("domain", normalized_domain)
+                normalized["path_prefix"] = parsed_path
+            else:
+                normalized["path_prefix"] = path_value.strip("/")
+
+    max_priority = raw_filters.get("max_priority")
+    if max_priority is None and allow_priority_alias:
+        max_priority = raw_filters.get("priority")
+    if max_priority is not None:
+        if isinstance(max_priority, bool) or isinstance(max_priority, float):
+            raise ValueError("filters.max_priority must be an integer")
+        try:
+            normalized["max_priority"] = int(str(max_priority).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("filters.max_priority must be an integer") from exc
+
+    updated_after = raw_filters.get("updated_after")
+    if updated_after is not None:
+        parsed = parse_iso_datetime(
+            str(updated_after),
+            normalize_to_utc_naive=True,
+            strict=True,
+        )
+        if parsed is not None:
+            normalized["updated_after"] = parsed.isoformat()
+
+    return normalized
+
+
 def should_try_intent_llm(
     client: Any,
     rule_payload: Optional[Dict[str, Any]],

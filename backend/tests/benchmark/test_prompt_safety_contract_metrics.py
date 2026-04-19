@@ -76,6 +76,7 @@ def test_prompt_safety_contract_metrics_threshold_and_artifacts() -> None:
     contract_pass_rate = safe_cases / total_cases if total_cases else 0.0
     threshold = float(load_thresholds_v1()["prompt_safety"]["contract_pass_rate_gte"])
     payload = {
+        "schema_version": "v1",
         "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "total_cases": total_cases,
         "safe_cases": safe_cases,
@@ -87,4 +88,5 @@ def test_prompt_safety_contract_metrics_threshold_and_artifacts() -> None:
     _write_artifact(payload)
 
     assert payload["gate_pass"] is True
+    assert payload["schema_version"] == "v1"
     assert PROMPT_SAFETY_JSON_ARTIFACT.exists()

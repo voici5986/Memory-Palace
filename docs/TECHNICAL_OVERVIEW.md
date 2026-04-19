@@ -176,6 +176,8 @@ backend/
 - 如果 reflection execute 的 rollback 先走了 review snapshot，后端现在还会继续对自动创建的 reflection namespace 做 best-effort cleanup，避免只回滚 leaf path 却把空父路径永远留在库里
 - 如果同一个 `session_id`、`source`、`reason`、`content` 被并发 `prepare`，现在会复用同一个 prepared review，而不是为同一批内容生成多个 review ID
 - `/maintenance/observability/summary` 里的 `reflection_workflow` 统计现在会合并持久化 summary，重启后 summary 计数口径稳定；这里说的是 summary 稳定，不是把所有明细事件都永久保留下来
+- Observability 页的运行时快照现在也会直接展示 `reflection_workflow` 的 prepared / executed / rolled back 计数，搜索诊断区会显示这条查询的 `interaction_tier` 和 `intent_llm_attempted`
+- 同一页的延迟卡片现在会显示本地化后的 `P95` 提示，不再把这个标签硬写死成单一英文样式
 - 如果调用方显式传了空白或只含空格的 `session_id`，reflection workflow 现在会直接按 `session_id_invalid` fail-closed；rollback 这条路径也一样，不再接受 ambient session fallback
 
 当前后端默认不会公开 `http://127.0.0.1:8000/docs`；直接访问一般会得到 `404`。接口说明优先看这里、[TOOLS.md](TOOLS.md) 和 `backend/tests/` 里的接口测试。
@@ -240,7 +242,7 @@ frontend/src/
 | Memory Browser | `/memory` | 按域（domain）树形浏览、内联编辑、查看 gist 摘要、别名管理 |
 | Review | `/review` | 查看写入快照 diff、支持 rollback 回滚和 integrate 确认、清理 deprecated 记忆 |
 | Maintenance | `/maintenance` | 查看 vitality 评分、清理孤儿记忆、触发索引重建、管理清理审批流程，支持 `domain` / `path_prefix` 过滤 |
-| Observability | `/observability` | 检索日志与统计、任务执行记录、索引 worker 状态、系统状态概览，支持 `scope_hint` 与更细的运行时快照 |
+| Observability | `/observability` | 检索日志与统计、任务执行记录、索引 worker 状态、系统状态概览，支持 `scope_hint`、`interaction_tier`、`intent_llm_attempted`、本地化 `P95`，以及更细的运行时快照 |
 
 补充说明：
 
@@ -367,7 +369,7 @@ Docker 端口环境变量：
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`（会拦截已跟踪的 `.audit` / `.playwright-mcp` 工件，也会扫描 tracked 文件里的本地 endpoint / key 模式，例如 `sk-local-*`、以及带端口的 loopback / private provider 地址；仓库自己的前端 loopback health probe 不会被误报）
 
-当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 重新实测 backend `1017 passed, 22 skipped`、frontend `173 passed`，前端 typecheck / build、`bash scripts/pre_publish_check.sh`，以及 `docker compose -f docker-compose.ghcr.yml config` 都通过。repo-local macOS `Profile B` 这轮还实际补跑了真实浏览器 smoke；另外也补跑了一条带显式 private-target allowlist 的本地 C/D retrieval + reranker + LLM smoke。repo-local live MCP e2e、Docker one-click `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这轮没有重跑，所以这里继续保留目标环境复核边界。
+当前 validate 链路已经把 frontend `npm run typecheck` 纳入和 `npm test` / build 同级的检查；本 session 在修复完成后重新实测 backend `1039 passed, 22 skipped`、frontend `173 passed`，前端 typecheck / build 也都通过，并额外补跑了一轮 repo-local macOS `Profile B` 真实浏览器 smoke。更早那张 2026-04-18 的 benchmark 表、repo-local live MCP e2e、Docker one-click `Profile C/D` 和原生 Windows / Linux 宿主 runtime 在这轮补跑里没有重跑，所以这里继续保留这些目标环境复核边界。
 
 ---
 

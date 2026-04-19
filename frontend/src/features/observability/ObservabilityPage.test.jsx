@@ -24,6 +24,8 @@ const buildSummary = ({
   timestamp = '2026-01-01T00:00:00Z',
   queueDepth = recentJobs.length,
   lastError = null,
+  searchStats = {},
+  reflectionWorkflow = null,
   smLite = {
     storage: 'runtime_ephemeral',
     promotion_path: 'compact_context + auto_flush',
@@ -33,7 +35,7 @@ const buildSummary = ({
 } = {}) => ({
   status: 'ok',
   timestamp,
-  search_stats: {},
+  search_stats: searchStats,
   health: {
     index: { degraded: false },
     runtime: {
@@ -51,6 +53,7 @@ const buildSummary = ({
   },
   index_latency: {},
   cleanup_query_stats: {},
+  ...(reflectionWorkflow ? { reflection_workflow: reflectionWorkflow } : {}),
 });
 
 const createDeferred = () => {
@@ -106,6 +109,14 @@ describe('ObservabilityPage', () => {
     await i18n.changeLanguage('zh-CN');
     api.getObservabilitySummary.mockResolvedValue(
       buildSummary({
+        searchStats: {
+          latency_ms: { avg: 18.4, p95: 41.7 },
+        },
+        reflectionWorkflow: {
+          prepared: 2,
+          executed: 1,
+          rolled_back: 1,
+        },
         recentJobs: [
           {
             job_id: 'job-zh',
@@ -129,6 +140,8 @@ describe('ObservabilityPage', () => {
       mode_applied: 'semantic',
       intent_applied: 'temporal',
       strategy_template_applied: 'temporal_time_filtered',
+      interaction_tier: 'deep',
+      intent_llm_attempted: true,
       degraded: false,
       counts: { session: 1, global: 2, returned: 1 },
       results: [
@@ -151,6 +164,8 @@ describe('ObservabilityPage', () => {
     expect(await screen.findByText('状态：正常')).toBeInTheDocument();
     expect(screen.getByText('索引降级：否')).toBeInTheDocument();
     expect(screen.getByText('sm-lite 降级：是')).toBeInTheDocument();
+    expect(screen.getByText('反思工作流：已准备 2 / 已执行 1 / 已回滚 1')).toBeInTheDocument();
+    expect(screen.getByText('P95：41.7 ms')).toBeInTheDocument();
     expect(screen.getByText('索引重建')).toBeInTheDocument();
     expect(screen.getByText('失败')).toBeInTheDocument();
 
@@ -159,6 +174,8 @@ describe('ObservabilityPage', () => {
     expect(await screen.findByText('模式 语义')).toBeInTheDocument();
     expect(screen.getByText('意图 时序型')).toBeInTheDocument();
     expect(screen.getByText('策略 时序过滤')).toBeInTheDocument();
+    expect(screen.getByText('交互层级 深度')).toBeInTheDocument();
+    expect(screen.getByText('意图 LLM 已尝试 是')).toBeInTheDocument();
     expect(screen.getByText('降级 否')).toBeInTheDocument();
     expect(screen.getByText('会话队列')).toBeInTheDocument();
   });

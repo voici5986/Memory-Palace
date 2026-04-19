@@ -366,6 +366,8 @@ cd <project-root>
 >
 > 当前 compose 会先等 `backend` 的 `/health` 通过，同时一键脚本还会补做一次前端代理 `/sse` 的可达性检查，frontend 才算真正 ready。看到容器刚启动但浏览器还没通时，优先先等几秒，不要急着误判成部署失败。
 >
+> 对 macOS / Linux 的 shell 路径来说，`docker_one_click.sh` 现在还会对短暂的 `docker compose up` 失败补一层有上限的退避重试，再决定是否报硬失败。说人话就是：短暂的拉镜像、daemon 抖动或启动瞬时问题会再给一次机会；如果连续失败，或者本来就不是可重试错误，脚本仍会停下并打印最后一条真实错误。
+>
 > 同一 checkout 下的并发一键部署会被 deployment lock 串行化，避免共享 compose project / env 文件互相覆盖。
 >
 > WAL 安全边界：仓库默认只把 **named volume + WAL** 当成受支持的 Docker 路径。如果你把 backend `/app/data` 改成 NFS/CIFS/SMB 或其它网络文件系统 bind mount，就必须显式切回 `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` 与 `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`。`docker_one_click.sh/.ps1` 现在会在 `docker compose up` 前做这层 preflight，并在发现高风险组合时直接拒绝启动；如果你绕过一键脚本，自己手动跑 `docker compose up`，则需要自己执行同样的检查。
@@ -399,7 +401,8 @@ cd <project-root>
 4. 检测并注入 Docker 持久化卷：默认按 compose project 生成隔离卷名（数据库 `<compose-project>_data`，snapshot `<compose-project>_snapshots`）；如需复用旧卷，必须显式设置 `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME`
 5. 若 backend `/app/data` 被改成 NFS/CIFS/SMB 等网络文件系统 bind mount，且本次配置仍会启用 WAL，则在启动前直接 fail-fast
 6. 对同一 checkout 的并发部署加 deployment lock，避免多次 `docker_one_click` 互相覆盖
-7. 使用 `docker compose` 构建并启动后端、SSE、前端三个容器
+7. 对 macOS / Linux 的 shell 路径，若 `docker compose up` 遇到短暂失败，会做几次小范围退避重试再决定是否放弃
+8. 使用 `docker compose` 构建并启动后端和前端两个容器；默认拓扑下的 SSE 由 backend 承载，再通过 frontend 代理对外暴露
 
 ### 安全说明
 

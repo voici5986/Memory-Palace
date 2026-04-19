@@ -56,7 +56,7 @@
 - **repo-local wrapper 现在会更一致地拦住本地 sqlite 误配**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，拒绝相对 sqlite 路径，也会把常见的 URL 编码容器路径先解开，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`。说人话就是：像 `sqlite+aiosqlite:///demo.db`、`sqlite+aiosqlite://///app/data/...`、`sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这类值，现在都不会再被误放过。
 - **Docker 基础镜像现在也收得更紧了**：仓库自带的 Dockerfile 现在把基础镜像 digest 一起锁住了，后面重建时不容易再因为上游 tag 漂了而悄悄变样。
 - **GHCR 发布镜像现在会先自查 backend 健康脚本了**：backend 镜像现在自带 Docker 级别的 `HEALTHCHECK`，`docker-compose.ghcr.yml` 里的 backend 也继续明确绑在 `0.0.0.0`，发布工作流还会在 push 前先检查 `/usr/local/bin/backend-healthcheck.py` 是否真的在镜像里而且可执行。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试 `1017 passed, 22 skipped`；前端 `173 passed`；前端 `npm run build`、`npm run typecheck` 和 `bash scripts/pre_publish_check.sh` 都通过；`docker compose -f docker-compose.ghcr.yml config` 也通过。这一轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke，以及一条带显式 private-target allowlist 的本地 C/D retrieval + reranker + LLM smoke。repo-local live MCP e2e、原生 Windows、原生 Linux 宿主 runtime 与 Docker one-click `Profile C/D` 这轮没有重跑，继续保留目标环境复验边界。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：跟进修复完成后，后端测试已更新为 `1039 passed, 22 skipped`；前端仍是 `173 passed`；前端 `npm run build` 和 `npm run typecheck` 也都通过。这一轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke，并确认 Observability 现在已经展示本地化后的 `P95`、`reflection_workflow`、`interaction_tier` 和 `intent_llm_attempted`。下面那组 2026-04-18 的 benchmark 表格这次**没有**重新跑。repo-local live MCP e2e、原生 Windows、原生 Linux 宿主 runtime 与 Docker one-click `Profile C/D` 继续保留目标环境复验边界。
 - **private provider 字面量地址现在不会再被默认信任**：像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认可用；其它 private IP 字面量现在必须通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式 allowlist 才能继续使用。link-local 和格式错误地址仍然会 fail-close。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection 后台清理现在更收口了**：同一个 session、source、reason、content 的并发 `prepare` 请求，仍然会复用同一个 prepared review；如果最后一个等待方先走掉了，后端现在也会把这条已经没人等的后台 prepare 一起取消，不再让它自己继续跑完。
@@ -1049,7 +1049,7 @@ curl -fsS http://127.0.0.1:8000/health
 
 <img src="docs/images/observability-zh.png" width="900" alt="Memory Palace — 可观测性页面（中文模式）" />
 
-实时搜索查询监控、检索质量洞察和任务队列状态。当前版本还补了 `scope hint`、运行时快照和索引任务队列等信息。
+实时搜索查询监控、检索质量洞察和任务队列状态。当前版本还补了 `scope hint`、运行时快照里的 `reflection_workflow`、搜索诊断里的 `interaction_tier` / `intent_llm_attempted`，以及索引任务队列等信息。
 </details>
 
 > 💡 后端现在默认不再公开运行中的 `/docs`。要看当前接口行为，优先看仓库文档和 `backend/tests/` 里的已核对测试。

@@ -25,7 +25,7 @@ async def test_mcp_search_memory_rejects_bool_and_float_max_priority_filters(
     payload = json.loads(raw)
 
     assert payload["ok"] is False
-    assert payload["error"] == "filters.max_priority must be an integer."
+    assert payload["error"] == "filters.max_priority must be an integer"
 
 
 @pytest.mark.asyncio

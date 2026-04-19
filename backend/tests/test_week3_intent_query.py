@@ -267,6 +267,85 @@ def test_interaction_tier_helpers_are_imported_from_shared_utils() -> None:
     assert maintenance_api._should_try_intent_llm is _should_try_intent_llm_shared
 
 
+@pytest.mark.parametrize(
+    "raw_filters",
+    [
+        {"domain": " CORE "},
+        {"path_prefix": "core://agent/index"},
+        {
+            "domain": "writer",
+            "path_prefix": "chapter_1/scene_2/",
+            "max_priority": "2",
+            "updated_after": "2026-01-31T12:00:00Z",
+        },
+        {
+            "domain": "core",
+            "path_prefix": "writer://chapter_1",
+            "max_priority": -1,
+        },
+        {"priority": 1},
+    ],
+)
+def test_maintenance_normalize_search_filters_matches_mcp_server_contract(
+    raw_filters: Dict[str, Any],
+) -> None:
+    assert maintenance_api._normalize_search_filters(
+        raw_filters
+    ) == mcp_server._normalize_search_filters(raw_filters)
+
+
+@pytest.mark.parametrize(
+    "raw_filters",
+    [
+        {"max_priority": True},
+        {"domain": "invalid"},
+        {"updated_after": "not-a-date"},
+        {"unknown": "value"},
+    ],
+)
+def test_maintenance_normalize_search_filters_raises_same_as_mcp_server(
+    raw_filters: Dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError) as maintenance_exc:
+        maintenance_api._normalize_search_filters(raw_filters)
+    with pytest.raises(ValueError) as mcp_exc:
+        mcp_server._normalize_search_filters(raw_filters)
+
+    assert str(maintenance_exc.value) == str(mcp_exc.value)
+
+
+@pytest.mark.parametrize(
+    "scope_hint",
+    [
+        None,
+        "",
+        "deep",
+        "core",
+        "core://agent/index",
+        "agent/index",
+    ],
+)
+def test_maintenance_scope_hint_contract_matches_mcp_server(
+    scope_hint: Any,
+) -> None:
+    assert maintenance_api._normalize_scope_hint(
+        scope_hint
+    ) == mcp_server._normalize_scope_hint(scope_hint)
+
+
+def test_maintenance_scope_merge_contract_matches_mcp_server() -> None:
+    normalized_filters = {"domain": "core", "path_prefix": "agent"}
+    normalized_scope_hint = {"provided": True, "raw": "core://agent/index", "domain": "core", "path_prefix": "agent/index", "strategy": "uri_prefix"}
+
+    assert maintenance_api._merge_scope_hint_with_filters(
+        normalized_filters=normalized_filters,
+        scope_hint=normalized_scope_hint,
+    ) == mcp_server._merge_scope_hint_with_filters(
+        normalized_filters=normalized_filters,
+        scope_hint=normalized_scope_hint,
+    )
+
+
 @pytest.mark.asyncio
 async def test_search_memory_degrades_to_unknown_when_classifier_unavailable(
     monkeypatch: pytest.MonkeyPatch,

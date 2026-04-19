@@ -313,6 +313,7 @@ search_memory(query="...", include_session=True)
 - mirrors 还一致吗
 - YAML/frontmatter 还合法吗
 - Claude / Codex / OpenCode / Gemini 现在是通过、部分通过，还是失败
+- 如果 prompt 里已经直接给出具体 URI，skill 还会不会按预期直接走 `read_memory(...)`，而不是先绕回 `search_memory(...)`
 - 当前回归结果是否比上一次更好
 
 注意这里的覆盖重点是：

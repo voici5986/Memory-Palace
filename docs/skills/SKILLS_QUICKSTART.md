@@ -442,6 +442,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 补一句体验口径：`evaluate_memory_palace_skill.py` 会串行调多个 CLI，完整跑完往往要几分钟；如果你机器上这几种客户端都装了，看到它跑一阵子没新输出，先别急着判定为卡死。当前 `codex` 这一项如果只是 `codex exec` 在 smoke 超时前没产出结构化输出，会直接记成 `PARTIAL`，而不是把整轮卡死。
 再补一句副作用口径：`gemini_live` 现在改为**显式可选**。只有当你设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会做这轮真实数据库 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；普通 smoke 保持默认即可，或显式设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
+再补一条当前 smoke 边界：如果 prompt 里已经直接给出具体 URI，答案现在应当直接对这个 URI 走 `read_memory(...)`。如果客户端在这类 known-URI 后续检查里还是先回到 `search_memory(...)`，live / smoke 结果也可能记成 `PARTIAL`。
 如果当前机器根本没有 `Antigravity` 宿主 runtime，`evaluate_memory_palace_skill.py` 里的 Antigravity 项更适合看成“待目标宿主手工补验”，不要先把它理解成仓库主链路坏了。
 如果这条报告里只有 `mcp_bindings` 失败，优先先重跑一次统一的 `user-scope` 安装，再重新执行 smoke：
 

@@ -34,6 +34,7 @@ from filelock import AsyncFileLock, Timeout as FileLockTimeout
 from shared_utils import (
     env_bool as _env_bool,
     env_int as _env_int,
+    normalize_search_filters as _normalize_search_filters_shared,
     parse_iso_datetime as _parse_iso_datetime_shared,
     resolve_interaction_tier as _resolve_interaction_tier,
     should_try_intent_llm as _should_try_intent_llm,
@@ -2834,63 +2835,11 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
 
 
 def _normalize_search_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Validate and normalize search filters."""
-    if filters is None:
-        return {}
-    if not isinstance(filters, dict):
-        raise ValueError(
-            "filters must be an object with optional fields: "
-            "domain/path_prefix/max_priority/updated_after."
-        )
-
-    allowed_keys = {"domain", "path_prefix", "max_priority", "updated_after"}
-    unknown = set(filters.keys()) - allowed_keys
-    if unknown:
-        raise ValueError(
-            f"Unknown filters: {', '.join(sorted(unknown))}. "
-            f"Allowed: {', '.join(sorted(allowed_keys))}."
-        )
-
-    normalized: Dict[str, Any] = {}
-
-    domain = filters.get("domain")
-    if domain is not None:
-        domain_value = str(domain).strip().lower()
-        if domain_value:
-            if domain_value not in VALID_DOMAINS:
-                raise ValueError(
-                    f"Unknown domain '{domain_value}'. "
-                    f"Valid domains: {', '.join(VALID_DOMAINS)}"
-                )
-            normalized["domain"] = domain_value
-
-    path_prefix = filters.get("path_prefix")
-    if path_prefix is not None:
-        path_value = str(path_prefix).strip()
-        if path_value:
-            if "://" in path_value:
-                parsed_domain, parsed_path = parse_uri(path_value)
-                normalized.setdefault("domain", parsed_domain)
-                normalized["path_prefix"] = parsed_path
-            else:
-                normalized["path_prefix"] = path_value.strip("/")
-
-    max_priority = filters.get("max_priority")
-    if max_priority is not None:
-        if isinstance(max_priority, bool) or isinstance(max_priority, float):
-            raise ValueError("filters.max_priority must be an integer.")
-        try:
-            normalized["max_priority"] = int(max_priority)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("filters.max_priority must be an integer.") from exc
-
-    updated_after = filters.get("updated_after")
-    if updated_after is not None:
-        parsed = _parse_iso_datetime(str(updated_after))
-        if parsed is not None:
-            normalized["updated_after"] = parsed.isoformat()
-
-    return normalized
+    return _normalize_search_filters_shared(
+        filters,
+        allowed_domains=VALID_DOMAINS,
+        allow_priority_alias=True,
+    )
 
 
 def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:

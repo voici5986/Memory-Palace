@@ -344,7 +344,7 @@ If the current machine simply does not have the `Antigravity` host runtime, trea
 
 This check sequentially calls multiple CLIs; if you have `claude`, `codex`, `opencode`, and `gemini` installed, it usually takes a few minutes to complete. Don't assume it's "hung" if there's no output for dozens of seconds.
 `gemini_live` is now **explicitly opt-in**: the script only attempts that real-database `create/update/guard` round when you set `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`, and it may still leave test memories like `notes://gemini_suite_*`. If you also want to force-skip it, you can keep using `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
-Even when you opt in, that live round can still stop at `PARTIAL` if it hits a shared real database or a neighboring Gemini live session mutates the same note first; treat that as a live-host verification limit before assuming the isolated mainline skill/MCP path is broken.
+Even when you opt in, that live round can still stop at `PARTIAL` if it hits a shared real database, a neighboring Gemini live session mutates the same note first, or the answer misses the current known-URI fast path (when the target URI is already explicit, it should go straight to `read_memory(...)` instead of bouncing back through `search_memory(...)`). Treat those as live-host / smoke-contract limits before assuming the isolated mainline skill/MCP path is broken.
 If the report only shows `mcp_bindings` as failed, first rerun the unified `user-scope` install and then rerun smoke:
 
 ```bash
@@ -375,7 +375,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 Similarly, this report is a local artifact that "appears after running"; it is normal that it's not in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 It uses an isolated temporary database by default and won't touch your formal database; however, it may still write stderr, logs, or temporary directory paths into the report upon failure. Check the content yourself before forwarding it to others.
-This script now follows the same repo-local wrapper path that users actually connect to. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification baseline for this session is: backend tests (`966 passed, 20 skipped`), frontend tests (`165 passed`), passing `frontend npm run typecheck`, passing frontend build, and a passing repo-local live MCP e2e; repo-local macOS `Profile B` (`backend + frontend + real browser setup/maintenance smoke`) and a local smoke pass covering the same retrieval / reranker / write-guard / gist paths as `Profile C/D` were also rerun. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
+This script now follows the same repo-local wrapper path that users actually connect to. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification note for this session is: after the follow-up fixes, backend tests are `1039 passed, 22 skipped`, frontend tests stay at `173 passed`, frontend `npm run typecheck` and frontend build both passed, and a repo-local macOS `Profile B` browser smoke was rerun. The last repo-local live MCP e2e pass still remains part of the public baseline, but this 2026-04-19 follow-up round did **not** rerun live MCP e2e or the benchmark tables. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
 
 These two reports are primarily for reviewing results in the current environment and are not main entry documents.
 
@@ -397,6 +397,10 @@ Expected matches:
 - `read_memory("system://boot")`
 - `NOOP = stop + inspect guard_target_uri / guard_target_id`
 - `docs/skills/memory-palace/references/trigger-samples.md`
+
+Current smoke also adds one concrete known-URI follow-up: if the prompt already
+names a target URI, the skill should go straight to `read_memory(...)` for that
+URI instead of bouncing through `search_memory(...)` first.
 
 Negative prompt:
 

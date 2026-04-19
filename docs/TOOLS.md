@@ -587,13 +587,13 @@ index_status()
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│  2. 话题回忆   │  search_memory(query, include_session=True)
-│              │  → 搜索相关记忆，包含本会话上下文
+│  2. 话题回忆   │  search_memory(query, include_session=True) / read_memory(uri)
+│              │  → URI 不确定时先搜索；目标 URI 已知时直接读取
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│  3. 写入前检查 │  search_memory → 确认无重复 → create_memory / update_memory
-│              │  → 避免创建冗余记忆
+│  3. 写入前检查 │  read_memory(uri) / search_memory → 确认无重复 → create_memory / update_memory
+│              │  → 目标已知就直接先读；目标不确定时先搜，避免创建冗余记忆
 └──────┬───────┘
        ▼
 ┌──────────────┐

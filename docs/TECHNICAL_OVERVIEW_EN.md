@@ -171,6 +171,8 @@ One more current behavior boundary is worth calling out:
 
 - `/maintenance/observability/search` now follows `SEARCH_DEFAULT_MODE` whenever the request omits `mode`; only an explicitly supplied `mode` overrides that default.
 - The reflection workflow no longer depends only on MCP-side session summaries. Successful Dashboard `/browse/node` writes now seed the same reflection input path, and `/maintenance/observability/summary` merges persisted reflection counters with the current runtime view so `reflection_workflow` totals remain restart-stable.
+- The Observability runtime snapshot now also exposes the `reflection_workflow` prepared / executed / rolled-back counters directly on the page, and the search diagnostics section shows `interaction_tier` plus whether `intent_llm_attempted` was true for that query.
+- The latency card on the same page now shows a localized `P95` hint so the UI keeps the same meaning in English and zh-CN instead of hardcoding one spelling.
 - After reflection `execute` succeeds, the learn job now also carries the matching review snapshot handle; `/maintenance/learn/jobs/{job_id}/rollback` delegates to the review rollback path instead of bypassing review semantics with its own delete logic.
 - Reflection rollback no longer depends on an ambient session. When callers already know `session_id`, the backend still checks that `session_id` (and `actor_id` when supplied) against the learn job before it deletes anything; when rollback only carries a learn `job_id`, the backend now recovers the stored `session_id` from that job before it continues.
 - If reflection execute rolls back through a review snapshot first, the backend now also does best-effort cleanup for the auto-created reflection namespace, so an empty parent path is less likely to be left behind forever.
@@ -239,7 +241,7 @@ frontend/src/
 | Memory Browser | `/memory` | Browse tree by domain, inline editing, view gist summaries, alias management |
 | Review | `/review` | View write snapshot diffs, support rollback and integrate confirmation, clean up deprecated memories |
 | Maintenance | `/maintenance` | View vitality scores, clean up orphaned memories, trigger index rebuilds, manage cleanup approval process, support `domain` / `path_prefix` filtering |
-| Observability | `/observability` | Retrieval logs and statistics, task execution records, index worker status, system status overview, support `scope_hint` and more granular runtime snapshots |
+| Observability | `/observability` | Retrieval logs and statistics, task execution records, index worker status, system status overview, support `scope_hint`, `interaction_tier`, `intent_llm_attempted`, localized `P95`, and more granular runtime snapshots |
 
 Additional notes:
 
@@ -364,7 +366,7 @@ Related files:
 - Backup scripts: `scripts/backup_memory.sh`, `scripts/backup_memory.ps1` (keep the latest `20` backups by default; adjust with `--keep` / `-Keep`; backup filenames use UTC timestamps so host/container runs sort consistently)
 - Pre-publishing check: `scripts/pre_publish_check.sh` (blocks tracked `.audit` / `.playwright-mcp` artifacts and scans tracked files for local-only endpoint/key patterns such as `sk-local-*` plus loopback/private provider bases with ports; the repository's own frontend loopback health probe is intentionally excluded from that leak scan)
 
-The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the real reruns were backend `1017 passed, 22 skipped`, frontend `173 passed`, passing frontend build/typecheck, `bash scripts/pre_publish_check.sh`, and `docker compose -f docker-compose.ghcr.yml config`, plus a repo-local macOS `Profile B` real-browser smoke and a local C/D retrieval + reranker + LLM smoke behind an explicit private-target allowlist. Repo-local live MCP e2e, Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths were not rerun in this round.
+The current validate path now treats frontend `npm run typecheck` as a first-class check alongside `npm test` and the frontend build; in this session, the follow-up reruns after the fixes were backend `1039 passed, 22 skipped`, frontend `173 passed`, passing frontend build/typecheck, plus a repo-local macOS `Profile B` real-browser smoke. The narrower 2026-04-18 benchmark table, repo-local live MCP e2e, Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths were not rerun in that follow-up pass, so those target-environment recheck boundaries remain explicit here.
 
 ---
 

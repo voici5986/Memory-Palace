@@ -7,6 +7,7 @@ This module implements the SQLite-based memory storage with:
 - Multiple paths (aliases) pointing to same memory
 """
 
+import asyncio
 import os
 import re
 import json
@@ -2147,6 +2148,47 @@ class SQLiteClient:
                             degrade_reasons,
                             f"{prefix}:{backend_value}:timeout:{error_type}",
                         )
+            else:
+                cls._append_degrade_reason(
+                    degrade_reasons, f"{prefix}:connection_failure"
+                )
+                if backend_value:
+                    cls._append_degrade_reason(
+                        degrade_reasons,
+                        f"{prefix}:{backend_value}:connection_failure",
+                    )
+
+        if category == "http_status":
+            status_code = error_info.get("status_code")
+            if status_code == 429:
+                cls._append_degrade_reason(degrade_reasons, f"{prefix}:rate_limited")
+                if backend_value:
+                    cls._append_degrade_reason(
+                        degrade_reasons, f"{prefix}:{backend_value}:rate_limited"
+                    )
+            elif status_code in {502, 503, 504}:
+                cls._append_degrade_reason(
+                    degrade_reasons, f"{prefix}:upstream_unavailable"
+                )
+                if backend_value:
+                    cls._append_degrade_reason(
+                        degrade_reasons,
+                        f"{prefix}:{backend_value}:upstream_unavailable",
+                    )
+
+        if bool(error_info.get("retry_exhausted")):
+            cls._append_degrade_reason(degrade_reasons, f"{prefix}:retry_exhausted")
+            if backend_value:
+                cls._append_degrade_reason(
+                    degrade_reasons, f"{prefix}:{backend_value}:retry_exhausted"
+                )
+        retry_reason = str(error_info.get("retry_reason") or "").strip()
+        if retry_reason:
+            cls._append_degrade_reason(degrade_reasons, f"{prefix}:{retry_reason}")
+            if backend_value:
+                cls._append_degrade_reason(
+                    degrade_reasons, f"{prefix}:{backend_value}:{retry_reason}"
+                )
 
         category_reason = f"{prefix}:{category}"
         cls._append_degrade_reason(degrade_reasons, category_reason)
@@ -2450,13 +2492,15 @@ class SQLiteClient:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        error_info: Dict[str, Any] = {}
 
         async def _request() -> Optional[Dict[str, Any]]:
-            return await self._post_json(
+            return await self._post_json_with_transient_retry(
                 self._intent_llm_api_base,
                 "/chat/completions",
                 payload,
                 self._intent_llm_api_key,
+                error_sink=error_info,
             )
 
         response = await self._run_reflection_task(
@@ -2470,7 +2514,14 @@ class SQLiteClient:
                 reason.startswith("intent_llm_reflection_lane_")
                 for reason in degrade_reasons
             ):
-                degrade_reasons.append("intent_llm_request_failed")
+                if self._looks_like_model_unavailable_error(error_info):
+                    degrade_reasons.append("intent_llm_model_unavailable")
+                else:
+                    self._append_request_failure_reasons(
+                        degrade_reasons,
+                        prefix="intent_llm_request_failed",
+                        error_info=error_info,
+                    )
             return {
                 **fallback,
                 "intent_llm_enabled": True,
@@ -2695,33 +2746,40 @@ class SQLiteClient:
             headers["Authorization"] = f"Bearer {api_key}"
             headers["X-API-Key"] = api_key
 
-        try:
-            timeout = httpx.Timeout(self._remote_http_timeout_sec)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=payload, headers=headers)
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    retry_payload = self._build_embedding_retry_payload_without_dimensions(
-                        endpoint=endpoint,
-                        payload=payload,
-                        response=exc.response,
-                    )
-                    if retry_payload is None:
-                        raise
-                    response = await client.post(url, json=retry_payload, headers=headers)
-                    response.raise_for_status()
-                parsed = response.json()
-            if isinstance(parsed, dict):
-                return parsed
-            return {"data": parsed}
-        except httpx.HTTPStatusError as exc:
-            if error_sink is not None:
+        attempts = 3
+        for attempt in range(1, attempts + 1):
+            local_error: Dict[str, Any] = {}
+            try:
+                timeout = httpx.Timeout(self._remote_http_timeout_sec)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        retry_payload = self._build_embedding_retry_payload_without_dimensions(
+                            endpoint=endpoint,
+                            payload=payload,
+                            response=exc.response,
+                        )
+                        if retry_payload is None:
+                            raise
+                        response = await client.post(url, json=retry_payload, headers=headers)
+                        response.raise_for_status()
+                    parsed = response.json()
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"data": parsed}
+            except httpx.HTTPStatusError as exc:
                 response = exc.response
-                error_sink.update(
+                local_error.update(
                     {
                         "category": "http_status",
                         "status_code": response.status_code if response is not None else None,
+                        "retry_after": (
+                            str(response.headers.get("retry-after") or "").strip()
+                            if response is not None
+                            else ""
+                        ),
                         "body": (
                             response.text[:1000]
                             if response is not None and isinstance(response.text, str)
@@ -2729,37 +2787,53 @@ class SQLiteClient:
                         ),
                     }
                 )
-            return None
-        except httpx.RequestError as exc:
-            if error_sink is not None:
-                error_sink.update(
+            except httpx.RequestError as exc:
+                local_error.update(
                     {
                         "category": "request_error",
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     }
                 )
-            return None
-        except httpx.InvalidURL as exc:
-            if error_sink is not None:
-                error_sink.update(
+            except httpx.InvalidURL as exc:
+                local_error.update(
                     {
                         "category": "invalid_url",
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     }
                 )
-            return None
-        except (ValueError, TypeError) as exc:
-            if error_sink is not None:
-                error_sink.update(
+            except (ValueError, TypeError) as exc:
+                local_error.update(
                     {
                         "category": "response_parse_error",
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     }
                 )
-            return None
+
+            retryable = self._is_retryable_remote_error(local_error)
+            if error_sink is not None:
+                error_sink.clear()
+                error_sink.update(local_error)
+                error_sink["attempts"] = attempt
+                error_sink["retry_count"] = max(0, attempt - 1)
+                error_sink["retryable"] = retryable
+                error_sink["retry_exhausted"] = attempt >= attempts or not retryable
+            if attempt >= attempts or not retryable:
+                return None
+            retry_after_raw = str(local_error.get("retry_after") or "").strip()
+            retry_delay = 0.15 * attempt
+            if retry_after_raw:
+                try:
+                    retry_after_value = float(retry_after_raw)
+                except (TypeError, ValueError):
+                    retry_after_value = None
+                else:
+                    if retry_after_value >= 0.0:
+                        retry_delay = min(retry_after_value, 0.5)
+            await asyncio.sleep(retry_delay)
+        return None
 
     async def _post_json_with_optional_error_sink(
         self,
@@ -2783,6 +2857,90 @@ class SQLiteClient:
             if "error_sink" not in str(exc):
                 raise
             return await self._post_json(base, endpoint, payload, api_key)
+
+    @staticmethod
+    def _is_retryable_remote_error(error_info: Dict[str, Any]) -> bool:
+        if not isinstance(error_info, dict) or not error_info:
+            return False
+        category = str(error_info.get("category") or "").strip().lower()
+        if category == "http_status":
+            try:
+                status_code = int(error_info.get("status_code"))
+            except (TypeError, ValueError):
+                return False
+            return status_code in {408, 429, 502, 503, 504}
+        if category != "request_error":
+            return False
+        error_type = str(error_info.get("error_type") or "").strip().lower()
+        message = str(error_info.get("message") or "").strip().lower()
+        return any(
+            token in error_type or token in message
+            for token in (
+                "timeout",
+                "connect",
+                "network",
+                "connection",
+                "readerror",
+                "writeerror",
+                "remoteprotocolerror",
+                "pooltimeout",
+            )
+        )
+
+    @staticmethod
+    def _classify_remote_request_failure(
+        prefix: str, error_info: Dict[str, Any]
+    ) -> List[str]:
+        reasons = [f"{prefix}_request_failed"]
+        if not isinstance(error_info, dict) or not error_info:
+            return reasons
+        category = str(error_info.get("category") or "").strip().lower()
+        if category == "http_status":
+            try:
+                status_code = int(error_info.get("status_code"))
+            except (TypeError, ValueError):
+                status_code = None
+            if status_code == 429:
+                reasons.append(f"{prefix}_request_failed:rate_limited")
+            elif status_code in {502, 503, 504}:
+                reasons.append(f"{prefix}_request_failed:upstream_unavailable")
+            if status_code is not None:
+                reasons.append(f"{prefix}_request_failed:http_status:{status_code}")
+        elif category == "request_error":
+            error_type = str(error_info.get("error_type") or "").strip()
+            lowered_error_type = error_type.lower()
+            if "timeout" in lowered_error_type:
+                reasons.append(f"{prefix}_request_failed:timeout")
+            else:
+                reasons.append(f"{prefix}_request_failed:connection_failure")
+            if error_type:
+                reasons.append(f"{prefix}_request_failed:request_error:{error_type}")
+        elif category == "invalid_url":
+            reasons.append(f"{prefix}_request_failed:invalid_url")
+        elif category == "response_parse_error":
+            reasons.append(f"{prefix}_request_failed:response_parse_error")
+        if bool(error_info.get("retry_exhausted")):
+            reasons.append(f"{prefix}_request_failed:retry_exhausted")
+        return reasons
+
+    async def _post_json_with_transient_retry(
+        self,
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+        *,
+        error_sink: Optional[Dict[str, Any]] = None,
+        max_attempts: int = 3,
+    ) -> Optional[Dict[str, Any]]:
+        _ = max_attempts
+        return await self._post_json_with_optional_error_sink(
+            base,
+            endpoint,
+            payload,
+            api_key,
+            error_sink=error_sink,
+        )
 
     @staticmethod
     def _looks_like_model_unavailable_error(error_info: Dict[str, Any]) -> bool:
@@ -5511,13 +5669,15 @@ class SQLiteClient:
                 },
             ],
         }
+        error_info: Dict[str, Any] = {}
 
         async def _request() -> Optional[Dict[str, Any]]:
-            return await self._post_json(
+            return await self._post_json_with_transient_retry(
                 llm_api_base,
                 "/chat/completions",
                 payload,
                 llm_api_key,
+                error_sink=error_info,
             )
 
         response = await self._run_reflection_task(
@@ -5531,8 +5691,10 @@ class SQLiteClient:
                 reason.startswith("compact_gist_llm_reflection_lane_")
                 for reason in degrade_reasons or []
             ):
-                self._append_degrade_reason(
-                    degrade_reasons, "compact_gist_llm_request_failed"
+                self._append_request_failure_reasons(
+                    degrade_reasons,
+                    prefix="compact_gist_llm_request_failed",
+                    error_info=error_info,
                 )
             return None
 
@@ -5748,7 +5910,7 @@ class SQLiteClient:
         error_info: Dict[str, Any] = {}
 
         async def _request() -> Optional[Dict[str, Any]]:
-            return await self._post_json(
+            return await self._post_json_with_transient_retry(
                 llm_api_base,
                 "/chat/completions",
                 payload,
@@ -5773,8 +5935,10 @@ class SQLiteClient:
                     degrade_reasons, "write_guard_llm_model_unavailable"
                 )
             else:
-                self._append_degrade_reason(
-                    degrade_reasons, "write_guard_llm_request_failed"
+                self._append_request_failure_reasons(
+                    degrade_reasons,
+                    prefix="write_guard_llm_request_failed",
+                    error_info=error_info,
                 )
             return None
 

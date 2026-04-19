@@ -523,6 +523,7 @@ const zhCN = {
     stats: {
       queries: '查询总数',
       latency: '延迟',
+      p95Hint: 'P95：{{value}}',
       cacheHitRatio: '缓存命中率',
       indexLatency: '索引延迟',
       cleanupP95: '清理 p95',
@@ -547,6 +548,7 @@ const zhCN = {
       smLiteDegraded: 'sm-lite 降级：{{value}}',
       smLiteReason: 'sm-lite 原因：{{value}}',
       cleanupQueries: '清理查询数：{{value}}',
+      reflectionWorkflow: '反思工作流：已准备 {{prepared}} / 已执行 {{executed}} / 已回滚 {{rolledBack}}',
       updatedAt: '更新时间：{{value}}',
     },
     job: {
@@ -576,7 +578,9 @@ const zhCN = {
     diagnostics: {
       latency: '延迟 {{value}}',
       mode: '模式 {{value}}',
+      interactionTier: '交互层级 {{value}}',
       intent: '意图 {{value}}',
+      intentLlmAttempted: '意图 LLM 已尝试 {{value}}',
       strategy: '策略 {{value}}',
       degraded: '降级 {{value}}',
       counts: '数量 s:{{session}} g:{{global}} r:{{returned}}',
@@ -593,6 +597,10 @@ const zhCN = {
       hybrid: '混合',
       semantic: '语义',
       keyword: '关键词',
+    },
+    interactionTiers: {
+      fast: '快速',
+      deep: '深度',
     },
     booleans: {
       true: '是',

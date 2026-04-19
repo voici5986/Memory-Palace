@@ -504,6 +504,12 @@ If this command can normally output the version number, starting `mcp_server.py`
    bash scripts/docker_one_click.sh --help
    ```
 
+   One more small boundary to keep in mind: on the macOS / Linux shell path,
+   `docker_one_click.sh` now already retries transient `docker compose up`
+   failures a few times with short backoff. So if the script still exits after
+   those retries, read the **last printed compose error** first; that is the
+   failure you need to fix, not just the first transient hiccup.
+
 3. Specify ports in case of port conflict:
 
    ```bash
@@ -577,12 +583,13 @@ If this command can normally output the version number, starting `mcp_server.py`
    | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | The current query scope contains mixed vector dimensions, or that scope's vectors do not match the active config; reindex is required | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API request failed | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker configuration missing | `backend/db/sqlite_client.py` |
+   | `intent_llm_model_unavailable` | Intent LLM was enabled, but the configured model/backend was not usable | `backend/db/sqlite_client.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM returned empty result | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | Indexing task enqueue dropped | `backend/mcp_server.py` |
 
    > `write_guard_exception` belongs to the write/learn chain (e.g., `create_memory`, `update_memory`, explicit learning trigger), meaning the write has been fail-closed and rejected, rather than a drop in search quality.
    >
-   > Those two request-failure markers can now also carry a more specific suffix. In practice you may see values like `embedding_request_failed:timeout`, `embedding_request_failed:http_status:503`, `embedding_request_failed:api:timeout`, or `reranker_request_failed:http_status:503`. Read them from left to right: first identify which chain failed, then use the suffix to tell whether it was a timeout, an HTTP status, or another request-side error.
+   > Those two request-failure markers can now also carry a more specific suffix. In practice you may see values like `embedding_request_failed:timeout`, `embedding_request_failed:http_status:503`, `embedding_request_failed:connection_failure`, `embedding_request_failed:rate_limited`, `embedding_request_failed:upstream_unavailable`, `embedding_request_failed:retry_exhausted`, or `reranker_request_failed:http_status:503`. Read them from left to right: first identify which chain failed, then use the suffix to tell whether it was a timeout, a rate limit, an upstream outage, a connection problem, or another request-side error. The same pattern now also applies to `compact_gist` / `write_guard` / `intent_llm` request failures in the degrade-reason path.
 
 2. **Check Embedding / Reranker API reachability**:
 
@@ -636,6 +643,10 @@ If this command can normally output the version number, starting `mcp_server.py`
 6. **Don't panic when seeing new fields on the observation page**:
 
    - `scope_hint`: Usually just tells the retrieval "which scope to prioritize"; only the legacy `fast/deep` values are treated first as fast/deep tier shortcuts.
+   - `interaction_tier`: Tells you whether that query stayed on the `fast` lane or went through the `deep` lane.
+   - `intent_llm_attempted`: Tells you whether the intent-LLM branch was actually attempted for that query; `false` is normal on `fast` requests.
+   - `reflection_workflow`: In the runtime snapshot, these are the prepared / executed / rolled-back counters merged into the current summary view.
+   - localized `P95`: The latency card still shows the same slow-tail metric; only the label is now localized with the rest of the page.
    - `sm-lite`: A new set of lightweight runtime states in the current version, not an error.
    - `Runtime Snapshot`: A summary to help you troubleshoot, not every item must have a value.
 

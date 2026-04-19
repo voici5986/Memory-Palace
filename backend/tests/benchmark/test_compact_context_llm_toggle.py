@@ -5,6 +5,7 @@ import pytest
 
 import mcp_server
 from db.sqlite_client import SQLiteClient
+from runtime_state import runtime_state
 
 
 COMPACT_GIST_ENV_KEYS = [
@@ -112,6 +113,63 @@ async def test_generate_compact_gist_request_failed(monkeypatch: pytest.MonkeyPa
 
     assert payload is None
     assert "compact_gist_llm_request_failed" in degrade_reasons
+
+
+@pytest.mark.asyncio
+async def test_generate_compact_gist_request_failed_records_timeout_retry_reasons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_compact_gist_env(monkeypatch)
+    _enable_compact_gist_llm(monkeypatch)
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+
+    async def _run_reflection(*, operation: str, task):
+        assert operation == "compact_gist_llm"
+        return await task()
+
+    async def _fake_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+        error_sink: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        _ = base
+        _ = endpoint
+        _ = payload
+        _ = api_key
+        if error_sink is not None:
+            error_sink.update(
+                {
+                    "category": "request_error",
+                    "error_type": "ReadTimeout",
+                    "message": "upstream timed out",
+                    "retry_reason": "timeout",
+                    "retryable": True,
+                    "retry_exhausted": True,
+                    "attempts": 3,
+                }
+            )
+        return None
+
+    monkeypatch.setattr(runtime_state.reflection_lanes, "run_reflection", _run_reflection)
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    degrade_reasons: List[str] = []
+    payload = await client.generate_compact_gist(
+        summary=_LONG_GIST_SUMMARY,
+        degrade_reasons=degrade_reasons,
+    )
+    await client.close()
+
+    assert payload is None
+    assert "compact_gist_llm_request_failed" in degrade_reasons
+    assert "compact_gist_llm_request_failed:timeout" in degrade_reasons
+    assert "compact_gist_llm_request_failed:retry_exhausted" in degrade_reasons
+    assert (
+        "compact_gist_llm_request_failed:request_error:ReadTimeout"
+        in degrade_reasons
+    )
 
 
 @pytest.mark.asyncio

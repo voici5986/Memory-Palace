@@ -308,6 +308,7 @@ Without this set of samples, every subsequent `description` adjustment can only 
 - Are mirrors still consistent?
 - Is YAML/frontmatter still valid?
 - Are Claude / Codex / OpenCode / Gemini passing, partially passing, or failing?
+- When a prompt already names a concrete URI, does the skill still take the direct `read_memory(...)` fast path instead of bouncing through `search_memory(...)`?
 - Is the current regression result better than the last one?
 
 Its practical coverage is centered on:

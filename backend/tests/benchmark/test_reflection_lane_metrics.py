@@ -66,6 +66,7 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
     status = await lane.status()
     thresholds = load_thresholds_v1()["reflection_lane"]
     payload = {
+        "schema_version": "v1",
         "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "tasks_total": status.get("tasks_total", 0),
         "tasks_failed": status.get("tasks_failed", 0),
@@ -82,6 +83,7 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
     assert "tasks_total" in status
     assert "wait_ms_p95" in status
     assert payload["gate_pass"] is True
+    assert payload["schema_version"] == "v1"
     assert int(payload["timeout_degrade_correct"]) == int(
         thresholds["timeout_degrade_correct_eq"]
     )

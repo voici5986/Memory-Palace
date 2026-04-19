@@ -443,6 +443,90 @@ wait_for_deployment_ready() {
   return 1
 }
 
+compose_error_is_retryable() {
+  local message="${1:-}"
+  local patterns=(
+    "No such container"
+    "dependency failed to start"
+    "toomanyrequests"
+    "TLS handshake timeout"
+    "connection reset by peer"
+    "i/o timeout"
+    "context canceled"
+    "EOF"
+  )
+  local pattern=""
+
+  if [[ -z "${message}" ]]; then
+    return 1
+  fi
+
+  for pattern in "${patterns[@]}"; do
+    if [[ "${message}" == *"${pattern}"* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_compose_with_retry() {
+  local compose_args_name="$1"
+  local compose_project_name="$2"
+  local max_attempts="${3:-3}"
+  local env_file="${4:-}"
+  local compose_env_file_args_local=()
+  local compose_args=()
+  local attempt=0
+  local sleep_seconds=0
+  local output=""
+  local status=0
+  local detail=""
+
+  if [[ -n "${env_file}" ]]; then
+    compose_env_file_args_local=(--env-file "${env_file}")
+  fi
+
+  eval "compose_args=(\"\${${compose_args_name}[@]}\")"
+
+  while (( attempt < max_attempts )); do
+    attempt=$((attempt + 1))
+
+    set +e
+    output="$(
+      COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compose_env_file_args_local[@]}" "${compose_args[@]}" 2>&1
+    )"
+    status=$?
+    set -e
+
+    if [[ ${status} -eq 0 ]]; then
+      if [[ -n "${output}" ]]; then
+        printf '%s\n' "${output}"
+      fi
+      return 0
+    fi
+
+    detail="docker compose command failed: ${compose_args[*]}"
+    if [[ -n "${output}" ]]; then
+      detail+=$'\n'"${output}"
+    fi
+    printf '%s\n' "${detail}" >&2
+
+    if (( attempt >= max_attempts )) || ! compose_error_is_retryable "${detail}"; then
+      return "${status}"
+    fi
+
+    sleep_seconds=$((2 * attempt))
+    echo "[compose-retry] transient compose up failure (${attempt}/${max_attempts}), retrying in ${sleep_seconds}s." >&2
+    sleep "${sleep_seconds}"
+    if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compose_env_file_args_local[@]}" -f docker-compose.yml down --remove-orphans >/dev/null 2>&1; then
+      :
+    fi
+  done
+
+  return 1
+}
+
 compose_project_has_any_container() {
   local service="$1"
   docker ps -a \
@@ -1214,6 +1298,15 @@ fi
 
 assert_no_risky_wal_bind_mounts "${env_file}"
 
+export MEMORY_PALACE_FRONTEND_PORT="${frontend_port}"
+export MEMORY_PALACE_BACKEND_PORT="${backend_port}"
+export MEMORY_PALACE_DATA_VOLUME="${data_volume}"
+export MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}"
+export NOCTURNE_FRONTEND_PORT="${frontend_port}"
+export NOCTURNE_BACKEND_PORT="${backend_port}"
+export NOCTURNE_DATA_VOLUME="${data_volume}"
+export NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}"
+
 # Force recreate to avoid stale network attachment causing frontend->backend 502.
 if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml down --remove-orphans >/dev/null 2>&1; then
   echo "[compose-down] pre-cleanup failed; aborting to match fail-closed deployment behavior." >&2
@@ -1221,16 +1314,8 @@ if ! COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" "${compo
 fi
 
 if [[ ${no_build} -eq 1 ]]; then
-  if ! COMPOSE_PROJECT_NAME="${compose_project_name}" \
-    MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
-    MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
-    MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
-    MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-    NOCTURNE_FRONTEND_PORT="${frontend_port}" \
-    NOCTURNE_BACKEND_PORT="${backend_port}" \
-    NOCTURNE_DATA_VOLUME="${data_volume}" \
-    NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-    "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --no-build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
+  compose_up_args=(-f docker-compose.yml up -d --no-build --wait --wait-timeout 120 --force-recreate --remove-orphans)
+  if ! run_compose_with_retry compose_up_args "${compose_project_name}" 3 "${env_file}"; then
     if ! compose_project_has_any_container backend \
       && ! compose_project_has_any_container frontend; then
       echo "[compose-up] docker compose failed before creating any service container; skipping readiness probe." >&2
@@ -1245,16 +1330,8 @@ if [[ ${no_build} -eq 1 ]]; then
     echo "[compose-up] services became ready after compose reported failure; continuing." >&2
   fi
 else
-  if ! COMPOSE_PROJECT_NAME="${compose_project_name}" \
-    MEMORY_PALACE_FRONTEND_PORT="${frontend_port}" \
-    MEMORY_PALACE_BACKEND_PORT="${backend_port}" \
-    MEMORY_PALACE_DATA_VOLUME="${data_volume}" \
-    MEMORY_PALACE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-    NOCTURNE_FRONTEND_PORT="${frontend_port}" \
-    NOCTURNE_BACKEND_PORT="${backend_port}" \
-    NOCTURNE_DATA_VOLUME="${data_volume}" \
-    NOCTURNE_SNAPSHOTS_VOLUME="${snapshots_volume}" \
-    "${compose_cmd[@]}" "${compose_env_file_args[@]}" -f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans; then
+  compose_up_args=(-f docker-compose.yml up -d --build --wait --wait-timeout 120 --force-recreate --remove-orphans)
+  if ! run_compose_with_retry compose_up_args "${compose_project_name}" 3 "${env_file}"; then
     if ! compose_project_has_any_container backend \
       && ! compose_project_has_any_container frontend; then
       echo "[compose-up] docker compose failed before creating any service container; skipping readiness probe." >&2

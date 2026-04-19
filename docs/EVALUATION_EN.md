@@ -9,8 +9,12 @@ records, and some metric JSONs are typically for development or local use only.
 
 > Status Note (2026-04): This page keeps the 2026-02 public baseline tables,
 > folds the 2026-04-17 real A/B/C/D verification into the current public-facing
-> conclusion, and also records a narrower 2026-04-18 maintenance rerun from
-> this session. For the current default interaction profile, the explicit
+> conclusion, records a narrower 2026-04-18 maintenance rerun, and also keeps a
+> 2026-04-19 follow-up validation note for the post-review fixes. That
+> 2026-04-19 round reran the full backend suite (`1039 passed, 22 skipped`),
+> frontend tests (`173 passed`), frontend build, frontend typecheck, and a
+> repo-local Profile B browser smoke; it did **not** rerun the benchmark tables
+> on this page. For the current default interaction profile, the explicit
 > deep-retrieval profiles, and the newest public-facing re-check notes, start
 > with Sections 3, 4, and 5 on this page.
 
@@ -28,7 +32,8 @@ records, and some metric JSONs are typically for development or local use only.
 
 > Data Generation Time: `2026-02-19T06:55:30+00:00` (early gate baseline) /
 > `2026-04-17T10:35:51+00:00` (current public verification) /
-> `2026-04-18T06:31:05+00:00` (current-session maintenance rerun)
+> `2026-04-18T06:31:05+00:00` (current-session maintenance rerun) /
+> `2026-04-19` (post-review fix validation refresh; benchmark tables unchanged)
 
 ---
 
@@ -167,10 +172,9 @@ In plain English:
   friction day-to-day setup.
 - `Profile C/D` again show the quality-first tier, but they still cost much
   more latency than `Profile B`.
-- This same session also reran the repo-local live MCP e2e, and it passed on
-  the current code path.
-- This same session rechecked Docker `Profile B` smoke and reran the real
-  A/B/C/D benchmark against local test-only providers.
+- The later 2026-04-19 follow-up pass reran the full backend/frontend suites,
+  frontend build, frontend typecheck, and a repo-local `Profile B` browser
+  smoke, but it did **not** rerun this benchmark table or the live MCP e2e.
 - Docker one-click `Profile C/D` was **not** rerun as a separate compose/script
   matrix in this round, so this page keeps that target-environment recheck
   boundary explicit.
@@ -357,6 +361,8 @@ benchmark helpers during the maintenance phase)
 |---|---:|---:|---|
 | Contract pass rate | 1.000 | >= 1.000 | ✅ PASS |
 
+- Artifact contract: the current JSON payload also carries
+  `schema_version: "v1"`.
 - Focus: whether the system prompt explicitly treats input as untrusted,
   enforces strict JSON output, and strips control characters from the base
   prompt payload.
@@ -373,6 +379,8 @@ benchmark helpers during the maintenance phase)
 |---|---:|---:|---|
 | Timeout degrade correctness | 1 | = 1 | ✅ PASS |
 
+- Artifact contract: the current JSON payload also carries
+  `schema_version: "v1"`.
 - Focus: when the reflection lane is saturated or times out, does it still
   return `reflection_lane_timeout` as expected and leave runtime metrics
   behind.
@@ -399,6 +407,10 @@ If you need deeper reproduction, the current repository already includes the
 benchmark helpers and test cases under `backend/tests/benchmark/`; only
 one-off maintenance artifacts and temporary gate scripts are not part of the
 main public docs entry.
+
+If you inspect the raw maintenance JSONs directly, the current benchmark
+artifacts also carry `schema_version: "v1"` so downstream checks can tell which
+artifact contract they are reading.
 
 If you want to reproduce the narrower 2026-04-18 maintenance rerun used in this
 session, this is the command shape:

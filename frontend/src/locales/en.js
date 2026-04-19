@@ -525,6 +525,7 @@ const en = {
     stats: {
       queries: 'Queries',
       latency: 'Latency',
+      p95Hint: 'P95 {{value}}',
       cacheHitRatio: 'Cache Hit Ratio',
       indexLatency: 'Index Latency',
       cleanupP95: 'Cleanup p95',
@@ -549,6 +550,7 @@ const en = {
       smLiteDegraded: 'sm-lite degraded: {{value}}',
       smLiteReason: 'sm-lite reason: {{value}}',
       cleanupQueries: 'cleanup queries: {{value}}',
+      reflectionWorkflow: 'reflection workflow: prepared {{prepared}} / executed {{executed}} / rolled back {{rolledBack}}',
       updatedAt: 'updated at: {{value}}',
     },
     job: {
@@ -578,7 +580,9 @@ const en = {
     diagnostics: {
       latency: 'latency {{value}}',
       mode: 'mode {{value}}',
+      interactionTier: 'interaction tier {{value}}',
       intent: 'intent {{value}}',
+      intentLlmAttempted: 'intent LLM attempted {{value}}',
       strategy: 'strategy {{value}}',
       degraded: 'degraded {{value}}',
       counts: 'counts s:{{session}} g:{{global}} r:{{returned}}',
@@ -595,6 +599,10 @@ const en = {
       hybrid: 'hybrid',
       semantic: 'semantic',
       keyword: 'keyword',
+    },
+    interactionTiers: {
+      fast: 'fast',
+      deep: 'deep',
     },
     booleans: {
       true: 'yes',

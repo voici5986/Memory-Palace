@@ -60,7 +60,7 @@ If you want the AI to guide installation step by step, start with the standalone
 - **Repo-local wrapper rejects more local sqlite misconfigurations now**: the built-in Python and shell wrappers now normalize common slash and case variants, reject relative sqlite paths, and also decode common percent-escaped container paths before deciding whether a local `DATABASE_URL` still points at Docker-internal `/app/...` or `/data/...`. In practice, values such as `sqlite+aiosqlite:///demo.db`, `sqlite+aiosqlite://///app/data/...`, and `sqlite+aiosqlite:////%2Fapp%2Fdata/...` are no longer accepted by accident.
 - **Docker base images are pinned more tightly now**: the repository Dockerfiles now keep explicit digest pins on the shipped base images, so rebuilds are less likely to drift just because an upstream tag moved.
 - **GHCR release images now self-check the backend health helper**: the backend image now ships a Docker-level `HEALTHCHECK`, `docker-compose.ghcr.yml` keeps the backend bound to `0.0.0.0`, and the publish workflow now verifies `/usr/local/bin/backend-healthcheck.py` before it pushes a new backend image.
-- **The current validation snapshot is based on fresh reruns in this session**: backend tests `1017 passed, 22 skipped`; frontend `173 passed`; frontend `npm run build`, `npm run typecheck`, and `bash scripts/pre_publish_check.sh` all passed; `docker compose -f docker-compose.ghcr.yml config` also passed. This same session reran a repo-local macOS Profile B browser smoke and a local C/D retrieval + reranker + LLM smoke behind an explicit private-target allowlist. Repo-local live MCP e2e, native Windows, native Linux host runtime paths, and Docker one-click `Profile C/D` were **not** rerun in this round and still keep explicit target-environment recheck boundaries.
+- **The current validation snapshot is based on fresh reruns in this session**: after the follow-up fixes, backend tests are now `1039 passed, 22 skipped`; frontend stays at `173 passed`; frontend `npm run build` and `npm run typecheck` both passed. This same session also reran a repo-local macOS `Profile B` browser smoke and confirmed that Observability now shows localized `P95`, `reflection_workflow`, `interaction_tier`, and `intent_llm_attempted`. The narrower 2026-04-18 benchmark tables below were **not** rerun in this follow-up pass. Repo-local live MCP e2e, native Windows, native Linux host runtime paths, and Docker one-click `Profile C/D` still keep explicit target-environment recheck boundaries.
 - **Search fail-closed behavior is tighter now**: if final path revalidation itself blows up, `search_memory` now drops that result instead of fail-opening with stale data, and surfaces the degradation in the response. Fast-tier temporal queries also keep the fast candidate cap, and the keyword LIKE fallback now escapes literal `%` / `_` instead of treating them as accidental wildcards.
 - **Private provider literals are no longer implicitly trusted**: loopback IP literals such as `127.0.0.1` / `::1`, plus `localhost`, still work out of the box, but other private IP literals now require an explicit allowlist entry through `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`. Link-local and malformed targets remain fail-closed.
 - **Dashboard writes and reflection are wired together now**: Dashboard `/browse/node` writes now feed the reflection workflow summary, so `/maintenance/learn/reflection` no longer gets stuck on `session_summary_empty` just because the change came from the Dashboard surface.
@@ -938,6 +938,8 @@ Full guides:
 | D | 1.000 | 1.000 | 1.000 | 1261.532 |
 
 > In the same session, Docker `Profile B` smoke, repo-local live MCP e2e, and the real A/B/C/D benchmark were also rerun. Native Windows and native Linux host runtime paths were not rerun in this round.
+>
+> Follow-up note (2026-04-19): after the post-review fixes, the repository also reran the full backend/frontend suites (`1039 passed, 22 skipped` / `173 passed`), frontend build, frontend typecheck, and a repo-local `Profile B` browser smoke. The narrower benchmark table above itself was not rerun in that follow-up pass.
 
 ### Retrieval Quality — A/B/C/D Real Run
 
@@ -1083,7 +1085,7 @@ Monitor memory vitality scores, trigger cleanup tasks, and manage decay paramete
 
 <img src="docs/images/memory-palace-observability-page.png" width="900" alt="Memory Palace — Observability Page (English mode)" />
 
-Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, runtime snapshot details, and richer index-task visibility.
+Real-time search query monitoring, retrieval quality insights, and task queue status. The current version also adds `scope hint`, `reflection_workflow` in the runtime snapshot, `interaction_tier` / `intent_llm_attempted` in search diagnostics, and richer index-task visibility.
 </details>
 
 > 💡 The backend no longer exposes a live `/docs` page by default. For current route behavior, use the repo docs plus the checked tests in `backend/tests/`.

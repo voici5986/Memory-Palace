@@ -444,6 +444,10 @@ If you need isolated output during parallel review or CI, set `MEMORY_PALACE_SKI
 
 A note on the experience: `evaluate_memory_palace_skill.py` runs multiple CLIs serially; it often takes a few minutes to complete. If you see no new output for a while, don't immediately assume it's stuck. The current `codex` item now falls back to `PARTIAL` when `codex exec` reaches the smoke timeout without producing structured output, so one slow Codex host CLI should not stall the whole run.
 A note on side effects: `gemini_live` is now **explicitly opt-in**. The script only attempts that real-database `create/update/guard` round when you set `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1`, and it may leave test memories like `notes://gemini_suite_*`. For regular smoke tests, keep the default or explicitly set `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`.
+One more current smoke boundary: if the prompt already names a concrete URI,
+the answer is now expected to go straight to `read_memory(...)` for that URI.
+If a client still falls back to `search_memory(...)` first on that known-URI
+follow-up, the live/smoke result can land as `PARTIAL`.
 If the current machine simply does not have the `Antigravity` host runtime, treat the Antigravity item in `evaluate_memory_palace_skill.py` as "manual verification on the target host still pending" rather than a repository-mainline failure.
 If the report only shows `mcp_bindings` as failed, rerun the unified `user-scope` install first and then rerun smoke:
 

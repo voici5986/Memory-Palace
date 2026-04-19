@@ -90,8 +90,10 @@ const LABEL_CLASS = 'mb-2 block text-xs font-medium uppercase tracking-[0.14em] 
  * @typedef {{
  *   latency_ms?: number | null,
  *   mode_applied?: string | null,
+ *   interaction_tier?: string | null,
  *   intent_applied?: string | null,
  *   intent?: string | null,
+ *   intent_llm_attempted?: boolean | null,
  *   strategy_template_applied?: string | null,
  *   strategy_template?: string | null,
  *   intent_profile?: { strategy_template?: string | null } | null,
@@ -163,6 +165,11 @@ const LABEL_CLASS = 'mb-2 block text-xs font-medium uppercase tracking-[0.14em] 
  *     full_scan_queries?: number | null,
  *     index_hit_ratio?: number | null,
  *     latency_ms?: { p95?: number | null } | null,
+ *   } | null,
+ *   reflection_workflow?: {
+ *     prepared?: number | null,
+ *     executed?: number | null,
+ *     rolled_back?: number | null,
  *   } | null,
  * }} ObservabilitySummary
  */
@@ -262,11 +269,22 @@ const translateObservabilityToken = (t, group, value, fallback = '-') => {
 const translateObservabilityBoolean = (t, value) =>
   t(`observability.booleans.${value ? 'true' : 'false'}`);
 
+const translateOptionalObservabilityBoolean = (t, value, fallback = '-') => (
+  value === null || value === undefined
+    ? fallback
+    : translateObservabilityBoolean(t, Boolean(value))
+);
+
 const formatObservabilityRequestTarget = (t, jobId) => (
   jobId
     ? t('observability.messages.jobTarget', { jobId: String(jobId) })
     : t('observability.messages.syncTarget')
 );
+
+const coerceNonNegativeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
 
 const parseOptionalNonNegativeInteger = (rawValue, label, t) => {
   const normalized = String(rawValue ?? '').trim();
@@ -778,6 +796,7 @@ export default function ObservabilityPage() {
   const indexLatency = summary?.index_latency || {};
   const cleanupQueryStats = summary?.cleanup_query_stats || {};
   const cleanupLatency = cleanupQueryStats.latency_ms || {};
+  const reflectionWorkflow = summary?.reflection_workflow || null;
   const recentJobs = Array.isArray(worker.recent_jobs) ? worker.recent_jobs : [];
   const viewingActiveJob = Boolean(detailJobId && activeJobId && detailJobId === activeJobId);
 
@@ -801,6 +820,17 @@ export default function ObservabilityPage() {
     summary?.status,
     t('common.states.unknown'),
   );
+  const reflectionWorkflowSummary = useMemo(() => {
+    if (!reflectionWorkflow || typeof reflectionWorkflow !== 'object') return null;
+    const prepared = coerceNonNegativeNumber(reflectionWorkflow.prepared);
+    const executed = coerceNonNegativeNumber(reflectionWorkflow.executed);
+    const rolledBack = coerceNonNegativeNumber(reflectionWorkflow.rolled_back);
+    return t('observability.runtime.reflectionWorkflow', {
+      prepared,
+      executed,
+      rolledBack,
+    });
+  }, [reflectionWorkflow, t]);
 
   return (
     <div className="palace-harmonized flex h-full flex-col overflow-hidden bg-[color:var(--palace-bg)] text-[color:var(--palace-ink)] selection:bg-[rgba(179,133,79,0.28)] selection:text-[color:var(--palace-ink)]">
@@ -879,7 +909,9 @@ export default function ObservabilityPage() {
             icon={TimerReset}
             label={t('observability.stats.latency')}
             value={formatMs(latency.avg)}
-            hint={`p95 ${formatMs(latency.p95)}`}
+            hint={t('observability.stats.p95Hint', {
+              value: formatMs(latency.p95),
+            })}
             tone="neutral"
           />
           <StatCard
@@ -1120,6 +1152,7 @@ export default function ObservabilityPage() {
                 <p>{t('observability.runtime.smLiteDegraded', { value: translateObservabilityBoolean(t, Boolean(smLite.degraded)) })}</p>
                 <p>{t('observability.runtime.smLiteReason', { value: smLite.reason || '-' })}</p>
                 <p>{t('observability.runtime.cleanupQueries', { value: formatNumber(cleanupQueryStats.total_queries, i18n.resolvedLanguage) })}</p>
+                {reflectionWorkflowSummary && <p>{reflectionWorkflowSummary}</p>}
                 <p>{t('observability.runtime.updatedAt', { value: summary?.timestamp || '-' })}</p>
               </div>
             </div>
@@ -1332,6 +1365,16 @@ export default function ObservabilityPage() {
                       value: translateObservabilityToken(t, 'modes', searchResult.mode_applied, searchResult.mode_applied || 'unknown'),
                     })}</Badge>
                     <Badge tone="neutral">
+                      {t('observability.diagnostics.interactionTier', {
+                        value: translateObservabilityToken(
+                          t,
+                          'interactionTiers',
+                          searchResult.interaction_tier,
+                          searchResult.interaction_tier || '-',
+                        ),
+                      })}
+                    </Badge>
+                    <Badge tone="neutral">
                       {t('observability.diagnostics.intent', {
                         value: translateObservabilityToken(
                           t,
@@ -1339,6 +1382,11 @@ export default function ObservabilityPage() {
                           searchResult.intent_applied || searchResult.intent || 'unknown',
                           searchResult.intent_applied || searchResult.intent || 'unknown',
                         ),
+                      })}
+                    </Badge>
+                    <Badge tone="neutral">
+                      {t('observability.diagnostics.intentLlmAttempted', {
+                        value: translateOptionalObservabilityBoolean(t, searchResult.intent_llm_attempted),
                       })}
                     </Badge>
                     <Badge tone="neutral">

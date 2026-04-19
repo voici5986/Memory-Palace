@@ -2,7 +2,7 @@
 
 本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
-> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-18 的当前 rerun 和本 session 的真实验证范围收口到公开口径里。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
+> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-19 review 后修复的补充验证一起收口到公开口径里。2026-04-19 这轮补充验证只重跑了完整 backend 测试（`1039 passed, 22 skipped`）、frontend 测试（`173 passed`）、frontend build、frontend typecheck，以及一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮补跑里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
 
 ---
 
@@ -16,7 +16,7 @@
 | 当前发布说明 | `docs/changelog/release_v3.7.1_2026-03-26.md` |
 | 发布对比摘要 | `docs/changelog/release_summary_vs_old_project_2026-03-06.md` |
 
-> 数据生成时间：`2026-02-19T06:55:30+00:00`（早期门禁基线）/ `2026-04-18`（本 session rerun）
+> 数据生成时间：`2026-02-19T06:55:30+00:00`（早期门禁基线）/ `2026-04-17T10:35:51+00:00`（当前公开验证）/ `2026-04-18T06:31:05+00:00`（本 session rerun）/ `2026-04-19`（review 后修复验证刷新；benchmark 表未重跑）
 
 ---
 
@@ -123,6 +123,7 @@
 - `Profile B` 还是默认交互档，质量已经明显高于 A，延迟也还很低。
 - `Profile C/D` 这轮质量都跑满了，但时延明显更高，属于按需打开的深检索档。
 - `Profile A` 依旧只是低配兜底，不适合拿来代表语义检索质量。
+- 后续 2026-04-19 的补跑只覆盖完整 backend/frontend 测试、frontend build/typecheck 和 repo-local `Profile B` 真实浏览器 smoke；这张 benchmark 表和 live MCP e2e 都没有在那轮重跑里重算。
 
 ## 3.5 旧版 vs 当前版本（同口径摘要）
 
@@ -276,6 +277,7 @@
 |---|---:|---:|---|
 | Contract pass rate | 1.000 | ≥ 1.000 | ✅ PASS |
 
+- 工件契约：当前这份 JSON 现在还会显式带 `schema_version: "v1"`。
 - 关注点：system prompt 是否明确把输入当作不可信数据、是否强制 strict JSON 输出、基础 prompt payload 是否移除了控制字符。
 - 这是**安全契约门禁**，不是模型能力评分；目标是保证 write guard / gist / intent 反射链路的 prompt 框架本身不退化。
 
@@ -287,6 +289,7 @@
 |---|---:|---:|---|
 | Timeout degrade correctness | 1 | = 1 | ✅ PASS |
 
+- 工件契约：当前这份 JSON 现在还会显式带 `schema_version: "v1"`。
 - 关注点：反射 lane 在并发受限且获取超时时，是否仍然按预期返回 `reflection_lane_timeout` 并留下运行时指标。
 - 关键观测字段包括：`tasks_total`、`tasks_failed`、`wait_ms_p95`、`duration_ms_p95`。
 - 这条公开门禁覆盖的是反射的 `prepare/execute` 并发边界；真正的 rollback 路径仍以当前结果里返回的 endpoint 为准：prepare 阶段通常先给 `/maintenance/import/jobs/.../rollback`，执行后如果已经拿到 review snapshot，则会升级为 `/review/...`，同时保留 `/maintenance/learn/jobs/.../rollback` alias。
@@ -306,14 +309,16 @@ curl -fsS http://127.0.0.1:8000/health
 
 如果你需要更深入的复现，当前仓库已经附带 `backend/tests/benchmark/` 下的 benchmark helpers 与测试用例；只有一次性维护产物和临时门禁脚本不作为公开文档主入口。
 
+如果你会直接读维护阶段产出的原始 JSON，当前 benchmark 产物现在还会额外带上 `schema_version: "v1"`，方便下游脚本先判断自己读的是哪一版工件契约。
+
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`974 passed / 22 skipped`
-- Frontend 全量：`167 passed`
+- Backend 非 benchmark 全量：`1039 passed / 22 skipped`
+- Frontend 全量：`173 passed`
 - Frontend `typecheck` / `build`：通过
-- repo-local live MCP e2e：通过
-- Docker `Profile B` smoke：通过
-- 真实 A/B/C/D benchmark：本轮已重跑
+- repo-local `Profile B` 真实浏览器 smoke：通过
+- repo-local live MCP e2e：这轮未重跑，继续沿用上一轮已通过口径
+- 真实 A/B/C/D benchmark：这轮未重跑，沿用 2026-04-18 rerun 表格
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界
 - `skills+MCP` / `single-MCP`：本轮未重跑，这里不追加新结论
 

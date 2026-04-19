@@ -370,6 +370,8 @@ cd <project-root>
 >
 > The current compose first waits for the `backend` `/health` check to pass, and the one-click script then adds one extra frontend-proxied `/sse` reachability check before the frontend is considered ready. If you see the container has just started but the browser isn't connecting, wait a few seconds first; do not immediately judge it as a deployment failure.
 >
+> On the macOS / Linux shell path, `docker_one_click.sh` now also gives transient `docker compose up` failures a small bounded retry with backoff before surfacing a hard error. In plain language: short-lived pull / daemon / startup hiccups get another chance, but repeated or clearly non-retryable failures still stop the run and print the last real error.
+>
 > Concurrent one-click deployments under the same checkout will be serialized by a deployment lock to prevent shared compose projects/env files from overwriting each other.
 >
 > WAL safety boundary: the repository defaults only treat **named volume + WAL** as a supported Docker path. If you replace backend `/app/data` with a bind mount on NFS/CIFS/SMB or another network filesystem, explicitly switch back to `MEMORY_PALACE_DOCKER_WAL_ENABLED=false` and `MEMORY_PALACE_DOCKER_JOURNAL_MODE=delete`. `docker_one_click.sh/.ps1` now performs that preflight before `docker compose up` and aborts on the risky combination; if you bypass the one-click script and run `docker compose up` manually, you need to enforce the same rule yourself.
@@ -403,7 +405,8 @@ cd <project-root>
 4.  Detects and injects Docker persistent volumes: by default they are isolated per compose project (`<compose-project>_data` for the database and `<compose-project>_snapshots` for Review snapshots); old volumes are reused only when `MEMORY_PALACE_DATA_VOLUME` / `MEMORY_PALACE_SNAPSHOTS_VOLUME` is explicitly set.
 5.  Fails fast before startup if backend `/app/data` has been changed to a bind mount on NFS/CIFS/SMB or another network filesystem while WAL would still be enabled.
 6.  Adds a deployment lock to concurrent deployments under the same checkout to prevent multiple `docker_one_click` instances from overwriting each other.
-7.  Uses `docker compose` to build and start the backend, SSE, and frontend containers.
+7.  On the macOS / Linux shell path, retries transient `docker compose up` failures a few times with short backoff before giving up.
+8.  Uses `docker compose` to build and start the backend plus frontend containers; SSE is served by the backend and exposed through the frontend proxy in the default topology.
 
 ### Security Notes
 

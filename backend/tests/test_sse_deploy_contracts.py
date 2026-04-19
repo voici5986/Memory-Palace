@@ -127,6 +127,15 @@ def test_frontend_nginx_template_targets_repo_managed_sse_port() -> None:
     template_text = (
         PROJECT_ROOT / "deploy" / "docker" / "nginx.conf.template"
     ).read_text(encoding="utf-8")
+    sse_block = template_text.split("location = /sse {", 1)[1].split(
+        "location = /sse/ {", 1
+    )[0]
+    messages_block = template_text.split("location ^~ /messages {", 1)[1].split(
+        "location ^~ /sse/messages {", 1
+    )[0]
+    sse_messages_block = template_text.split(
+        "location ^~ /sse/messages {", 1
+    )[1].split("location = /index.html {", 1)[0]
 
     assert "proxy_pass http://backend:8000/sse/;" in template_text
     assert "connect-src ${FRONTEND_CSP_CONNECT_SRC_NGINX_ESCAPED};" in template_text
@@ -134,6 +143,9 @@ def test_frontend_nginx_template_targets_repo_managed_sse_port() -> None:
     assert "location ^~ /sse/messages {" in template_text
     assert "location = /sse/ {" in template_text
     assert "return 307 /sse;" in template_text
+    assert 'proxy_set_header Connection "";' in sse_block
+    assert 'proxy_set_header Connection "";' in messages_block
+    assert 'proxy_set_header Connection "";' in sse_messages_block
 
 
 def test_frontend_nginx_template_only_injects_api_key_for_protected_api_routes() -> None:

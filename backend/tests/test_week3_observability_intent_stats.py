@@ -117,6 +117,30 @@ class _LegacyIntentClient(_FakeIntentClient):
         }
 
 
+class _AmbiguousIntentLlmClient(_FakeIntentClient):
+    def classify_intent(self, _query: str, _rewritten_query: str) -> Dict[str, Any]:
+        return {
+            "intent": "unknown",
+            "strategy_template": "default",
+            "method": "keyword_scoring_v2",
+            "confidence": 0.41,
+            "signals": ["causal:why", "temporal:before"],
+        }
+
+    async def classify_intent_with_llm(
+        self, _query: str, _rewritten_query: str
+    ) -> Dict[str, Any]:
+        return {
+            "intent": "causal",
+            "strategy_template": "causal_wide_pool",
+            "method": "intent_llm",
+            "confidence": 0.93,
+            "signals": ["intent_llm:causal"],
+            "intent_llm_enabled": True,
+            "intent_llm_applied": True,
+        }
+
+
 class _RacePersistIntentClient(_FakeIntentClient):
     def __init__(self, delays: list[float]) -> None:
         super().__init__()
@@ -194,6 +218,75 @@ async def test_observability_summary_tracks_intent_and_strategy_breakdown(
     assert stats["intent_breakdown"]["causal"] == 1
     assert stats["strategy_hit_breakdown"]["temporal_time_filtered"] == 1
     assert stats["strategy_hit_breakdown"]["causal_wide_pool"] == 1
+    assert stats["interaction_tier_breakdown"]["fast"] == 2
+    assert stats["intent_llm_attempted_breakdown"]["attempted"] == 0
+    assert stats["intent_llm_attempted_breakdown"]["not_attempted"] == 2
+
+
+@pytest.mark.asyncio
+async def test_observability_summary_tracks_interaction_tier_and_intent_llm_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _AmbiguousIntentLlmClient()
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    async def _index_worker_status() -> Dict[str, Any]:
+        return {"enabled": True, "running": False, "recent_jobs": [], "stats": {}}
+
+    async def _write_lane_status() -> Dict[str, Any]:
+        return {
+            "global_concurrency": 1,
+            "global_active": 0,
+            "global_waiting": 0,
+            "session_waiting_count": 0,
+            "session_waiting_sessions": 0,
+            "max_session_waiting": 0,
+            "wait_warn_ms": 2000,
+        }
+
+    monkeypatch.setattr(maintenance_api, "_INTENT_LLM_ENABLED", True)
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.index_worker, "status", _index_worker_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.write_lanes, "status", _write_lane_status
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state.reflection_lanes, "status", _write_lane_status
+    )
+
+    async with maintenance_api._search_events_guard:
+        maintenance_api._search_events.clear()
+    maintenance_api._search_events_loaded = False
+
+    fast_payload = maintenance_api.SearchConsoleRequest(
+        query="When did we rebuild index?",
+        mode="hybrid",
+        include_session=False,
+    )
+    deep_payload = maintenance_api.SearchConsoleRequest(
+        query="before or after maybe why timeline",
+        mode="hybrid",
+        include_session=False,
+        filters={"interaction_tier": "deep"},
+    )
+
+    fast_result = await maintenance_api.run_observability_search(fast_payload)
+    deep_result = await maintenance_api.run_observability_search(deep_payload)
+    summary = await maintenance_api.get_observability_summary()
+
+    assert fast_result["intent_llm_attempted"] is False
+    assert deep_result["intent_llm_attempted"] is True
+
+    stats = summary["search_stats"]
+    assert stats["interaction_tier_breakdown"]["fast"] == 1
+    assert stats["interaction_tier_breakdown"]["deep"] == 1
+    assert stats["intent_llm_attempted_breakdown"]["attempted"] == 1
+    assert stats["intent_llm_attempted_breakdown"]["not_attempted"] == 1
 
 
 @pytest.mark.asyncio

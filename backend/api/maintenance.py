@@ -13,7 +13,7 @@ from urllib.parse import quote
 from collections import Counter, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Tuple, cast
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Literal, Optional, Tuple, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
@@ -27,6 +27,7 @@ from shared_utils import (
     env_float as _shared_env_float,
     env_int as _shared_env_int,
     is_loopback_hostname as _is_loopback_hostname,
+    normalize_search_filters as _normalize_search_filters_shared,
     resolve_interaction_tier as _resolve_interaction_tier,
     should_try_intent_llm as _should_try_intent_llm,
     utc_iso_now as _utc_iso_now,
@@ -143,6 +144,8 @@ _VALID_DOMAINS = [
     for d in str(os.getenv("VALID_DOMAINS", "core,writer,game,notes,system")).split(",")
     if d.strip()
 ]
+if "system" not in _VALID_DOMAINS:
+    _VALID_DOMAINS.append("system")
 _SCOPE_URI_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)://(.*)$")
 _SEARCH_EVENT_LIMIT = 200
 _SEARCH_EVENTS_META_KEY = "observability.search_events.v1"
@@ -204,7 +207,7 @@ class SearchConsoleRequest(BaseModel):
     include_session: bool = True
     session_id: Optional[str] = None
     filters: Dict[str, Any] = Field(default_factory=dict)
-    interaction_tier: Optional[str] = None
+    interaction_tier: Optional[Literal["fast", "deep"]] = None
     scope_hint: Optional[str] = None
 
 
@@ -2069,6 +2072,8 @@ def _sanitize_search_event(raw: Any) -> Optional[Dict[str, Any]]:
         "global_contributed": _safe_int(raw.get("global_contributed") or 0),
         "intent": str(raw.get("intent") or "unknown"),
         "intent_applied": str(raw.get("intent_applied") or "unknown"),
+        "interaction_tier": str(raw.get("interaction_tier") or "unknown"),
+        "intent_llm_attempted": bool(raw.get("intent_llm_attempted")),
         "strategy_template": str(raw.get("strategy_template") or "default"),
         "strategy_template_applied": str(
             raw.get("strategy_template_applied") or "default"
@@ -2152,46 +2157,11 @@ async def _persist_search_events_locked(
 
 
 def _normalize_search_filters(raw_filters: Dict[str, Any]) -> Dict[str, Any]:
-    normalized: Dict[str, Any] = {}
-    if not isinstance(raw_filters, dict):
-        return normalized
-
-    domain = raw_filters.get("domain")
-    if isinstance(domain, str) and domain.strip():
-        normalized["domain"] = domain.strip().lower()
-
-    path_prefix = raw_filters.get("path_prefix")
-    if isinstance(path_prefix, str) and path_prefix.strip():
-        normalized["path_prefix"] = path_prefix.strip().strip("/")
-
-    max_priority = raw_filters.get("max_priority", raw_filters.get("priority"))
-    if max_priority is not None:
-        parsed_priority: Optional[int] = None
-        if isinstance(max_priority, bool):
-            parsed_priority = None
-        elif isinstance(max_priority, int):
-            parsed_priority = max_priority
-        elif isinstance(max_priority, str):
-            priority_raw = max_priority.strip()
-            if priority_raw and priority_raw.lstrip("+-").isdigit():
-                parsed_priority = int(priority_raw)
-        if parsed_priority is None:
-            raise ValueError("filters.max_priority must be an integer")
-        normalized["max_priority"] = parsed_priority
-
-    updated_after = raw_filters.get("updated_after")
-    if isinstance(updated_after, str) and updated_after.strip():
-        normalized["updated_after"] = updated_after.strip()
-
-    scope_hint = raw_filters.get("scope_hint")
-    if scope_hint is not None:
-        if not isinstance(scope_hint, str):
-            raise ValueError("filters.scope_hint must be a string")
-        normalized_scope_hint = scope_hint.strip()
-        if normalized_scope_hint:
-            normalized["scope_hint"] = normalized_scope_hint
-
-    return normalized
+    return _normalize_search_filters_shared(
+        raw_filters,
+        allowed_domains=_VALID_DOMAINS,
+        allow_priority_alias=True,
+    )
 
 
 def _normalize_scope_hint(scope_hint: Optional[Any]) -> Dict[str, Any]:
@@ -2420,6 +2390,8 @@ def _build_search_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             "latency_ms": {"avg": 0.0, "p95": 0.0, "max": 0.0},
             "mode_breakdown": {},
             "intent_breakdown": {},
+            "interaction_tier_breakdown": {"fast": 0, "deep": 0},
+            "intent_llm_attempted_breakdown": {"attempted": 0, "not_attempted": 0},
             "strategy_hit_breakdown": {},
             "top_degrade_reasons": [],
             "last_query_at": None,
@@ -2438,6 +2410,13 @@ def _build_search_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     mode_counts = Counter(str(item.get("mode_applied") or "unknown") for item in events)
     intent_counts = Counter(_resolve_event_intent(item) for item in events)
+    interaction_tier_counts = Counter(
+        str(item.get("interaction_tier") or "unknown") for item in events
+    )
+    intent_llm_attempted_counts = Counter(
+        "attempted" if bool(item.get("intent_llm_attempted")) else "not_attempted"
+        for item in events
+    )
     strategy_counts = Counter(_resolve_event_strategy(item) for item in events)
     degrade_reason_counts = Counter()
     for item in events:
@@ -2464,6 +2443,19 @@ def _build_search_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         },
         "mode_breakdown": dict(mode_counts),
         "intent_breakdown": dict(intent_counts),
+        "interaction_tier_breakdown": {
+            "fast": interaction_tier_counts.get("fast", 0),
+            "deep": interaction_tier_counts.get("deep", 0),
+            **{
+                key: value
+                for key, value in interaction_tier_counts.items()
+                if key not in {"fast", "deep"}
+            },
+        },
+        "intent_llm_attempted_breakdown": {
+            "attempted": intent_llm_attempted_counts.get("attempted", 0),
+            "not_attempted": intent_llm_attempted_counts.get("not_attempted", 0),
+        },
         "strategy_hit_breakdown": dict(strategy_counts),
         "top_degrade_reasons": [
             {"reason": reason, "count": count}
@@ -4309,8 +4301,13 @@ async def run_observability_search(payload: SearchConsoleRequest):
     if scope_hint_raw is None and isinstance(payload.filters, dict):
         scope_hint_raw = payload.filters.get("scope_hint")
 
+    raw_filters = payload.filters
+    if isinstance(raw_filters, dict):
+        raw_filters = dict(raw_filters)
+        raw_filters.pop("scope_hint", None)
+
     interaction_tier, raw_filters, scope_hint_raw = _resolve_interaction_tier(
-        payload.filters,
+        raw_filters,
         requested_tier=payload.interaction_tier,
         requested_scope_hint=scope_hint_raw,
         allowed_tiers=_ALLOWED_INTERACTION_TIERS,
@@ -4635,6 +4632,7 @@ async def run_observability_search(payload: SearchConsoleRequest):
         "intent": str(intent_profile.get("intent") or "unknown"),
         "intent_applied": intent_applied,
         "interaction_tier": interaction_tier,
+        "intent_llm_attempted": intent_llm_attempted,
         "strategy_template": str(
             intent_profile.get("strategy_template") or "default"
         ),

@@ -994,7 +994,7 @@ def test_smoke_gemini_live_suite_accepts_create_verified_via_update_row(
     assert "create_verified_via_update=True" in result.details
 
 
-def test_smoke_gemini_live_suite_accepts_prefixed_mcp_tool_names(
+def test_smoke_gemini_live_suite_requires_known_uri_fast_path_for_prefixed_mcp_tool_names(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -1105,8 +1105,9 @@ def test_smoke_gemini_live_suite_accepts_prefixed_mcp_tool_names(
 
     result = evaluate_memory_palace_skill.smoke_gemini_live_suite()
 
-    assert result.status == "PASS"
-    assert "guard_message=BLOCKED notes://gemini_suite_4321" in result.details
+    assert result.status == "PARTIAL"
+    assert "known-URI fast path" in result.summary
+    assert "guard_known_uri_fast_path=False" in result.details
 
 
 def test_smoke_gemini_live_suite_downgrades_shared_state_interference_to_partial(

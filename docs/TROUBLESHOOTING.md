@@ -495,6 +495,11 @@ cd backend
    bash scripts/docker_one_click.sh --help
    ```
 
+   这里再补一个容易误判的小边界：对 macOS / Linux 的 shell 路径来说，
+   `docker_one_click.sh` 现在已经会先对短暂的 `docker compose up`
+   失败做几次小范围退避重试。所以如果脚本最后还是退出，优先先看**最后一条
+   compose 错误**；真正需要修的是那条最终错误，而不只是第一次瞬时抖动。
+
 3. 端口冲突时指定端口：
 
    ```bash
@@ -568,12 +573,13 @@ cd backend
    | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | 当前查询作用域内混入了多种向量维度，或该作用域整体维度和当前配置不一致，需要重建索引 | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker 配置缺失 | `backend/db/sqlite_client.py` |
+   | `intent_llm_model_unavailable` | 已开启 intent LLM，但当前配置的模型/后端不可用 | `backend/db/sqlite_client.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM 返回空结果 | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | 索引任务入队被丢弃 | `backend/mcp_server.py` |
 
    > `write_guard_exception` 属于写入/学习链路（如 `create_memory`、`update_memory`、显式学习触发），语义为写入已 fail-closed 拒绝，并非检索质量降级。
    >
-   > 现在这两类请求失败原因还会继续细分。例如你可能看到 `embedding_request_failed:timeout`、`embedding_request_failed:http_status:503`、`embedding_request_failed:api:timeout`，或者 `reranker_request_failed:http_status:503`。看法很简单：先看前半段知道是哪条链路挂了，再看后半段确认是超时、HTTP 状态码还是别的请求错误。
+   > 现在这两类请求失败原因还会继续细分。例如你可能看到 `embedding_request_failed:timeout`、`embedding_request_failed:http_status:503`、`embedding_request_failed:connection_failure`、`embedding_request_failed:rate_limited`、`embedding_request_failed:upstream_unavailable`、`embedding_request_failed:retry_exhausted`，或者 `reranker_request_failed:http_status:503`。看法很简单：先看前半段知道是哪条链路挂了，再看后半段确认是超时、限流、上游不可用、连接失败，还是别的请求错误。现在 `compact_gist` / `write_guard` / `intent_llm` 这些请求失败链路也会沿用同一套细分口径。
 
 2. **检查 Embedding / Reranker API 可达性**：
 
@@ -625,6 +631,10 @@ cd backend
 6. **观测页里看到新增字段不要慌**：
 
    - `scope_hint`：通常只是告诉检索“优先看哪个范围”；只有兼容旧调用方时，`fast/deep` 会先被当成快/深档位快捷值
+   - `interaction_tier`：这条查询最后走的是 `fast` 还是 `deep`
+   - `intent_llm_attempted`：这条查询是否真的尝试过 intent-LLM 分支；对 `fast` 请求来说，看到 `false` 很正常
+   - `reflection_workflow`：运行时快照里看到的是 prepared / executed / rolled back 计数，属于当前 summary 视图，不是每条明细事件列表
+   - 本地化 `P95`：延迟卡片看的还是同一个慢尾指标，只是标签现在会跟着当前语言一起本地化
    - `sm-lite`：是当前版本新增的一组轻量运行时状态，不是报错
    - `Runtime Snapshot`：是帮助你排障的摘要，不是必须每项都有值
 

@@ -98,6 +98,52 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
     )
 
 
+def test_one_click_scripts_share_compose_retry_backoff_contract() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+    ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for literal in (
+        "No such container",
+        "dependency failed to start",
+        "toomanyrequests",
+        "TLS handshake timeout",
+        "connection reset by peer",
+        "i/o timeout",
+        "context canceled",
+        "EOF",
+        "transient compose up failure",
+    ):
+        assert literal in shell_text
+        assert literal in ps1_text
+
+    assert "compose_error_is_retryable()" in shell_text
+    assert "run_compose_with_retry()" in shell_text
+    assert 'sleep_seconds=$((2 * attempt))' in shell_text
+    assert 'sleep "${sleep_seconds}"' in shell_text
+    assert (
+        'run_compose_with_retry compose_up_args "${compose_project_name}" 3 "${env_file}"'
+        in shell_text
+    )
+    assert (
+        'COMPOSE_PROJECT_NAME="${compose_project_name}" "${compose_cmd[@]}" '
+        '"${compose_env_file_args_local[@]}" -f docker-compose.yml down --remove-orphans'
+        in shell_text
+    )
+
+    assert "function Test-ComposeRetryableError" in ps1_text
+    assert "function Invoke-ComposeWithRetry" in ps1_text
+    assert "Start-Sleep -Seconds $sleepSeconds" in ps1_text
+    assert (
+        "Invoke-ComposeWithRetry -ComposeArgs $composeUpArgs "
+        "-ComposeProjectName $composeProjectName -MaxAttempts 3 -EnvFile $envFile"
+        in ps1_text
+    )
+
+
 def test_powershell_one_click_env_io_uses_utf8_no_bom_helpers() -> None:
     ps1_text = (PROJECT_ROOT / "scripts" / "docker_one_click.ps1").read_text(
         encoding="utf-8"

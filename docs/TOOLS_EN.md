@@ -587,13 +587,13 @@ The following workflow is a general sequence for MCP usage. For specific validat
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│  2. Recall    │  search_memory(query, include_session=True)
-│              │  → Search relevant memories including session context
+│  2. Recall    │  search_memory(query, include_session=True) / read_memory(uri)
+│              │  → Search when the URI is uncertain; go straight to read when the target URI is already known
 └──────┬───────┘
        ▼
 ┌──────────────┐
-│  3. Pre-write │  search_memory → confirm no duplicates → create_memory / update_memory
-│     Check    │  → Avoid creating redundant memories
+│  3. Pre-write │  read_memory(uri) / search_memory → confirm no duplicates → create_memory / update_memory
+│     Check    │  → Read the known target directly; otherwise search first to avoid redundant memories
 └──────┬───────┘
        ▼
 ┌──────────────┐

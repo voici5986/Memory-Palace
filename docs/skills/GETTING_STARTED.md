@@ -343,7 +343,7 @@ docs/skills/TRIGGER_SMOKE_REPORT.md
 
 这条检查会串行调用多种 CLI；如果你的机器上已经装了 `claude`、`codex`、`opencode`、`gemini`，完整跑完通常要几分钟，不建议看到几十秒无输出就直接当成“挂死”。
 `gemini_live` 现在改为**显式可选**：只有当你主动设置 `MEMORY_PALACE_ENABLE_GEMINI_LIVE=1` 时，脚本才会对 Gemini 当前配置解析出的真实数据库做一轮 `create/update/guard` 验证，并可能留下 `notes://gemini_suite_*` 这类测试记忆；如果你还想强制跳过，也可以继续设置 `MEMORY_PALACE_SKIP_GEMINI_LIVE=1`。
-即使手动开启这轮 live 验证，只要撞上共享真实数据库，或者有另一条 Gemini live 会话先改了同一条记忆，它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
+即使手动开启这轮 live 验证，只要撞上共享真实数据库、有另一条 Gemini live 会话先改了同一条记忆，或者回答漏掉了当前的 known-URI fast path（目标 URI 已明确时，本来就该直接 `read_memory(...)`，不该再绕回 `search_memory(...)`），它也可能停在 `PARTIAL`；先把它理解成 live 宿主侧或 smoke 契约侧的验证边界，不要直接等同于主链路 skill/MCP 已坏。
 如果这条报告里只有 `mcp_bindings` 失败，优先先重跑一次统一的 `user-scope` 安装，再重新执行 smoke：
 
 ```bash
@@ -374,7 +374,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
-现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证口径是：backend `966 passed, 20 skipped`、frontend `165 passed`、frontend `npm run typecheck` 通过、frontend build 通过，repo-local live MCP e2e 也已通过；repo-local macOS `Profile B`（`backend + frontend + 真实浏览器 setup/maintenance smoke`）和一条覆盖 `Profile C/D` 同类 retrieval / reranker / `write_guard` / gist 链路的本地 smoke 也已重跑。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
+现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：跟进修复完成后，backend `1039 passed, 22 skipped`、frontend `173 passed`、frontend `npm run typecheck` 通过、frontend build 通过，并额外补跑了一轮 repo-local macOS `Profile B` 真实浏览器 smoke。repo-local live MCP e2e 的上一次通过结果仍然保留在公开基线里，但这轮 2026-04-19 补跑本身**没有**再重跑 live MCP e2e 或 benchmark 表格。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。
 
@@ -396,6 +396,8 @@ For this repository's memory-palace skill, answer with exactly three bullets:
 - `read_memory("system://boot")`
 - `NOOP = stop + inspect guard_target_uri / guard_target_id`
 - `docs/skills/memory-palace/references/trigger-samples.md`
+
+当前 smoke 还会再补一条后续检查：如果 prompt 里已经直接给出具体 URI，答案就应该直接对那个 URI 走 `read_memory(...)`，不要先绕回 `search_memory(...)`。
 
 反向 prompt：
 
