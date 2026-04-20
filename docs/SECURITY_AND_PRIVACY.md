@@ -66,20 +66,22 @@ Authorization: Bearer <MCP_API_KEY>
 
 ### SSE `/messages` 突发限流
 
-`/messages` 不是无限速入口。当前实现会对**单个 SSE session** 的消息突发做进程内限流：
+`/messages` 不是无限速入口。当前实现会按**稳定客户端主体**做进程内突发限流：
 
 | 配置项 | 默认值 | 作用 |
 |---|---|---|
 | `SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | `10` | 统计窗口（秒） |
-| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | 单个 session 在窗口内允许的最大 POST 次数 |
+| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | 单个客户端主体在窗口内允许的最大 POST 次数 |
 | `SSE_MESSAGE_MAX_BODY_BYTES` | `1048576` | 单个 `/messages` 请求体的硬上限（字节） |
 
 触发限流时：
 
 - 返回 `429 Too Many Requests`
 - 响应头包含 `Retry-After`
-- 当前 session 的后续请求需要等窗口释放
+- 当前客户端主体的后续请求需要等窗口释放
 - 超过 `SSE_MESSAGE_MAX_BODY_BYTES` 时会在 JSON 解析前直接返回 `413`
+
+这里的“客户端主体”当前优先按**解析后的客户端地址**分桶；如果请求本身带了 API key / Bearer token，还会把该 token 的稳定哈希一起并入 key。说人话就是：单纯重连换一个新的 `session_id`，已经不能直接把 `/messages` 的限流桶清零。
 
 如果这条 SSE 链路跑在**受信代理后面**（例如仓库自带的 Docker 前端代理，或你自己控制的私有反向代理），当前限流 key 会优先读取：
 
@@ -87,11 +89,13 @@ Authorization: Bearer <MCP_API_KEY>
 - 取不到时再看 `X-Real-IP`
 - 只有不在受信代理后面时，才直接按当前连接对端地址分桶
 
-这意味着在 Docker 默认代理路径下，`/messages` 的 burst limit 不再把所有客户端都算成同一个前端容器地址。
+这里的“受信代理”也不是看见转发头就自动信。当前默认只信 loopback 代理；如果你自己的反向代理不在 loopback 上，需要显式补 `SSE_TRUSTED_PROXY_HOSTS` 或 `SSE_TRUSTED_PROXY_CIDRS`，否则转发头不会参与分桶。
+
+这意味着在 Docker 默认代理路径下，`/messages` 的 burst limit 不再把所有客户端都算成同一个前端容器地址；但在你自己的部署里，只有显式 allowlist 过的代理，才会让 `X-Forwarded-For` / `X-Real-IP` 生效。
 
 另外，`/sse` 流默认还会发心跳（当前默认 15 秒），主要目的是让长连接在代理链路上更稳定，不至于看起来像“静默挂住”。
 
-这层限流主要用于拦截**误配置客户端或单 session 突发刷写**；它不是公网暴露场景下的完整 DDoS 防护，也不能替代外层的 VPN、反向代理限流或网络访问控制。
+这层限流主要用于拦截**误配置客户端或单主体突发刷写**；它不是公网暴露场景下的完整 DDoS 防护，也不能替代外层的 VPN、反向代理限流或网络访问控制。
 
 ### 无 Key 时的默认行为
 

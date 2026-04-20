@@ -362,7 +362,7 @@ cd <project-root>
 >
 > `docker_one_click.sh/.ps1` 默认会为每次运行生成独立的临时 Docker env 文件，并通过 `MEMORY_PALACE_DOCKER_ENV_FILE` 传给 `docker compose`；只有显式设置该环境变量时才会复用指定路径，而不是固定共享 `.env.docker`。
 >
-> 对 macOS / Linux 的 shell 路径来说，如果你显式把 `MEMORY_PALACE_DOCKER_ENV_FILE` 指到自定义位置，`docker_one_click.sh` 现在也会在那个文件同目录生成临时文件再替换回去，减少目标文件不在默认临时目录时出现跨文件系统替换问题的概率。
+> 对 macOS / Linux 的 shell 路径来说，如果你显式把 `MEMORY_PALACE_DOCKER_ENV_FILE` 指到自定义位置，`docker_one_click.sh` 现在也会在那个文件同目录生成临时文件再替换回去，减少目标文件不在默认临时目录时出现跨文件系统替换问题的概率。那条最终提交现在也会补一层有上限的小重试，短暂锁冲突不再那么容易直接打断整次 env 更新。
 >
 > 如果本次 Docker env 文件里的 `MCP_API_KEY` 为空，`apply_profile.sh/.ps1` 会自动生成一把本地 key，供 Dashboard 代理和 SSE 共用。
 >
@@ -444,9 +444,9 @@ bash scripts/apply_profile.sh macos b
 # .\scripts\apply_profile.ps1 -Platform windows -Profile c
 ```
 
-> 脚本执行逻辑：复制 `.env.example` 为生成后的环境文件，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。对本地平台，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 还会按当前 checkout 自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是互相覆盖。它生成 staged / update 临时文件时，也会放到目标文件同目录，减少跨文件系统替换时的意外。
+> 脚本执行逻辑：复制 `.env.example` 为生成后的环境文件，然后追加 `deploy/profiles/<platform>/profile-<x>.env` 中的覆盖参数。对本地平台，默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 还会按当前 checkout 自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`；如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是互相覆盖。它生成 staged / update 临时文件时，也会放到目标文件同目录，减少跨文件系统替换时的意外。这两类相邻临时文件提交现在还会补一层有上限的小重试，短暂的文件锁或索引器占用不再那么容易把整次改写打断。
 >
-> 原生 Windows PowerShell 现在也补齐了同样的保护逻辑。`apply_profile.ps1` 现在也会在覆盖前先备份 `*.bak`，如果另一份 `apply_profile.ps1` 正在写同一个目标文件，也会直接拒绝第二个写入，并且 staged 临时文件同样放在目标文件所在目录，而不是默认共享临时目录。如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...`，或者在 PowerShell 下用 `.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun` 做预览；这两条路径都只打印最终结果，不会真正改目标文件。
+> 原生 Windows PowerShell 现在也补齐了同样的保护逻辑。`apply_profile.ps1` 现在也会在覆盖前先备份 `*.bak`，如果另一份 `apply_profile.ps1` 正在写同一个目标文件，也会直接拒绝第二个写入，并且 staged 临时文件同样放在目标文件所在目录，而不是默认共享临时目录。最终 replace/move 这一步现在还会对常见的 Windows 短暂锁冲突补一层有上限的小重试。如果你只是想先看最终结果，可以用 `bash scripts/apply_profile.sh --dry-run ...`，或者在 PowerShell 下用 `.\scripts\apply_profile.ps1 -Platform windows -Profile b -DryRun` 做预览；这两条路径都只打印最终结果，不会真正改目标文件。
 >
 > `apply_profile.sh/.ps1` 当前会在生成结束后统一去重重复 env key，避免不同解析器对“同 key 多次出现”产生不一致行为。
 >

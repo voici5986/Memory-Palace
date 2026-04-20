@@ -325,6 +325,8 @@ async def test_profile_c_preflight_fails_fast_when_embedding_provider_returns_50
 
     assert fake_session.closed is True
     assert fake_session.calls[0]["url"] == "http://10.0.0.8:11435/v1/embeddings"
+    assert fake_session.calls[0]["headers"]["Authorization"] == "Bearer embed-secret"
+    assert "X-API-Key" not in fake_session.calls[0]["headers"]
 
 
 @pytest.mark.asyncio
@@ -404,6 +406,65 @@ async def test_profile_c_preflight_retries_without_dimensions_when_provider_reje
     assert len(fake_session.calls) == 2
     assert "dimensions" in fake_session.calls[0]["json"]
     assert "dimensions" not in fake_session.calls[1]["json"]
+    assert fake_session.calls[0]["headers"]["Authorization"] == "Bearer embed-secret"
+    assert "X-API-Key" not in fake_session.calls[0]["headers"]
+
+
+@pytest.mark.asyncio
+async def test_profile_d_preflight_reranker_uses_bearer_header_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "1024")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_ENABLED", "true")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_API_BASE", "http://10.0.0.9:8080/v1")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_API_KEY", "rerank-secret")
+    monkeypatch.setenv("RETRIEVAL_RERANKER_MODEL", "rerank-model")
+    monkeypatch.setenv(
+        "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS",
+        "10.0.0.8/32,10.0.0.9/32",
+    )
+
+    fake_session = _FakeProbeSession(
+        [
+            _FakeProbeResponse(
+                status_code=200,
+                payload={"data": [{"embedding": [0.1] * 1024}]},
+            ),
+            _FakeProbeResponse(
+                status_code=200,
+                payload={
+                    "results": [
+                        {"index": 0, "relevance_score": 0.9},
+                        {"index": 1, "relevance_score": 0.1},
+                    ]
+                },
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        sys.modules[_run_profile.__module__],
+        "_build_remote_probe_session",
+        lambda: fake_session,
+    )
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_d")
+    try:
+        _preflight_profile_remote_dependencies(
+            config=config,
+            client=client,
+            timeout_sec=1.0,
+        )
+    finally:
+        await client.close()
+
+    assert fake_session.calls[1]["url"] == "http://10.0.0.9:8080/v1/rerank"
+    assert fake_session.calls[1]["headers"]["Authorization"] == "Bearer rerank-secret"
+    assert "X-API-Key" not in fake_session.calls[1]["headers"]
 
 
 class _ProbeSearchClient:

@@ -31,6 +31,27 @@ async def test_safe_prompt_payload_truncates_and_normalizes_control_chars() -> N
 
 
 @pytest.mark.asyncio
+async def test_safe_prompt_payload_strips_unicode_bidi_and_format_controls() -> None:
+    client = SQLiteClient(_SQLITE_MEMORY_URL)
+    try:
+        payload = client._safe_prompt_payload(
+            {"input": "safe\u202eevil\u2066text\u200b"},
+            max_chars=64,
+        )
+    finally:
+        await client.close()
+
+    parsed = json.loads(payload)
+    text = parsed["input"]
+    assert "\u202e" not in text
+    assert "\u2066" not in text
+    assert "\u200b" not in text
+    assert "safe" in text
+    assert "evil" in text
+    assert "text" in text
+
+
+@pytest.mark.asyncio
 async def test_classify_intent_with_llm_uses_reflection_lane_and_prompt_safety(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -152,6 +173,8 @@ async def test_post_json_retries_transient_429_then_succeeds(
 ) -> None:
     client = SQLiteClient(_SQLITE_MEMORY_URL)
     attempts = 0
+    client_instances = 0
+    request_headers: list[Dict[str, Any]] = []
     sleep_calls: list[float] = []
     request = httpx.Request("POST", "http://fake.intent/v1/chat/completions")
 
@@ -184,6 +207,9 @@ async def test_post_json_retries_transient_429_then_succeeds(
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             _ = args
             _ = kwargs
+            nonlocal client_instances
+            client_instances += 1
+            self.is_closed = False
 
         async def __aenter__(self) -> "_FakeAsyncClient":
             return self
@@ -193,6 +219,9 @@ async def test_post_json_retries_transient_429_then_succeeds(
             _ = exc
             _ = tb
             return False
+
+        async def aclose(self) -> None:
+            self.is_closed = True
 
         async def post(
             self,
@@ -204,7 +233,7 @@ async def test_post_json_retries_transient_429_then_succeeds(
             nonlocal attempts
             _ = url
             _ = json
-            _ = headers
+            request_headers.append(dict(headers))
             attempts += 1
             if attempts < 3:
                 return _FakeResponse(429, {"error": "rate limited"}, headers={"retry-after": "0"})
@@ -221,13 +250,17 @@ async def test_post_json_retries_transient_429_then_succeeds(
             "http://fake.intent/v1",
             "/chat/completions",
             {"model": "fake-model"},
+            api_key="secret-token",
         )
     finally:
         await client.close()
 
     assert payload == {"ok": True}
     assert attempts == 3
+    assert client_instances == 1
     assert len(sleep_calls) == 2
+    assert all(item.get("Authorization") == "Bearer secret-token" for item in request_headers)
+    assert all("X-API-Key" not in item for item in request_headers)
 
 
 @pytest.mark.asyncio

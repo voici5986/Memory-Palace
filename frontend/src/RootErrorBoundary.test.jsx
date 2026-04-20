@@ -69,4 +69,27 @@ describe('RootErrorBoundary', () => {
       });
     }
   });
+
+  it('reports render crashes through componentDidCatch', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      void i18n.changeLanguage('en');
+      render(
+        <RootErrorBoundary>
+          <ThrowOnRender />
+        </RootErrorBoundary>
+      );
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'RootErrorBoundary caught render error',
+        expect.any(Error),
+        expect.objectContaining({
+          componentStack: expect.any(String),
+        })
+      );
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
 });

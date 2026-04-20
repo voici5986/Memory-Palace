@@ -55,9 +55,8 @@ describe('main entrypoint', () => {
     expect(rootElement.props.children.type.name).toBe('RootErrorBoundary');
   });
 
-  it('registers an unhandled rejection handler that renders the fallback shell', async () => {
+  it('registers an unhandled rejection handler that logs without replacing the app shell', async () => {
     const { registerGlobalUnhandledRejectionHandler } = await import('./main.jsx');
-    const { RootErrorFallback } = await import('./RootErrorBoundary.jsx');
 
     const registration = addEventListenerSpy.mock.calls.find(
       ([eventName]) => eventName === 'unhandledrejection'
@@ -74,7 +73,6 @@ describe('main entrypoint', () => {
       'Unhandled promise rejection',
       expect.any(Error)
     );
-    expect(renderSpy).toHaveBeenCalledTimes(2);
-    expect(renderSpy.mock.calls[1][0].props.children.type).toBe(RootErrorFallback);
+    expect(renderSpy).toHaveBeenCalledTimes(1);
   });
 });

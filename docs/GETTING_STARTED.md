@@ -108,11 +108,11 @@ bash scripts/apply_profile.sh macos b
 
 > `deploy/profiles/*/profile-*.env` 是脚本输入模板，不是建议你直接复制使用的最终 `.env`。对用户路径来说，继续用 `apply_profile.sh/.ps1` 生成会更稳，也能自动补齐路径和去重重复 key。
 
-> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 也会自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是两边互相覆盖；它生成 staged / update 临时文件时，也会直接放到目标文件同目录，减少跨文件系统替换时的意外。
+> apply_profile 脚本会先生成一份环境文件，再追加对应 Profile 的覆盖配置。本地 shell 路径（`macos` / `linux`）和原生 `windows` 默认目标仍是 `.env`；如果你跑的是 `docker` 变体且没有显式传目标文件，默认目标现在会是 `.env.docker`。对 shell 路径来说，`apply_profile.sh` 也会自动改写常见的本地 `DATABASE_URL` 占位路径，包括 `/Users/...` 和 `/home/...`。其中 macOS / Linux 下的 `apply_profile.sh` 现在还会在覆盖已有目标文件前先备份一份 `*.bak`。如果另一份 `apply_profile.sh` 正在写同一个目标文件，后来的进程会直接提示你稍后重试，而不是两边互相覆盖；它生成 staged / update 临时文件时，也会直接放到目标文件同目录，减少跨文件系统替换时的意外。对这两类相邻临时文件提交，shell 路径现在还会补一层有上限的小重试，短暂的文件锁或索引器占用不再那么容易把整次改写打断。
 >
 > 如果你是在 native Windows checkout 上，从 PowerShell / WSL / Git Bash 调 `bash scripts/apply_profile.sh ... <Windows绝对目标路径>`，当前 shell 路径现在也会更安全地规范化这个目标路径；常见的“分隔符被 shell 吃掉”的形态，不会再往仓库根目录里落一个坏文件名。
 >
-> 原生 Windows PowerShell 现在也补齐了同样的操作逻辑。`apply_profile.ps1` 现在也会在覆盖前先备份 `*.bak`，如果另一份 `apply_profile.ps1` 正在写同一个目标文件，也会直接拒绝第二个写入，并且 staged 临时文件同样放在目标文件所在目录，而不是默认共享临时目录。
+> 原生 Windows PowerShell 现在也补齐了同样的操作逻辑。`apply_profile.ps1` 现在也会在覆盖前先备份 `*.bak`，如果另一份 `apply_profile.ps1` 正在写同一个目标文件，也会直接拒绝第二个写入，并且 staged 临时文件同样放在目标文件所在目录，而不是默认共享临时目录。最终 replace/move 这一步现在还会对常见的 Windows 短暂锁冲突补一层有上限的小重试。
 >
 > `apply_profile.sh/.ps1` 当前会在生成后统一去重重复 env key；原生 Windows / native `pwsh` 仍建议在目标环境单独补跑一次。
 >
@@ -528,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `1071 passed, 22 skipped`；frontend `187 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `1093 passed, 22 skipped`；frontend `193 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 
@@ -893,7 +893,7 @@ MCP_API_KEY_ALLOW_INSECURE_LOCAL=true
 | 本地 stdio MCP 在客户端里报 `startup failed`、`initialize response` 或类似启动中断 | 先检查 `.env` 或显式 `DATABASE_URL` 是否写成了 `/app/...` 或 `/data/...` 这类容器路径。那是 Docker 内部路径，`scripts/run_memory_palace_mcp_stdio.sh` 会直接拒绝启动；改成宿主机可访问的绝对路径，或继续走 Docker `/sse`。 |
 | 前端访问 API 返回 `502` 或 `Network Error` | 确认后端已启动且运行在 `8000` 端口。检查 `vite.config.js` 中 proxy 目标与后端端口是否一致 |
 | 受保护接口返回 `401` | 本地手动启动：配置 `MCP_API_KEY` 或设置 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`；Docker：优先确认是否使用 `apply_profile.*` / `docker_one_click.*` 生成的 Docker env 文件 |
-| SSE `/messages` 返回 `429` 或 `413` | `429` 说明同一 SSE 会话短时间内 POST 太多；先检查客户端是否有重复重试或死循环。`413` 说明单次请求体超过 `SSE_MESSAGE_MAX_BODY_BYTES`，需要缩小 payload 或调整后端限制 |
+| SSE `/messages` 返回 `429` 或 `413` | `429` 说明同一客户端主体短时间内 POST 太多；当前分桶优先看解析后的客户端地址，带鉴权时还会叠加鉴权 token 的稳定哈希，所以单纯重连换一个新的 `session_id` 已经不能直接把限流桶清零。先检查客户端是否有重复重试或死循环。`413` 说明单次请求体超过 `SSE_MESSAGE_MAX_BODY_BYTES`，需要缩小 payload 或调整后端限制 |
 | Docker 启动端口冲突 | `docker_one_click.sh` 默认会自动寻找空闲端口。也可通过 `--frontend-port` / `--backend-port` 手动指定 |
 
 更多问题排查请参考 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。

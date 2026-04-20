@@ -1,6 +1,8 @@
+import errno
 import json
 from pathlib import Path
 
+import security.import_guard as import_guard
 from security.import_guard import ExternalImportGuard, ExternalImportGuardConfig
 
 
@@ -56,6 +58,27 @@ def test_external_import_guard_allows_safe_batch(tmp_path: Path) -> None:
     assert result["total_bytes"] == file_path.stat().st_size
     assert len(result["allowed_files"]) == 1
     assert result["rejected_files"] == []
+
+
+def test_external_import_guard_returns_content_snapshot_for_allowed_file(
+    tmp_path: Path,
+) -> None:
+    guard, allowed_root = _build_guard(tmp_path)
+    file_path = allowed_root / "safe.md"
+    file_path.write_text("hello-safe", encoding="utf-8")
+
+    result = guard.validate_batch(
+        file_paths=[file_path],
+        actor_id="actor-a",
+        session_id="session-1",
+    )
+
+    assert result["ok"] is True
+    assert result["allowed_files"][0]["content"] == "hello-safe"
+
+    file_path.write_text("hello-mutated", encoding="utf-8")
+
+    assert result["allowed_files"][0]["content"] == "hello-safe"
 
 
 def test_external_import_guard_rejects_path_traversal_outside_allowed_roots(
@@ -297,6 +320,48 @@ def test_external_import_guard_state_file_prunes_stale_session_buckets(
     assert isinstance(actor_bucket, list)
     assert len(actor_bucket) == 1
     assert session_keys == ["actor-a::session-4"]
+
+
+def test_external_import_guard_retries_transient_state_file_replace_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixed_clock = _FixedClock(now=2600.0)
+    state_file = tmp_path / "rate_limit_state.json"
+    guard, allowed_root = _build_guard(
+        tmp_path,
+        rate_limit_window_seconds=30,
+        rate_limit_max_requests=2,
+        rate_limit_state_file=state_file,
+        clock=fixed_clock,
+    )
+    file_path = allowed_root / "safe.txt"
+    file_path.write_text("ok", encoding="utf-8")
+
+    original_replace = import_guard.os.replace
+    replace_attempts = {"count": 0}
+
+    def flaky_replace(source, target) -> None:
+        replace_attempts["count"] += 1
+        if replace_attempts["count"] == 1:
+            raise PermissionError(errno.EACCES, "transient sharing violation")
+        original_replace(source, target)
+
+    monkeypatch.setattr(import_guard.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(import_guard.os, "replace", flaky_replace)
+
+    result = guard.validate_batch(
+        file_paths=[file_path],
+        actor_id="actor-a",
+        session_id="session-retry",
+    )
+
+    assert result["ok"] is True
+    assert replace_attempts["count"] == 2
+
+    payload = json.loads(state_file.read_text(encoding="utf-8"))
+    assert payload["actor-a::*"] == [fixed_clock.now]
+    assert payload["actor-a::session-retry"] == [fixed_clock.now]
 
 
 def test_external_import_guard_fails_closed_when_state_file_is_not_regular_file(

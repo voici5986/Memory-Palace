@@ -66,20 +66,22 @@ Authorization: Bearer <MCP_API_KEY>
 
 ### SSE `/messages` Burst Rate Limit
 
-`/messages` is not an unlimited ingress path. The current implementation applies an in-process burst limit to **each SSE session**:
+`/messages` is not an unlimited ingress path. The current implementation applies an in-process burst limit to a **stable client principal**:
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `SSE_MESSAGE_RATE_LIMIT_WINDOW_SECONDS` | `10` | Accounting window in seconds |
-| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | Maximum allowed POSTs for one session inside the window |
+| `SSE_MESSAGE_RATE_LIMIT_MAX_REQUESTS` | `120` | Maximum allowed POSTs for one client principal inside the window |
 | `SSE_MESSAGE_MAX_BODY_BYTES` | `1048576` | Hard body-size ceiling for one `/messages` request |
 
 When the limit is hit:
 
 - the server returns `429 Too Many Requests`
 - the response includes `Retry-After`
-- the affected session must wait for the window to drain before posting again
+- the affected client principal must wait for the window to drain before posting again
 - if the body exceeds `SSE_MESSAGE_MAX_BODY_BYTES`, the server returns `413` before JSON parsing
+
+That client principal is currently built from the **resolved client address** first; when the request carries an API key / Bearer token, the current implementation also mixes in a stable hash of that token. In plain language: reconnecting with a fresh `session_id` no longer clears the `/messages` burst bucket by accident.
 
 If this SSE path is running **behind a trusted proxy** (for example the repository-shipped Docker frontend proxy, or your own private reverse proxy), the current rate-limit key now prefers:
 
@@ -87,11 +89,13 @@ If this SSE path is running **behind a trusted proxy** (for example the reposito
 - otherwise `X-Real-IP`
 - and only falls back to the direct peer address when the request is not coming through a trusted proxy
 
-In plain language, on the default Docker proxy path, `/messages` burst limiting no longer treats every client as the same frontend-container address.
+“Trusted proxy” also does not mean “any request that happens to carry forwarding headers.” The current default trust boundary only includes loopback proxies; for your own non-loopback reverse proxy, you must explicitly allowlist it through `SSE_TRUSTED_PROXY_HOSTS` or `SSE_TRUSTED_PROXY_CIDRS`, otherwise those forwarded headers are ignored for rate-limit bucketing.
+
+In plain language, on the default Docker proxy path, `/messages` burst limiting no longer treats every client as the same frontend-container address; on your own deployment, forwarded IP headers only take effect after that proxy is explicitly allowlisted.
 
 The `/sse` stream also sends heartbeat pings by default (currently every 15 seconds). The goal is simple: make long-lived streams less likely to look silently stuck when they pass through proxies.
 
-This limit is mainly there to catch **misconfigured clients or single-session bursts**. It is not a substitute for public-edge protection such as VPN, reverse-proxy rate limiting, or network ACLs.
+This limit is mainly there to catch **misconfigured clients or single-principal bursts**. It is not a substitute for public-edge protection such as VPN, reverse-proxy rate limiting, or network ACLs.
 
 ### Default Behavior When No Key is Provided
 

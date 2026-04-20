@@ -278,6 +278,7 @@ _IMPORT_LEARN_META_PERSIST_LOCKS_GUARD = threading.Lock()
 class _ReflectionPrepareInFlightEntry:
     task: asyncio.Task[Dict[str, Any]]
     waiters: int = 0
+    cancelling: bool = False
 
 
 _REFLECTION_PREPARE_IN_FLIGHT: Dict[str, _ReflectionPrepareInFlightEntry] = {}
@@ -325,13 +326,31 @@ async def _run_deduped_reflection_prepare(
     dedup_key: str,
     task_factory,
 ) -> Dict[str, Any]:
-    async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
-        entry = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
-        if entry is None or entry.task.done():
-            entry = _ReflectionPrepareInFlightEntry(task=asyncio.create_task(task_factory()))
-            _REFLECTION_PREPARE_IN_FLIGHT[dedup_key] = entry
-        entry.waiters += 1
-        task = entry.task
+    entry: _ReflectionPrepareInFlightEntry
+    task: asyncio.Task[Dict[str, Any]]
+    while True:
+        wait_for_cancelled_task: Optional[asyncio.Task[Dict[str, Any]]] = None
+        async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
+            entry = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
+            if entry is None or entry.task.done():
+                entry = _ReflectionPrepareInFlightEntry(
+                    task=asyncio.create_task(task_factory()),
+                    waiters=1,
+                )
+                _REFLECTION_PREPARE_IN_FLIGHT[dedup_key] = entry
+                task = entry.task
+                break
+            if entry.cancelling:
+                wait_for_cancelled_task = entry.task
+            else:
+                entry.waiters += 1
+                task = entry.task
+                break
+
+        try:
+            await asyncio.shield(wait_for_cancelled_task)
+        except asyncio.CancelledError:
+            continue
 
     try:
         result = await asyncio.shield(task)
@@ -342,12 +361,23 @@ async def _run_deduped_reflection_prepare(
             if current is entry:
                 entry.waiters = max(0, entry.waiters - 1)
                 if entry.waiters == 0:
-                    _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
-                    cancel_task = not task.done()
+                    if task.done():
+                        _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
+                    else:
+                        entry.cancelling = True
+                        cancel_task = True
                 elif task.done():
                     _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
         if cancel_task:
             task.cancel()
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                pass
+            async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
+                current = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
+                if current is entry and current.task is task and current.waiters == 0:
+                    _REFLECTION_PREPARE_IN_FLIGHT.pop(dedup_key, None)
 
     return copy.deepcopy(result)
 

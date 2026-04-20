@@ -279,6 +279,16 @@ def test_shell_one_click_normalizes_windows_absolute_env_paths_before_shell_io()
     assert 'echo "Refusing mangled Windows absolute env file path:' in shell_text
 
 
+def test_shell_one_click_env_upsert_uses_retrying_adjacent_commit_helper() -> None:
+    shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "commit_adjacent_temp_file_with_retry()" in shell_text
+    assert 'tmp_file="$(mktemp_adjacent_file "${env_file}" "upsert")"' in shell_text
+    assert 'commit_adjacent_temp_file_with_retry "${tmp_file}" "${env_file}"' in shell_text
+
+
 def test_one_click_readiness_probes_force_local_no_proxy_bypass() -> None:
     shell_text = (PROJECT_ROOT / "scripts" / "docker_one_click.sh").read_text(
         encoding="utf-8"

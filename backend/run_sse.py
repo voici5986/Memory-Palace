@@ -1,6 +1,7 @@
 import os
 import sys
 import hmac
+import hashlib
 import asyncio
 import errno
 import socket
@@ -60,16 +61,22 @@ _FORWARDED_HEADER_NAMES = {
 }
 _SSE_HTTP_PATHS = {"/sse", "/sse/", "/messages", "/messages/", "/sse/messages", "/sse/messages/"}
 _PUBLIC_HTTP_PATHS = {"/health", "/health/"}
-_TRUSTED_PROXY_IPV4_NETWORKS = (
-    ip_network("10.0.0.0/8"),
-    ip_network("172.16.0.0/12"),
-    ip_network("192.168.0.0/16"),
-)
-_TRUSTED_PROXY_IPV6_NETWORKS = (ip_network("fc00::/7"),)
+_SSE_TRUSTED_PROXY_HOSTS_ENV = "SSE_TRUSTED_PROXY_HOSTS"
+_SSE_TRUSTED_PROXY_CIDRS_ENV = "SSE_TRUSTED_PROXY_CIDRS"
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     return _shared_env_int(name, default, minimum=minimum, clamp_default=True)
+
+
+def _env_csv(name: str) -> tuple[str, ...]:
+    raw = str(os.getenv(name) or "")
+    values: list[str] = []
+    for part in raw.split(","):
+        candidate = str(part or "").strip()
+        if candidate:
+            values.append(candidate)
+    return tuple(values)
 
 
 def _loopback_probe_targets(
@@ -205,11 +212,30 @@ def _extract_scope_client_host(scope: Scope) -> str:
     return host
 
 
+def _trusted_proxy_hosts() -> set[str]:
+    configured_hosts = {
+        str(item or "").strip().lower()
+        for item in _env_csv(_SSE_TRUSTED_PROXY_HOSTS_ENV)
+        if str(item or "").strip()
+    }
+    return set(_LOOPBACK_CLIENT_HOSTS) | configured_hosts
+
+
+def _trusted_proxy_networks() -> tuple[Any, ...]:
+    networks = []
+    for item in _env_csv(_SSE_TRUSTED_PROXY_CIDRS_ENV):
+        try:
+            networks.append(ip_network(item, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
 def _is_trusted_proxy_host(host: str) -> bool:
     normalized = str(host or "").strip().lower()
     if not normalized:
         return False
-    if normalized in _LOOPBACK_CLIENT_HOSTS:
+    if normalized in _trusted_proxy_hosts():
         return True
     try:
         address = ip_address(normalized)
@@ -217,9 +243,7 @@ def _is_trusted_proxy_host(host: str) -> bool:
         return False
     if address.is_loopback:
         return True
-    if address.version == 4:
-        return any(address in network for network in _TRUSTED_PROXY_IPV4_NETWORKS)
-    return any(address in network for network in _TRUSTED_PROXY_IPV6_NETWORKS)
+    return any(address in network for network in _trusted_proxy_networks())
 
 
 def _extract_forwarded_client_host(scope: Scope) -> Optional[str]:
@@ -255,6 +279,25 @@ def _resolve_rate_limit_client_host(scope: Scope) -> str:
         if forwarded_host:
             return forwarded_host
     return direct_host or "unknown"
+
+
+def _extract_rate_limit_auth_token(scope: Scope) -> str:
+    headers = Headers(raw=list(scope.get("headers") or []))
+    provided = (
+        str(headers.get(_MCP_API_KEY_HEADER) or "").strip()
+        or _extract_bearer_token(headers.get("authorization"))
+        or ""
+    )
+    return provided
+
+
+def _build_rate_limit_principal_key(scope: Scope) -> str:
+    host = _resolve_rate_limit_client_host(scope)
+    token = _extract_rate_limit_auth_token(scope)
+    if not token:
+        return host
+    token_hash = hashlib.sha256(token.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return f"{host}:{token_hash}"
 
 
 def _is_loopback_scope(scope: Scope) -> bool:
@@ -411,8 +454,8 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
 
     @staticmethod
     def _session_rate_limit_key(scope: Scope, session_id: UUID) -> str:
-        host = _resolve_rate_limit_client_host(scope)
-        return f"{host}:{session_id.hex}"
+        _ = session_id
+        return _build_rate_limit_principal_key(scope)
 
     async def _check_message_rate_limit(
         self, *, scope: Scope, session_id: UUID
@@ -444,10 +487,8 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
     async def _clear_message_rate_limit_state(
         self, *, scope: Scope, session_id: UUID
     ) -> None:
-        key = self._session_rate_limit_key(scope, session_id)
-        async with self._message_rate_limit_guard:
-            self._message_rate_limit_buckets.pop(key, None)
-            self._message_rate_limit_last_seen.pop(key, None)
+        _ = scope, session_id
+        return None
 
     def _evict_oldest_rate_limit_key_if_needed(self) -> None:
         if len(self._message_rate_limit_buckets) < self._message_rate_limit_max_keys:

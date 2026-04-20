@@ -796,6 +796,28 @@ get_env_value_from_file() {
   echo "${raw%$'\r'}"
 }
 
+commit_adjacent_temp_file_with_retry() {
+  local source_path="$1"
+  local target_path="$2"
+  local attempt output status
+
+  for attempt in 1 2 3; do
+    if output="$(mv -f "${source_path}" "${target_path}" 2>&1)"; then
+      return 0
+    fi
+    status=$?
+    if (( attempt >= 3 )); then
+      break
+    fi
+    sleep "0.$((attempt * 5))"
+  done
+
+  if [[ -n "${output:-}" ]]; then
+    printf '%s\n' "${output}" >&2
+  fi
+  return "${status:-1}"
+}
+
 upsert_env_value_in_file() {
   local env_file="$1"
   local key="$2"
@@ -819,7 +841,7 @@ upsert_env_value_in_file() {
       }
     }
   ' "${env_file}" > "${tmp_file}"
-  mv "${tmp_file}" "${env_file}"
+  commit_adjacent_temp_file_with_retry "${tmp_file}" "${env_file}"
 }
 
 apply_profile_runtime_overrides() {

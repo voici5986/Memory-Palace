@@ -119,6 +119,7 @@ python scripts/sync_memory_palace_skill.py --check
 - 如果脚本准备改写现有配置文件（例如 `.mcp.json`、`.gemini/settings.json`、`~/.gemini/policies/memory-palace-overrides.toml`、`~/.codex/config.toml`），现在会先在同目录生成一个 `*.bak` 备份
   - 例如：`.mcp.json.bak`、`settings.json.bak`、`memory-palace-overrides.toml.bak`、`config.toml.bak`
 - 如果目标 JSON 本身已经坏掉，脚本会直接报出具体文件路径和行列号，不再吐一整屏 Python traceback
+- 如果 Windows 上的配置文件或 skill 目录刚好被短暂占用，`install_skill.py` 现在还会对那类最终 `replace` / promote / rollback 步骤补一层有上限的小重试，不再那么容易把安装停在半切换状态
 
 ### 推荐命令
 
@@ -371,7 +372,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
-现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：backend `1063 passed, 22 skipped`、frontend `181 passed`、frontend build / typecheck 通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke 和 repo-local live MCP e2e（全 `PASS`）。skill smoke 也已重跑：`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿。这意味着 repo-local live MCP 路径已重新确认，但各 CLI / IDE host 仍保留自己的宿主边界。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
+现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：backend `1093 passed, 22 skipped`、frontend `193 passed`、frontend build / typecheck 通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke 和 repo-local live MCP e2e（全 `PASS`）。前面提到的 skill smoke 与各 CLI / IDE host 的宿主边界说明仍然成立，不过这次没有重新跑那组 host-bound smoke。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。
 

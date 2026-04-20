@@ -525,19 +525,19 @@ export const saveSetupConfig = (payload) =>
 export const getSessions = () => api.get('/review/sessions').then(res => res.data);
 
 export const getSnapshots = (sessionId) => 
-  api.get(`/review/sessions/${sessionId}/snapshots`).then(res => res.data);
+  api.get(`/review/sessions/${encodeId(sessionId)}/snapshots`).then(res => res.data);
 
 export const getDiff = (sessionId, resourceId) => 
-  api.get(`/review/sessions/${sessionId}/diff/${encodeId(resourceId)}`).then(res => res.data);
+  api.get(`/review/sessions/${encodeId(sessionId)}/diff/${encodeId(resourceId)}`).then(res => res.data);
 
 export const rollbackResource = (sessionId, resourceId) => 
-  api.post(`/review/sessions/${sessionId}/rollback/${encodeId(resourceId)}`, {}).then(res => res.data);
+  api.post(`/review/sessions/${encodeId(sessionId)}/rollback/${encodeId(resourceId)}`, {}).then(res => res.data);
 
 export const approveSnapshot = (sessionId, resourceId) => 
-  api.delete(`/review/sessions/${sessionId}/snapshots/${encodeId(resourceId)}`).then(res => res.data);
+  api.delete(`/review/sessions/${encodeId(sessionId)}/snapshots/${encodeId(resourceId)}`).then(res => res.data);
 
 export const clearSession = (sessionId) => 
-  api.delete(`/review/sessions/${sessionId}`).then(res => res.data);
+  api.delete(`/review/sessions/${encodeId(sessionId)}`).then(res => res.data);
 
 // ============ Catalog API (SQLite/URI Model) ============
 
@@ -589,7 +589,7 @@ export const triggerIndexRebuild = (params = {}) =>
   }).then(res => res.data);
 
 export const triggerMemoryReindex = (memoryId, params = {}) =>
-  api.post(`/maintenance/index/reindex/${memoryId}`, null, {
+  api.post(`/maintenance/index/reindex/${encodeId(memoryId)}`, null, {
     params,
     timeout: LONG_RUNNING_REQUEST_TIMEOUT_MS,
   }).then(res => res.data);

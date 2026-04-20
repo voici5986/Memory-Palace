@@ -139,6 +139,7 @@ docs/skills/memory-palace/
 - 如果脚本要覆盖已有配置，会先在原目录留一份 `*.bak`
   - 常见文件名会长这样：`.mcp.json.bak`、`settings.json.bak`、`config.toml.bak`、`memory-palace-overrides.toml.bak`
 - 如果某个 JSON 配置已经被手工改坏，脚本会直接报出坏文件路径和行列号，方便你先修文件再重跑
+- 如果 Windows 上的配置文件或 skill 目录刚好被短暂占用，`install_skill.py` 现在还会对那类最终 `replace` / promote / rollback 步骤补一层有上限的小重试，不再那么容易把安装停在半切换状态
 
 ## 推荐命令
 
@@ -379,7 +380,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 这两份报告主要用来补做验证，不作为主入口文档。它们默认都是“运行后才出现”的本地产物，所以公开 GitHub 仓库里暂时没有也正常。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 `MCP_LIVE_E2E_REPORT.md` 默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径带进报告，转发前同样建议先自己看一遍内容。
-现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper，而且 launcher 规则已经和 `install_skill.py`、`render_ide_host_config.py` 对齐：原生 Windows 走 `backend/mcp_wrapper.py`，macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 走 `scripts/run_memory_palace_mcp_stdio.sh`。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：backend `1063 passed, 22 skipped`、frontend `181 passed`、frontend build / typecheck 通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke 和 repo-local live MCP e2e（全 `PASS`）。skill smoke 也已重跑：`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿。这意味着 repo-local live MCP 路径已经重新确认，但 CLI / IDE host 的宿主边界仍然保留。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
+现在这条 live e2e 会跟用户实际连接时一样，优先走 repo-local wrapper，而且 launcher 规则已经和 `install_skill.py`、`render_ide_host_config.py` 对齐：原生 Windows 走 `backend/mcp_wrapper.py`，macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin 走 `scripts/run_memory_palace_mcp_stdio.sh`。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：backend `1093 passed, 22 skipped`、frontend `193 passed`、frontend build / typecheck 通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke 和 repo-local live MCP e2e（全 `PASS`）。前面提到的 skill smoke 与 CLI / IDE host 的宿主边界说明仍然成立，不过这次没有重新跑那组 host-bound smoke。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 ## 正向 / 反向 prompt
 

@@ -2672,6 +2672,7 @@ async def prepare_external_import(payload: ImportPrepareRequest):
         resolved_path = str(file_info.get("resolved_path") or "").strip()
         extension = str(file_info.get("extension") or "").strip().lower()
         size_bytes = _safe_non_negative_int(file_info.get("size_bytes"))
+        snapshot_content = file_info.get("content")
         if not resolved_path:
             read_failures.append(
                 {
@@ -2680,17 +2681,15 @@ async def prepare_external_import(payload: ImportPrepareRequest):
                 }
             )
             continue
-        try:
-            content = Path(resolved_path).read_text(encoding="utf-8")
-        except Exception as exc:
+        if not isinstance(snapshot_content, str):
             read_failures.append(
                 {
                     "path": source_path,
-                    "reason": "file_read_failed",
-                    "detail": type(exc).__name__,
+                    "reason": "content_snapshot_missing",
                 }
             )
             continue
+        content = snapshot_content
 
         source_hash = _build_import_source_hash(content)
         title = _sanitize_import_title(

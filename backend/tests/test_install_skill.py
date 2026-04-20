@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import sys
+import errno
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,31 @@ def test_write_json_file_creates_backup_before_overwrite(tmp_path: Path) -> None
     backup_path = tmp_path / "settings.json.bak"
     assert backup_path.is_file()
     assert json.loads(backup_path.read_text(encoding="utf-8")) == {"old": True}
+    assert json.loads(config_path.read_text(encoding="utf-8")) == {"new": True}
+
+
+def test_write_json_file_retries_transient_permission_error_during_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_install_skill_module()
+    config_path = tmp_path / "settings.json"
+    config_path.write_text(json.dumps({"old": True}), encoding="utf-8")
+
+    original_replace = module.os.replace
+    attempts = {"count": 0}
+
+    def flaky_replace(src, dst):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise PermissionError(errno.EACCES, "file is temporarily locked")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(module.os, "replace", flaky_replace)
+
+    module.write_json_file(config_path, {"new": True}, dry_run=False)
+
+    assert attempts["count"] == 2
     assert json.loads(config_path.read_text(encoding="utf-8")) == {"new": True}
 
 
@@ -691,3 +717,48 @@ def test_install_target_force_keeps_existing_skill_when_copying_new_tree_fails(
     assert (destination_dir / "agents" / "openai.yaml").read_text(encoding="utf-8") == "old agent\n"
     assert not list((destination_base / ".claude" / "skills").glob(".memory-palace.staging.*"))
     assert not list((destination_base / ".claude" / "skills").glob(".memory-palace.backup.*"))
+
+
+def test_install_target_retries_transient_permission_error_when_promoting_staging_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_install_skill_module()
+    project_root = tmp_path / "Memory-Palace"
+    source = project_root / "docs" / "skills" / "memory-palace"
+    destination_base = tmp_path / "home"
+    destination_dir = destination_base / ".claude" / "skills" / "memory-palace"
+
+    for relative_path, content in {
+        Path("SKILL.md"): "skill\n",
+        Path("agents/openai.yaml"): "agent\n",
+        Path("references/mcp-workflow.md"): "workflow\n",
+        Path("references/trigger-samples.md"): "triggers\n",
+    }.items():
+        path = source / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    original_replace = module.os.replace
+    attempts = {"count": 0}
+
+    def flaky_replace(src, dst):
+        if Path(dst) == destination_dir:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise PermissionError(errno.EACCES, "destination is temporarily locked")
+        return original_replace(src, dst)
+
+    monkeypatch.setattr(module.os, "replace", flaky_replace)
+
+    module.install_target(
+        "claude",
+        source=source,
+        base_dir=destination_base,
+        mode="copy",
+        force=False,
+        dry_run=False,
+    )
+
+    assert attempts["count"] == 2
+    assert (destination_dir / "SKILL.md").read_text(encoding="utf-8") == "skill\n"

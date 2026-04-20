@@ -1,7 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
-import RootErrorBoundary, { RootErrorFallback } from './RootErrorBoundary.jsx'
+import RootErrorBoundary from './RootErrorBoundary.jsx'
 import { primeDocumentLanguageFromBootstrap } from './i18n'
 import './index.css'
 
@@ -44,9 +44,7 @@ const renderRoot = (node) => {
 }
 
 if (typeof window !== 'undefined') {
-  registerGlobalUnhandledRejectionHandler(window, () => {
-    renderRoot(<RootErrorFallback />)
-  })
+  registerGlobalUnhandledRejectionHandler(window)
 }
 
 renderRoot(

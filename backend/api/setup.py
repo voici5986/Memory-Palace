@@ -1,7 +1,9 @@
+import errno
 import hmac
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -451,7 +453,33 @@ def _write_env_file(target_env_path: Path, updates: Dict[str, str]) -> None:
     ) as handle:
         handle.write(text)
         temp_path = Path(handle.name)
-    temp_path.replace(target_env_path)
+    _atomic_replace_env_file(temp_path, target_env_path)
+
+
+def _atomic_replace_env_file(
+    temp_path: Path,
+    target_env_path: Path,
+    *,
+    retries: int = 3,
+    retry_delay_sec: float = 0.05,
+) -> None:
+    last_error: Optional[OSError] = None
+    for attempt in range(retries):
+        try:
+            os.replace(temp_path, target_env_path)
+            return
+        except OSError as exc:
+            last_error = exc
+            is_retryable = exc.errno in {
+                errno.EACCES,
+                errno.EBUSY,
+                errno.EPERM,
+            }
+            if not is_retryable or attempt >= retries - 1:
+                raise
+            time.sleep(retry_delay_sec)
+    if last_error is not None:
+        raise last_error
 
 
 def _set_optional_update(

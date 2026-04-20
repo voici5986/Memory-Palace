@@ -1,6 +1,7 @@
 import importlib
 import os
 import tempfile
+import errno
 from pathlib import Path
 
 import pytest
@@ -213,6 +214,34 @@ def test_setup_status_accepts_authenticated_remote_request(monkeypatch, tmp_path
     assert payload["apply_supported"] is True
     assert payload["write_supported"] is False
     assert payload["write_reason"] == "local_loopback_required_for_write"
+
+
+def test_write_env_file_retries_atomic_replace_after_transient_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target_env = tmp_path / ".env"
+    target_env.write_text("EXISTING=1\n", encoding="utf-8")
+    replace_calls: list[tuple[str, str]] = []
+    original_replace = setup_api.os.replace
+
+    def _flaky_replace(src: str, dst: str) -> None:
+        replace_calls.append((src, dst))
+        if len(replace_calls) == 1:
+            raise PermissionError(errno.EACCES, "locked", dst)
+        original_replace(src, dst)
+
+    monkeypatch.setattr(setup_api.os, "replace", _flaky_replace)
+
+    setup_api._write_env_file(
+        target_env,
+        {"UPDATED": "2"},
+    )
+
+    written = target_env.read_text(encoding="utf-8")
+    assert "EXISTING=1" in written
+    assert "UPDATED=2" in written
+    assert len(replace_calls) == 2
 
 
 def test_setup_status_loopback_requires_api_key_for_write_when_configured(

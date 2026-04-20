@@ -14,7 +14,7 @@
 >
 > 当前前端会在 React 挂载前先按浏览器已保存语言同步首帧 `lang` 和页面标题；右上角语言按钮可在英文和中文之间一键切换，浏览器会记住你的选择。
 >
-> 当前这轮公开复核：backend `1071 passed / 22 skipped`，frontend `187 passed`，前端 `typecheck/build` 都通过；repo-local macOS `Profile B` 的真实浏览器 smoke 已补跑，repo-local live MCP e2e 也已重跑并保持全 `PASS`。同一轮 Docker 复核里，Dashboard `/` 返回 `200`、backend `/health` 返回 `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`、原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 继续保留目标环境复核边界。
+> 当前这轮公开复核：backend `1093 passed / 22 skipped`，frontend `193 passed`，前端 `typecheck/build` 都通过；repo-local macOS `Profile B` 的真实浏览器 smoke 已补跑，repo-local live MCP e2e 也已重跑并保持全 `PASS`。同一轮 Docker 复核里，Dashboard `/` 返回 `200`、backend `/health` 返回 `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`、原生 Windows 宿主 runtime 与原生 Linux 宿主 runtime 继续保留目标环境复核边界。
 
 ![系统架构图](images/系统架构图.png)
 

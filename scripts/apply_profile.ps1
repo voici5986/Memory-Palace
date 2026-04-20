@@ -162,6 +162,60 @@ function Release-TargetFileLock {
     }
 }
 
+function Test-RetryableFileCommitException {
+    param([System.Exception]$Exception)
+
+    if ($null -eq $Exception) {
+        return $false
+    }
+
+    if ($Exception -is [System.UnauthorizedAccessException]) {
+        return $true
+    }
+
+    if ($Exception -isnot [System.IO.IOException]) {
+        return $false
+    }
+
+    $win32Code = $Exception.HResult -band 0xFFFF
+    if ($win32Code -in @(5, 32, 33)) {
+        return $true
+    }
+
+    return $Exception.Message -match '(?i)being used by another process|access to the path .* is denied'
+}
+
+function Invoke-FileCommitWithRetry {
+    param(
+        [scriptblock]$Operation,
+        [string]$TargetPath,
+        [int]$MaxAttempts = 3,
+        [int]$BaseDelayMilliseconds = 50
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            & $Operation
+            return
+        }
+        catch {
+            $lastError = if ($null -ne $_.Exception) { $_.Exception } else { $_ }
+            if (
+                -not (Test-RetryableFileCommitException -Exception $lastError) `
+                -or $attempt -ge $MaxAttempts
+            ) {
+                throw
+            }
+            Start-Sleep -Milliseconds ($BaseDelayMilliseconds * $attempt)
+        }
+    }
+
+    if ($null -ne $lastError) {
+        throw $lastError
+    }
+}
+
 function Finalize-GeneratedEnvFile {
     param(
         [string]$TempPath,
@@ -175,12 +229,19 @@ function Finalize-GeneratedEnvFile {
 
     if (Test-Path $DestinationPath) {
         $backupPath = "$DestinationPath.bak"
-        [System.IO.File]::Replace($TempPath, $DestinationPath, $backupPath, $true)
+        Invoke-FileCommitWithRetry -TargetPath $DestinationPath -Operation {
+            if (Test-Path $backupPath) {
+                Remove-Item -Path $backupPath -Force -ErrorAction SilentlyContinue
+            }
+            [System.IO.File]::Replace($TempPath, $DestinationPath, $backupPath, $true)
+        }
         Write-Host "[backup] Existing $DestinationPath saved to $backupPath"
         return
     }
 
-    [System.IO.File]::Move($TempPath, $DestinationPath)
+    Invoke-FileCommitWithRetry -TargetPath $DestinationPath -Operation {
+        [System.IO.File]::Move($TempPath, $DestinationPath)
+    }
 }
 
 function Set-EnvValueInFile {

@@ -11,8 +11,8 @@ records, and some metric JSONs are typically for development or local use only.
 > folds the 2026-04-17 real A/B/C/D verification into the current public-facing
 > conclusion, records a narrower 2026-04-18 maintenance rerun, and also keeps a
 > 2026-04-20 closeout validation note for the later review-driven fixes. That
-> 2026-04-20 round reran the full backend suite (`1071 passed, 22 skipped`),
-> frontend tests (`187 passed`), frontend build, frontend typecheck,
+> 2026-04-20 round reran the full backend suite (`1093 passed, 22 skipped`),
+> frontend tests (`193 passed`), frontend build, frontend typecheck,
 > repo-local live MCP e2e (`PASS`), and a repo-local Profile B browser smoke;
 > it did **not** recalculate the benchmark tables on this page. For the current
 > default interaction profile, the explicit deep-retrieval profiles, and the
@@ -463,15 +463,15 @@ cd backend
 
 ### 5.1 What Was Actually Rechecked In This Session
 
-- Full non-benchmark backend suite: `1071 passed / 22 skipped`
-- Full frontend suite: `187 passed`
+- Full non-benchmark backend suite: `1093 passed / 22 skipped`
+- Full frontend suite: `193 passed`
 - Frontend `typecheck` / `build`: passed
 - Repo-local `Profile B` real-browser smoke: passed
 - Repo-local live MCP e2e: passed
 - Docker readiness/auth recheck: Dashboard `/` `200`, backend `/health` `200`, protected setup/SSE requests remained fail-closed
 - Real A/B/C/D benchmark: rerun earlier in this session; not recalculated in the final closeout pass
 - Docker one-click `Profile C/D`: not rerun in this round; the target-environment recheck boundary remains
-- `skills+MCP` / `single-MCP`: skill smoke was rerun; `claude` / `codex` / `gemini` passed, `cursor` / `agent` / `antigravity` remain `PARTIAL`, and `gemini_live` stays `SKIP`. `OpenCode` hit one timeout in the full multi-CLI sweep but passed on the immediate standalone rerun, so this is better understood as host-side fluctuation rather than a stable all-host `PASS` claim
+- `skills+MCP` / `single-MCP`: the public skill-smoke note still follows the earlier dedicated host-validation round: `claude` / `codex` / `gemini` passed, `cursor` / `agent` / `antigravity` remain `PARTIAL`, and `gemini_live` stays `SKIP`. `OpenCode` hit one timeout in the full multi-CLI sweep but passed on the immediate standalone rerun, so this is better understood as host-side fluctuation rather than a stable all-host `PASS` claim. This 2026-04-20 doc refresh did not rerun that host-bound skill-smoke set.
 
 This is intentionally still not described as “everything is green everywhere.”
 

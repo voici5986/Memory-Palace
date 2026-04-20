@@ -29,7 +29,12 @@ vi.mock('axios', () => ({
 }));
 
 import {
+    approveSnapshot,
+    clearSession,
+    getDiff,
     getMemoryNode,
+    getSnapshots,
+    rollbackResource,
     runObservabilitySearch,
     listOrphanMemories,
     getOrphanMemoryDetail,
@@ -144,6 +149,41 @@ describe('api contract regression', () => {
     expect(result.results).toEqual([]);
   });
 
+  it('encodes session and resource path segments for review APIs', async () => {
+    mockApi.get.mockResolvedValueOnce({ data: [] });
+    mockApi.get.mockResolvedValueOnce({ data: { diff: [] } });
+    mockApi.post.mockResolvedValueOnce({ data: { ok: true } });
+    mockApi.delete.mockResolvedValueOnce({ data: { ok: true } });
+    mockApi.delete.mockResolvedValueOnce({ data: { ok: true } });
+
+    await getSnapshots('session/a b');
+    await getDiff('session/a b', 'core://node/with space');
+    await rollbackResource('session/a b', 'core://node/with space');
+    await approveSnapshot('session/a b', 'core://node/with space');
+    await clearSession('session/a b');
+
+    expect(mockApi.get).toHaveBeenNthCalledWith(
+      1,
+      '/review/sessions/session%2Fa%20b/snapshots'
+    );
+    expect(mockApi.get).toHaveBeenNthCalledWith(
+      2,
+      '/review/sessions/session%2Fa%20b/diff/core%3A%2F%2Fnode%2Fwith%20space'
+    );
+    expect(mockApi.post).toHaveBeenCalledWith(
+      '/review/sessions/session%2Fa%20b/rollback/core%3A%2F%2Fnode%2Fwith%20space',
+      {}
+    );
+    expect(mockApi.delete).toHaveBeenNthCalledWith(
+      1,
+      '/review/sessions/session%2Fa%20b/snapshots/core%3A%2F%2Fnode%2Fwith%20space'
+    );
+    expect(mockApi.delete).toHaveBeenNthCalledWith(
+      2,
+      '/review/sessions/session%2Fa%20b'
+    );
+  });
+
   it('uses extended timeout for long-running index maintenance operations', async () => {
     mockApi.post.mockResolvedValue({ data: { ok: true } });
 
@@ -163,6 +203,21 @@ describe('api contract regression', () => {
       params: { reason: 'test' },
       timeout: 60000,
     });
+  });
+
+  it('encodes memory ids for reindex endpoints', async () => {
+    mockApi.post.mockResolvedValue({ data: { ok: true } });
+
+    await triggerMemoryReindex('memory/42 with space', { reason: 'test' });
+
+    expect(mockApi.post).toHaveBeenCalledWith(
+      '/maintenance/index/reindex/memory%2F42%20with%20space',
+      null,
+      {
+        params: { reason: 'test' },
+        timeout: 60000,
+      }
+    );
   });
 
   it('uses extended timeout for vitality cleanup confirmation', async () => {

@@ -353,7 +353,6 @@ def _probe_profile_embedding_provider(
     }
     if client._embedding_api_key:
         headers["Authorization"] = f"Bearer {client._embedding_api_key}"
-        headers["X-API-Key"] = client._embedding_api_key
 
     timeout = _probe_timeout_seconds(client, timeout_sec)
     try:
@@ -452,7 +451,6 @@ def _probe_profile_reranker_provider(
     api_key = str(getattr(client, "_reranker_api_key", "") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-        headers["X-API-Key"] = api_key
 
     try:
         response = _post_preflight_request(

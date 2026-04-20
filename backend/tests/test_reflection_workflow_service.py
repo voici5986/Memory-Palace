@@ -247,6 +247,74 @@ async def test_deduped_reflection_prepare_cancels_orphaned_task_when_last_waiter
     assert "cancel-me" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
 
 
+@pytest.mark.asyncio
+async def test_deduped_reflection_prepare_waits_for_cancelling_task_before_restart() -> None:
+    mcp_server._REFLECTION_PREPARE_IN_FLIGHT.clear()
+    first_started = asyncio.Event()
+    first_cleanup_started = asyncio.Event()
+    first_ready_to_exit = asyncio.Event()
+    first_exited = asyncio.Event()
+    allow_first_cleanup = asyncio.Event()
+    allow_first_exit = asyncio.Event()
+    second_started = asyncio.Event()
+    run_number = 0
+
+    async def _factory() -> dict[str, object]:
+        nonlocal run_number
+        run_number += 1
+        is_first_run = run_number == 1
+        if is_first_run:
+            first_started.set()
+        else:
+            second_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if is_first_run:
+                first_cleanup_started.set()
+                await allow_first_cleanup.wait()
+            raise
+        finally:
+            if is_first_run:
+                first_ready_to_exit.set()
+                await allow_first_exit.wait()
+                first_exited.set()
+
+    waiter = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("restart-after-cancel", _factory)
+    )
+    await first_started.wait()
+
+    waiter.cancel()
+    await asyncio.wait_for(first_cleanup_started.wait(), timeout=1.0)
+
+    restarted = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("restart-after-cancel", _factory)
+    )
+    await asyncio.sleep(0)
+
+    assert second_started.is_set() is False
+
+    allow_first_cleanup.set()
+    await asyncio.wait_for(first_ready_to_exit.wait(), timeout=1.0)
+    await asyncio.sleep(0)
+
+    assert second_started.is_set() is False
+
+    allow_first_exit.set()
+    await asyncio.wait_for(second_started.wait(), timeout=1.0)
+    assert first_exited.is_set() is True
+
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    restarted.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await restarted
+
+    assert "restart-after-cancel" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
+
+
 async def _capture_import_learn_lock() -> asyncio.Lock:
     return mcp_server._get_import_learn_meta_persist_lock()
 

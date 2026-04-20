@@ -2,7 +2,7 @@
 
 本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
-> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-20 的收口验证一起收口到公开口径里。2026-04-20 这轮收口验证重跑了完整 backend 测试（`1071 passed, 22 skipped`）、frontend 测试（`187 passed`）、frontend build、frontend typecheck、repo-local live MCP e2e（`PASS`）和一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮收口里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
+> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-20 的收口验证一起收口到公开口径里。2026-04-20 这轮收口验证重跑了完整 backend 测试（`1093 passed, 22 skipped`）、frontend 测试（`193 passed`）、frontend build、frontend typecheck、repo-local live MCP e2e（`PASS`）和一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮收口里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
 
 ---
 
@@ -324,15 +324,15 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`1071 passed / 22 skipped`
-- Frontend 全量：`187 passed`
+- Backend 非 benchmark 全量：`1093 passed / 22 skipped`
+- Frontend 全量：`193 passed`
 - Frontend `typecheck` / `build`：通过
 - repo-local `Profile B` 真实浏览器 smoke：通过
 - repo-local live MCP e2e：通过（`docs/skills/MCP_LIVE_E2E_REPORT.md` 全 `PASS`）
 - Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close
 - 真实 A/B/C/D benchmark：本 session 早些时候已重跑；这轮收口未重算，继续沿用第 3 节表格
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界
-- `skills+MCP` / `single-MCP`：skill smoke 已重跑；`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿
+- `skills+MCP` / `single-MCP`：skill smoke 的公开说明仍沿用更早那轮专门宿主验证的结果：`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿。本次 2026-04-20 文档刷新没有重新跑这组 host-bound smoke。
 
 这里故意不把这轮结果写成“全链路全绿”。尤其是 `skills-only`，现在还只能写 PARTIAL，不能往上拔。
 

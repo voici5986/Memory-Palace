@@ -1,7 +1,9 @@
+import errno
 import hashlib
 import json
 import math
 import os
+import stat
 import threading
 import time
 from collections import deque
@@ -15,6 +17,8 @@ from shared_utils import env_int as _shared_env_int
 
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 _RATE_LIMIT_STATE_LOCK_TIMEOUT_SECONDS = 1.0
+_RATE_LIMIT_STATE_REPLACE_RETRIES = 3
+_RATE_LIMIT_STATE_RETRY_DELAY_SECONDS = 0.05
 
 
 def _normalize_extension(extension: str) -> str:
@@ -302,7 +306,7 @@ class ExternalImportGuard:
 
         candidate = Path(requested).expanduser()
         try:
-            resolved = candidate.resolve(strict=False)
+            resolved = candidate.resolve(strict=True)
         except (OSError, RuntimeError, ValueError):
             return {
                 "ok": False,
@@ -340,12 +344,56 @@ class ExternalImportGuard:
             }
 
         try:
-            size_bytes = int(resolved.stat().st_size)
+            open_flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                open_flags |= os.O_NOFOLLOW
+            fd = os.open(os.fspath(candidate), open_flags)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return {
+                    "ok": False,
+                    "reason": "symlink_not_allowed",
+                    "detail": "symlink targets are not allowed for external import",
+                }
+            return {
+                "ok": False,
+                "reason": "file_open_failed",
+                "detail": type(exc).__name__,
+            }
+
+        try:
+            stat_result = os.fstat(fd)
+            if not stat.S_ISREG(stat_result.st_mode):
+                return {
+                    "ok": False,
+                    "reason": "not_a_file",
+                    "detail": "path is not a regular file",
+                }
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                content = handle.read()
+            fd = -1
+            current_resolved = candidate.resolve(strict=True)
+        except UnicodeDecodeError:
+            return {
+                "ok": False,
+                "reason": "file_read_failed",
+                "detail": "file is not valid utf-8 text",
+            }
         except OSError:
             return {
                 "ok": False,
-                "reason": "stat_failed",
-                "detail": "failed to read file size",
+                "reason": "file_read_failed",
+                "detail": "failed to read file content",
+            }
+        finally:
+            if fd >= 0:
+                os.close(fd)
+
+        if current_resolved != resolved:
+            return {
+                "ok": False,
+                "reason": "path_changed_during_validation",
+                "detail": "path changed during validation",
             }
 
         return {
@@ -354,7 +402,8 @@ class ExternalImportGuard:
                 "path": requested,
                 "resolved_path": str(resolved),
                 "extension": extension,
-                "size_bytes": size_bytes,
+                "size_bytes": int(stat_result.st_size),
+                "content": content,
             },
         }
 
@@ -676,7 +725,7 @@ class ExternalImportGuard:
                 json.dumps(payload, ensure_ascii=False),
                 encoding="utf-8",
             )
-            tmp_file.replace(state_file)
+            ExternalImportGuard._replace_rate_limit_state_file(tmp_file, state_file)
             return None
         except OSError:
             return "state_file_write_failed"
@@ -686,6 +735,32 @@ class ExternalImportGuard:
                     tmp_file.unlink()
             except OSError:
                 pass
+
+    @staticmethod
+    def _replace_rate_limit_state_file(
+        temp_path: Path,
+        target_path: Path,
+        *,
+        retries: int = _RATE_LIMIT_STATE_REPLACE_RETRIES,
+        retry_delay_sec: float = _RATE_LIMIT_STATE_RETRY_DELAY_SECONDS,
+    ) -> None:
+        last_error: Optional[OSError] = None
+        for attempt in range(max(1, retries)):
+            try:
+                os.replace(temp_path, target_path)
+                return
+            except OSError as exc:
+                last_error = exc
+                is_retryable = exc.errno in {
+                    errno.EACCES,
+                    errno.EBUSY,
+                    errno.EPERM,
+                }
+                if not is_retryable or attempt >= retries - 1:
+                    raise
+                time.sleep(retry_delay_sec)
+        if last_error is not None:
+            raise last_error
 
     @staticmethod
     def _prune_rate_limit_state_payload(

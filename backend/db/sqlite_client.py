@@ -127,6 +127,7 @@ _INTENT_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     ),
 }
 _PROMPT_SAFETY_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_PROMPT_SAFETY_FILTERED_UNICODE_CATEGORIES = {"Cf"}
 
 
 def _register_sqlite_adapters() -> None:
@@ -545,6 +546,7 @@ class SQLiteClient:
         self._remote_http_timeout_sec = max(
             1.0, self._env_float("RETRIEVAL_REMOTE_TIMEOUT_SEC", 8.0)
         )
+        self._remote_http_client: Optional[httpx.AsyncClient] = None
         self._reranker_enabled = self._env_bool("RETRIEVAL_RERANKER_ENABLED", False)
         self._reranker_api_base = self._normalize_reranker_api_base(
             self._first_env(
@@ -737,6 +739,12 @@ class SQLiteClient:
         normalized = unicodedata.normalize("NFKC", str(value or ""))
         normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
         normalized = _PROMPT_SAFETY_CONTROL_CHAR_PATTERN.sub(" ", normalized)
+        normalized = "".join(
+            " "
+            if unicodedata.category(char) in _PROMPT_SAFETY_FILTERED_UNICODE_CATEGORIES
+            else char
+            for char in normalized
+        )
         normalized = re.sub(r"[ \t]+\n", "\n", normalized)
         normalized = re.sub(r"\n{4,}", "\n\n\n", normalized)
         normalized = normalized.strip()
@@ -2769,28 +2777,26 @@ class SQLiteClient:
         }
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-            headers["X-API-Key"] = api_key
 
         attempts = 3
+        client = self._get_remote_http_client()
         for attempt in range(1, attempts + 1):
             local_error: Dict[str, Any] = {}
             try:
-                timeout = httpx.Timeout(self._remote_http_timeout_sec)
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    response = await client.post(url, json=payload, headers=headers)
-                    try:
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as exc:
-                        retry_payload = self._build_embedding_retry_payload_without_dimensions(
-                            endpoint=endpoint,
-                            payload=payload,
-                            response=exc.response,
-                        )
-                        if retry_payload is None:
-                            raise
-                        response = await client.post(url, json=retry_payload, headers=headers)
-                        response.raise_for_status()
-                    parsed = response.json()
+                response = await client.post(url, json=payload, headers=headers)
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    retry_payload = self._build_embedding_retry_payload_without_dimensions(
+                        endpoint=endpoint,
+                        payload=payload,
+                        response=exc.response,
+                    )
+                    if retry_payload is None:
+                        raise
+                    response = await client.post(url, json=retry_payload, headers=headers)
+                    response.raise_for_status()
+                parsed = response.json()
                 if isinstance(parsed, dict):
                     return parsed
                 return {"data": parsed}
@@ -2859,6 +2865,14 @@ class SQLiteClient:
                         retry_delay = min(retry_after_value, 0.5)
             await asyncio.sleep(retry_delay)
         return None
+
+    def _get_remote_http_client(self) -> httpx.AsyncClient:
+        client = self._remote_http_client
+        if client is None or getattr(client, "is_closed", False):
+            timeout = httpx.Timeout(self._remote_http_timeout_sec)
+            client = httpx.AsyncClient(timeout=timeout)
+            self._remote_http_client = client
+        return client
 
     async def _post_json_with_optional_error_sink(
         self,
@@ -3858,6 +3872,12 @@ class SQLiteClient:
 
     async def close(self):
         """Close the database connection."""
+        if self._remote_http_client is not None and not getattr(
+            self._remote_http_client, "is_closed", False
+        ):
+            close_remote_client = getattr(self._remote_http_client, "aclose", None)
+            if callable(close_remote_client):
+                await close_remote_client()
         await self.engine.dispose()
 
     @asynccontextmanager

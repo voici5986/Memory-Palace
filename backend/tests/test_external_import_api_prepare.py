@@ -222,3 +222,90 @@ def test_import_prepare_returns_prepared_job_payload(
     assert "content" not in files[0]
     assert job_id in maintenance_api._IMPORT_JOBS
     assert job_id not in maintenance_api._LEARN_JOBS
+
+
+def test_import_prepare_uses_guard_snapshot_content_without_rereading_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MCP_API_KEY", "import-secret")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ENABLED", "true")
+    monkeypatch.setenv("EXTERNAL_IMPORT_ALLOWED_ROOTS", str(tmp_path))
+    headers = {"X-MCP-API-Key": "import-secret"}
+    file_path = tmp_path / "guide.md"
+    file_path.write_text("disk-content", encoding="utf-8")
+
+    class _SnapshotGuard:
+        def policy_snapshot(self) -> dict:
+            return {
+                "enabled": True,
+                "allowed_roots_count": 1,
+                "allowed_roots_fingerprint": "fp",
+                "allowed_exts": [".md"],
+                "max_total_bytes": 1024,
+                "max_files": 10,
+                "rate_limit_window_seconds": 60,
+                "rate_limit_max_requests": 10,
+                "rate_limit_storage": "process_memory",
+                "require_shared_rate_limit": False,
+            }
+
+        def validate_batch(self, *, file_paths, actor_id, session_id=None) -> dict:
+            _ = file_paths, actor_id, session_id
+            return {
+                "ok": True,
+                "reason": "ok",
+                "allowed_files": [
+                    {
+                        "path": str(file_path),
+                        "resolved_path": str(file_path.resolve()),
+                        "extension": ".md",
+                        "size_bytes": 16,
+                        "content": "snapshot-content",
+                    }
+                ],
+                "requested_file_count": 1,
+                "file_count": 1,
+                "max_files": 10,
+                "total_bytes": 16,
+                "max_total_bytes": 1024,
+                "retry_after_seconds": 0,
+                "rate_limit_storage": "process_memory",
+                "require_shared_rate_limit": False,
+                "rate_limit": {
+                    "allowed": True,
+                    "reason": "ok",
+                    "key": "actor-a::*",
+                    "scope": "actor",
+                    "window_seconds": 60,
+                    "max_requests": 10,
+                    "remaining": 9,
+                    "retry_after_seconds": 0,
+                },
+            }
+
+    async def _fake_get_external_import_guard():
+        return _SnapshotGuard()
+
+    def _fail_read_text(self, *args, **kwargs):
+        raise AssertionError(f"prepare should not re-read {self}")
+
+    monkeypatch.setattr(
+        maintenance_api,
+        "_get_external_import_guard",
+        _fake_get_external_import_guard,
+    )
+    monkeypatch.setattr(Path, "read_text", _fail_read_text)
+
+    with _build_client() as client:
+        response = client.post(
+            "/maintenance/import/prepare",
+            headers=headers,
+            json=_prepare_payload(file_path),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    job = payload.get("job") or {}
+    files = job.get("files") or []
+    assert len(files) == 1
+    assert files[0].get("preview") == "snapshot-content"

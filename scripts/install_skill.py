@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import errno
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 try:
@@ -282,10 +284,41 @@ def _atomic_write_text(path: Path, content: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(content)
-        os.replace(temp_path, path)
+        _replace_with_retry(temp_path, path)
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+def _is_retryable_replace_error(exc: OSError) -> bool:
+    if getattr(exc, "winerror", None) in {5, 32, 33}:
+        return True
+    return exc.errno in {
+        errno.EACCES,
+        errno.EBUSY,
+        errno.EPERM,
+    }
+
+
+def _replace_with_retry(
+    source: Path,
+    destination: Path,
+    *,
+    retries: int = 3,
+    retry_delay_sec: float = 0.05,
+) -> None:
+    last_error: OSError | None = None
+    for attempt in range(retries):
+        try:
+            os.replace(source, destination)
+            return
+        except OSError as exc:
+            last_error = exc
+            if not _is_retryable_replace_error(exc) or attempt >= retries - 1:
+                raise
+            time.sleep(retry_delay_sec * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def write_json_file(path: Path, payload: dict, *, dry_run: bool) -> None:
@@ -382,9 +415,9 @@ def _install_regular_skill_target_atomically(
                 tempfile.mkdtemp(prefix=f".{SKILL_NAME}.backup.", dir=str(destination_root))
             )
             backup_path = backup_root / destination_dir.name
-            os.replace(destination_dir, backup_path)
+            _replace_with_retry(destination_dir, backup_path)
 
-        os.replace(staging_dir, destination_dir)
+        _replace_with_retry(staging_dir, destination_dir)
         staging_dir = destination_dir
 
         if backup_root is not None:
@@ -393,7 +426,7 @@ def _install_regular_skill_target_atomically(
 
     except Exception:
         if backup_path is not None and backup_path.exists() and not destination_dir.exists():
-            os.replace(backup_path, destination_dir)
+            _replace_with_retry(backup_path, destination_dir)
         raise
     finally:
         if backup_root is not None and backup_root.exists():

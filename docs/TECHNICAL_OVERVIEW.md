@@ -369,7 +369,7 @@ Docker 端口环境变量：
 - 备份脚本：`scripts/backup_memory.sh`、`scripts/backup_memory.ps1`（默认保留最近 `20` 份备份，可通过 `--keep` / `-Keep` 调整；备份文件名统一使用 UTC 时间戳，方便宿主机和容器环境混用时按时间排序）
 - 分享前检查：`scripts/pre_publish_check.sh`（会拦截已跟踪的 `.audit` / `.playwright-mcp` 工件，也会扫描 tracked 文件里的本地 endpoint / key 模式，例如 `sk-local-*`、以及带端口的 loopback / private provider 地址；仓库自己的前端 loopback health probe 不会被误报）
 
-当前 validate 链路已经把 frontend `typecheck` 纳入和前端测试 / build 同级的检查；本 session 收口时重新实测 backend `1071 passed, 22 skipped`、frontend `187 passed`，前端 typecheck / build 也都通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核（Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close）。更早那张 2026-04-18 的 benchmark 表在这轮收口里没有重算；Docker one-click `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这里继续保留目标环境复核边界。
+当前 validate 链路已经把 frontend `typecheck` 纳入和前端测试 / build 同级的检查；本 session 收口时重新实测 backend `1093 passed, 22 skipped`、frontend `193 passed`，前端 typecheck / build 也都通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核（Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close）。更早那张 2026-04-18 的 benchmark 表在这轮收口里没有重算；Docker one-click `Profile C/D` 和原生 Windows / Linux 宿主 runtime 这里继续保留目标环境复核边界。
 
 ---
 

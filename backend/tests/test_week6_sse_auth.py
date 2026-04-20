@@ -163,7 +163,11 @@ def test_sse_auth_accepts_bearer_token(monkeypatch) -> None:
     assert response.json().get("ok") is True
 
 
-def test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy() -> None:
+def test_sse_rate_limit_ignores_forwarded_client_ip_from_private_peer_by_default(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("SSE_TRUSTED_PROXY_HOSTS", raising=False)
+    monkeypatch.delenv("SSE_TRUSTED_PROXY_CIDRS", raising=False)
     session_id = uuid4()
     key = run_sse.MemoryPalaceSseServerTransport._session_rate_limit_key(
         {
@@ -178,7 +182,28 @@ def test_sse_rate_limit_prefers_forwarded_client_ip_for_trusted_proxy() -> None:
         session_id,
     )
 
-    assert key == f"198.51.100.8:{session_id.hex}"
+    assert key == "172.18.0.10"
+
+
+def test_sse_rate_limit_prefers_forwarded_client_ip_for_explicit_allowlisted_proxy(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SSE_TRUSTED_PROXY_CIDRS", "172.18.0.0/16")
+    session_id = uuid4()
+    key = run_sse.MemoryPalaceSseServerTransport._session_rate_limit_key(
+        {
+            "type": "http",
+            "path": "/messages",
+            "client": ("172.18.0.10", 50000),
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.8, 172.18.0.10"),
+                (b"x-real-ip", b"198.51.100.8"),
+            ],
+        },
+        session_id,
+    )
+
+    assert key == "198.51.100.8"
 
 
 def test_sse_rate_limit_ignores_forwarded_client_ip_from_untrusted_peer() -> None:
@@ -196,7 +221,7 @@ def test_sse_rate_limit_ignores_forwarded_client_ip_from_untrusted_peer() -> Non
         session_id,
     )
 
-    assert key == f"198.51.100.99:{session_id.hex}"
+    assert key == "198.51.100.99"
 
 @pytest.mark.anyio
 async def test_read_request_body_with_limit_rejects_stream_without_content_length() -> None:
@@ -687,6 +712,32 @@ async def test_sse_messages_rate_limit_returns_429(monkeypatch) -> None:
     assert retry_after >= 1
 
 
+@pytest.mark.anyio
+async def test_sse_messages_rate_limit_persists_across_session_rotation(monkeypatch) -> None:
+    transport = run_sse.MemoryPalaceSseServerTransport("/messages", security_settings=None)
+    transport._message_rate_limit_window_seconds = 60
+    transport._message_rate_limit_max_requests = 2
+    scope = {
+        "type": "http",
+        "path": "/messages",
+        "client": ("127.0.0.1", 50000),
+    }
+
+    first_session_id = uuid4()
+    second_session_id = uuid4()
+
+    assert await transport._check_message_rate_limit(scope=scope, session_id=first_session_id) is None
+    assert await transport._check_message_rate_limit(scope=scope, session_id=first_session_id) is None
+
+    retry_after = await transport._check_message_rate_limit(
+        scope=scope,
+        session_id=second_session_id,
+    )
+
+    assert isinstance(retry_after, int)
+    assert retry_after >= 1
+
+
 def test_sse_messages_reject_oversized_body_with_413(tmp_path) -> None:
     backend_dir = Path(__file__).resolve().parents[1]
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
@@ -795,9 +846,11 @@ def test_sse_messages_reject_oversized_body_with_413(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_sse_rate_limit_state_is_cleared_when_session_closes() -> None:
+async def test_sse_rate_limit_state_persists_when_session_closes() -> None:
     transport = run_sse.MemoryPalaceSseServerTransport("/messages", security_settings=None)
-    session_id = uuid4()
+    transport._message_rate_limit_max_requests = 1
+    first_session_id = uuid4()
+    second_session_id = uuid4()
     scope = {
         "type": "http",
         "path": "/messages",
@@ -805,17 +858,22 @@ async def test_sse_rate_limit_state_is_cleared_when_session_closes() -> None:
     }
 
     retry_after = await transport._check_message_rate_limit(
-        scope=scope, session_id=session_id
+        scope=scope, session_id=first_session_id
     )
 
     assert retry_after is None
     assert transport._message_rate_limit_buckets
 
     await transport._clear_message_rate_limit_state(
-        scope=scope, session_id=session_id
+        scope=scope, session_id=first_session_id
     )
 
-    assert transport._message_rate_limit_buckets == {}
+    retry_after = await transport._check_message_rate_limit(
+        scope=scope, session_id=second_session_id
+    )
+
+    assert isinstance(retry_after, int)
+    assert retry_after >= 1
 
 
 @pytest.mark.anyio

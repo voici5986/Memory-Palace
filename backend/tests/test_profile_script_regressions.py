@@ -848,8 +848,11 @@ def test_apply_profile_shell_uses_target_adjacent_temp_files_and_locking_contrac
     )
 
     assert "try_acquire_path_lock" in script_text
+    assert "commit_adjacent_temp_file_with_retry()" in script_text
     assert 'mktemp_adjacent_file "${file_path}" "write"' in script_text
     assert 'mktemp_adjacent_file "${target_file}" "staged"' in script_text
+    assert 'commit_adjacent_temp_file_with_retry "${tmp_file}" "${file_path}"' in script_text
+    assert 'commit_adjacent_temp_file_with_retry "${staged_file}" "${target_file}"' in script_text
     assert "another apply_profile.sh process is already writing" in script_text
 
 
@@ -1452,6 +1455,8 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
     assert "function New-AdjacentTempFile" in script_text
     assert "function Acquire-TargetFileLock" in script_text
     assert "function Release-TargetFileLock" in script_text
+    assert "function Test-RetryableFileCommitException" in script_text
+    assert "function Invoke-FileCommitWithRetry" in script_text
     assert "function Finalize-GeneratedEnvFile" in script_text
     assert "function Assert-ResolvedDatabaseUrlPlaceholder" in script_text
     assert "function Assert-ResolvedProfilePlaceholders" in script_text
@@ -1466,6 +1471,9 @@ def test_apply_profile_powershell_declares_utf8_no_bom_and_placeholder_guard() -
     assert "$targetLock = Acquire-TargetFileLock -TargetPath $Target" in script_text
     assert "$workingTarget = New-AdjacentTempFile -TargetPath $Target -Label 'staged'" in script_text
     assert "Finalize-GeneratedEnvFile -TempPath $workingTarget -DestinationPath $Target" in script_text
+    assert "$win32Code = $Exception.HResult -band 0xFFFF" in script_text
+    assert "$win32Code -in @(5, 32, 33)" in script_text
+    assert "Start-Sleep -Milliseconds ($BaseDelayMilliseconds * $attempt)" in script_text
     assert "Release-TargetFileLock -LockInfo $targetLock" in script_text
     assert 'throw "[apply-profile-lock] another apply_profile.ps1 process is already writing $TargetPath; wait for it to finish before retrying."' in script_text
     assert 'Assert-ResolvedDatabaseUrlPlaceholder -FilePath $workingTarget -DisplayPath $Target' in script_text
@@ -1490,12 +1498,15 @@ def test_apply_profile_powershell_uses_target_adjacent_temp_files_and_locking_co
     assert "function New-AdjacentTempFile" in script_text
     assert "function Acquire-TargetFileLock" in script_text
     assert "function Release-TargetFileLock" in script_text
+    assert "function Invoke-FileCommitWithRetry" in script_text
     assert "function Finalize-GeneratedEnvFile" in script_text
     assert "[apply-profile-lock] another apply_profile.ps1 process is already writing" in script_text
     assert "$targetLock = Acquire-TargetFileLock -TargetPath $Target" in script_text
     assert "$workingTarget = New-AdjacentTempFile -TargetPath $Target -Label 'staged'" in script_text
     assert "Finalize-GeneratedEnvFile -TempPath $workingTarget -DestinationPath $Target" in script_text
+    assert "Invoke-FileCommitWithRetry -TargetPath $DestinationPath -Operation {" in script_text
     assert "[System.IO.File]::Replace($TempPath, $DestinationPath, $backupPath, $true)" in script_text
+    assert "[System.IO.File]::Move($TempPath, $DestinationPath)" in script_text
     assert '$dryRunOutput = [System.IO.File]::ReadAllText($workingTarget, $utf8NoBom)' in script_text
     assert '[Console]::Out.Write($dryRunOutput)' in script_text
 
