@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from helpers.profile_abcd_real_runner import (
@@ -106,6 +107,23 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--skip-provider-preflight",
+        action="store_true",
+        help=(
+            "Skip the fail-fast remote provider preflight for profile C/D. "
+            "Not recommended unless you are debugging the runner itself."
+        ),
+    )
+    parser.add_argument(
+        "--provider-preflight-timeout",
+        type=float,
+        default=None,
+        help=(
+            "Optional timeout in seconds for the provider preflight probe. "
+            "Default uses the helper fail-fast timeout."
+        ),
+    )
+    parser.add_argument(
         "--phase6-gate-mode",
         type=str,
         default=None,
@@ -142,6 +160,8 @@ async def _run(args: argparse.Namespace) -> None:
         max_results=int(args.max_results),
         candidate_multiplier=int(args.candidate_multiplier),
         workdir=args.workdir,
+        provider_preflight=not bool(args.skip_provider_preflight),
+        provider_preflight_timeout=args.provider_preflight_timeout,
     )
     artifact_paths = write_profile_abcd_real_artifacts(
         payload,
@@ -161,7 +181,11 @@ async def _run(args: argparse.Namespace) -> None:
 
 def main() -> int:
     args = parse_args()
-    asyncio.run(_run(args))
+    try:
+        asyncio.run(_run(args))
+    except RuntimeError as exc:
+        print(f"[benchmark] failed: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -97,6 +97,23 @@ describe('i18n bootstrap', () => {
     expect(document.title).toBe('Memory Palace 控制台');
   });
 
+  it('treats null translations as missing values instead of returning null', async () => {
+    vi.resetModules();
+    const [{ default: freshI18n }] = await Promise.all([
+      import('./i18n'),
+    ]);
+
+    freshI18n.addResourceBundle('en', 'translation', {
+      tests: {
+        nullValue: null,
+      },
+    }, true, true);
+    await freshI18n.changeLanguage('en');
+
+    expect(freshI18n.options.returnNull).toBe(false);
+    expect(freshI18n.t('tests.nullValue')).toBe('tests.nullValue');
+  });
+
   it('maps zh-TW navigator locale to zh-CN on fresh init when no stored locale exists', async () => {
     const originalLanguage = window.navigator.language;
     const originalLanguages = window.navigator.languages;

@@ -270,7 +270,7 @@ python scripts/install_skill.py \
 - **更稳的默认方案仍是先跑 `--scope user --with-mcp`**
 - 如果你还想给当前仓库补一个 workspace 入口，再额外执行 workspace 安装
 - 如果你看到 `Policy file warning in memory-palace-overrides.toml`，优先重跑一遍 `--scope user --with-mcp --force`
-- 写给别人看时仍建议保守：smoke 已通过，但 `gemini_live` 还没有到“完全通过”的程度
+- 写给别人看时仍建议保守：普通 `gemini` smoke 这轮已通过；`gemini_live` 仍是显式可选并默认 `SKIP`
 
 ### Codex CLI
 
@@ -283,10 +283,7 @@ python scripts/install_skill.py \
 - 准确说法是：
   - skill 可 repo-local 自动发现
   - MCP 仍以 user-scope 注册为主
-- 对 `Codex` 更稳的公开口径是：skill 仍可 repo-local 自动发现，MCP 仍以 user-scope 注册为主；除非你刚在目标机上重跑过 smoke，否则不要写成“当前机器已完全通过”。当前实现下，`mcp_bindings` / smoke 仍更适合按 `PARTIAL` 理解：
-  - user-scope MCP 绑定已对齐当前仓库
-  - `codex exec` smoke 可能因为超时或缺少结构化输出而停在 `PARTIAL`
-  - 对外更稳的口径应写成“当前仓库已具备接线条件，但仍建议本机再做一次 user-scope 复核”
+- 对 `Codex` 更稳的公开口径是：skill 仍可 repo-local 自动发现，MCP 仍以 user-scope 注册为主；这次 session 的 `codex` smoke 已通过，但公开文档仍建议保留“目标机再做一次 user-scope 复核”的说法，不要直接写成所有机器都已完全通过
 
 ### OpenCode
 
@@ -374,7 +371,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 同样地，这份报告默认也是“运行后才会出现”的本地产物；公开 GitHub 仓库里暂时没有，不代表接法有问题。
 如果你在并行 review 或 CI 里不想覆盖默认文件，也可以先设置 `MEMORY_PALACE_MCP_E2E_REPORT_PATH`。如果你写的是相对路径，脚本现在会自动把报告落到系统临时目录下的 `memory-palace-reports/`；如果你想完全自己控制落点，优先传仓库外的绝对路径。
 它默认使用隔离临时库，不会碰你的正式库；但失败时仍可能把 stderr、日志或临时目录路径写进报告。准备转发给别人前，先自己看一遍内容。
-现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：跟进修复完成后，backend `1039 passed, 22 skipped`、frontend `173 passed`、frontend `npm run typecheck` 通过、frontend build 通过，并额外补跑了一轮 repo-local macOS `Profile B` 真实浏览器 smoke。repo-local live MCP e2e 的上一次通过结果仍然保留在公开基线里，但这轮 2026-04-19 补跑本身**没有**再重跑 live MCP e2e 或 benchmark 表格。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
+现在这条脚本会跟用户实际连接时一样，优先走 repo-local wrapper。它也会把 wrapper 行为和 `compact_context` 的 gist 持久化一起带上复核，而不只是检查工具清单。本 session 当前公开验证补充口径是：backend `1063 passed, 22 skipped`、frontend `181 passed`、frontend build / typecheck 通过，并补跑了 repo-local macOS `Profile B` 真实浏览器 smoke 和 repo-local live MCP e2e（全 `PASS`）。skill smoke 也已重跑：`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿。这意味着 repo-local live MCP 路径已重新确认，但各 CLI / IDE host 仍保留自己的宿主边界。Docker one-click 的 `Profile C/D` 以及原生 Windows / Linux 宿主 runtime 这轮继续保留目标环境复核边界。
 
 这两份报告主要用来复核当前环境的结果，不是主入口文档。
 

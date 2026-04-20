@@ -53,7 +53,7 @@
 >
 > **补充说明**：C/D 模板默认走 `router` 路线；如果你的部署不使用统一 router，也可以直接配置 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` 连接 OpenAI-compatible 服务。
 >
-> **首启向导口径也一样**：向导里的 `Profile C` / `Profile D` 只是分别预填一组更像“本地/private router”或“远程 router”的建议起点，不代表你已经完成配置。真正保存前，仍然要把 router 的必填地址 / 模型字段换成你自己的真实值；如果你不走 router，也可以直接切到 `api` / `openai` embedding backend。`openai` 是 embedding backend 选项，不是额外新增的新档位。这里填写的 API base 口径也和后端一致：请填服务 base/root（通常到 `/v1`），不要手动写成 `/embeddings`、`/rerank`、`/chat/completions` 这种具体接口路径；常见尾缀会自动去掉，但格式不对或指到 link-local 的地址会直接 fail-closed。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意把 provider base 指到其它 private IP 字面量，还要先通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。
+> **首启向导口径也一样**：向导里的 `Profile C` / `Profile D` 只是分别预填一组更像“本地/private router”或“远程 router”的建议起点，不代表你已经完成配置。真正保存前，仍然要把 router 的必填地址 / 模型字段换成你自己的真实值；如果你不走 router，也可以直接切到 `api` / `openai` embedding backend。`openai` 是 embedding backend 选项，不是额外新增的新档位。这里填写的 API base 口径也和后端一致：请填服务 base/root（通常到 `/v1`），不要手动写成 `/embeddings`、`/rerank`、`/chat/completions` 这种具体接口路径；常见尾缀会自动去掉，但格式不对或指到 link-local 的地址会直接 fail-closed。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意把 provider base 指到其它 private IP 字面量，还要先通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。还有一个现在需要明说的边界：在非 Docker 的本地 checkout 上，如果当前还没有已配置的 Dashboard auth，而你第一次用向导保存的又是需要远端 provider chain 的配置，后端会先只 bootstrap `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL`；要让 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_*`、`INTENT_LLM_*` 真正写进 `.env`，需要在 auth 生效后再保存一次。
 >
 > **本地模板补一条**：仓库内的本地 `profile c/d` 模板现在也显式保留 `RUNTIME_AUTO_FLUSH_ENABLED=true`，所以通过 `apply_profile.sh/.ps1` 生成的 `.env`，默认会和 A/B 一样继续保留 auto-flush。
 >
@@ -118,7 +118,7 @@ C 和 D 的算法路径相同，均使用 `router` 后端调用 OpenAI-compatibl
 > - **Profile D**：沿用同一条 Embedding + Reranker 检索链路，但默认指向远程端点，且 reranker 权重更高
 > - `WRITE_GUARD_LLM_*`、`COMPACT_GIST_LLM_*`、`INTENT_LLM_*` 不是检索 smoke 的硬前提
 >
-> 当前仓库附带的 real-profile helper 和这里的“最少准备什么”说法，只是在强调更深检索首先新增的是 Embedding 依赖；它**不等于**仓库自带 `profile-c` 模板会默认关闭 Reranker。按当前模板，`Profile C` 仍是本地/private API 优先且默认启用 Reranker，`Profile D` 则是在同一条检索链路上切到 remote API 并给更高的默认 reranker 权重。本地小样本 smoke 也已经按这组实际模板重新核对过。这不是在说你可以对同一批旧向量“智能切档”。
+> 当前仓库附带的 real-profile helper 和这里的“最少准备什么”说法，只是在强调更深检索首先新增的是 Embedding 依赖；它**不等于**仓库自带 `profile-c` 模板会默认关闭 Reranker。`backend/tests/benchmark/helpers/profile_abcd_real_runner.py` 里的 helper 目前使用的是 benchmark-only 语义：`profile_c = API embedding 且不带 reranker`，`profile_d = API embedding + reranker`。而按当前模板，`Profile C` 仍是本地/private API 优先且默认启用 Reranker，`Profile D` 则是在同一条检索链路上切到 remote API 并给更高的默认 reranker 权重。本地小样本 smoke 也已经按这组实际模板重新核对过。这不是在说你可以对同一批旧向量“智能切档”。
 >
 > **再强调一次**：Profile B 默认是 64 维 hash 向量；Profile C/D 则取决于你实际配置的外部 embedding 维度。只要 backend / model / dim 变了，就要把“旧索引可能需要重建”当成前置条件，而不是当成故障后的附加排障动作。
 
@@ -177,6 +177,8 @@ RETRIEVAL_RERANKER_WEIGHT=0.35                     # 远程推荐略高
 ```
 
 > **🔑 C/D 第一调参项**：`RETRIEVAL_RERANKER_WEIGHT`，建议范围 `0.20 ~ 0.40`，以 `0.05` 步长微调。
+>
+> **补一条口径区分**：这里的 `0.30 / 0.35` 仍是 shipped `Profile C/D` 模板的显式默认值；generic `.env.example` 里的运行时 fallback 默认值现在是 `0.40`，两者不是同一个层级。
 >
 > **模型 ID 提醒**：上面的 `your-embedding-model-id` / `your-reranker-model-id` 只是 shell-safe 占位示例。项目本身不绑定某个固定模型家族；请直接填写你自己的 provider 实际 model id。
 > 如果你使用 `profile c/d`，无论是先跑 `apply_profile.sh/.ps1`，还是继续走 `docker_one_click.sh/.ps1`，这些占位 model id / endpoint / key 都会被当成未解析配置；脚本会先直接拦下，而不是等容器启动后再暴露错误。
@@ -477,7 +479,7 @@ MEMORY_PALACE_API_PROXY_TARGET=http://127.0.0.1:18000 npm run dev -- --host 127.
 ```bash
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
 
-这条 `/sse` 代理是刻意保留的本地开发路径，主要给 Vite 同源下的 EventSource / MCP 调试复用；前端现在已经有独立的 `frontend/src/lib/sse.js` 来走这条路径。
+这条 `/sse` 代理是刻意保留的本地开发路径，主要给 Vite 同源下的 SSE / MCP 调试复用；前端现在已经有共享的 `frontend/src/lib/sse.js` 来走这条路径。没有浏览器侧鉴权时它仍走轻量原生 `EventSource`；有鉴权时会切到可带 header 的 fetch-based SSE，并在非终态断流后自动重连。
 ```
 
 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起转发到你本机单独启动的 `run_sse.py`，仅用于本地 Vite 开发入口联调。

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -83,6 +84,44 @@ async def test_apply_vitality_decay_is_daily_idempotent(tmp_path: Path) -> None:
     assert second["applied"] is False
     assert second["reason"] == "already_applied_today"
     assert third["applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_vitality_decay_status_does_not_wait_for_inflight_decay() -> None:
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    class _BlockingClient:
+        async def apply_vitality_decay(
+            self, *, force: bool = False, reason: str = "runtime"
+        ) -> Dict[str, Any]:
+            started.set()
+            await release.wait()
+            return {
+                "applied": True,
+                "forced": force,
+                "reason": reason,
+            }
+
+    coordinator = VitalityDecayCoordinator()
+    run_task = asyncio.create_task(
+        coordinator.run_decay(
+            client_factory=lambda: _BlockingClient(),
+            force=True,
+            reason="test",
+        )
+    )
+    await started.wait()
+
+    status = await asyncio.wait_for(coordinator.status(), timeout=0.1)
+
+    release.set()
+    result = await run_task
+
+    assert status["reason"] == "not_started"
+    assert status["check_interval_seconds"] > 0
+    assert result["applied"] is True
+    assert result["forced"] is True
 
 
 @pytest.mark.asyncio

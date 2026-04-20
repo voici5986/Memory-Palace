@@ -189,7 +189,9 @@ On the shell-wrapper path (`macOS / Linux / Git Bash / WSL`), `run_memory_palace
 - **Frontend Page**: You can also directly click `Set API key` / `Update API key` in the top right corner.
   - The current version opens the first-run setup assistant first.
   - If you only need the Dashboard to authenticate, prefer **Save dashboard key only**.
+  - Once the browser already has a Dashboard key, Observability switches to header/bearer-capable fetch-based SSE; explicit `4xx` auth failures stop the retry loop, so treat those as key/session issues first.
   - Only use the `.env` write path on a non-Docker local checkout.
+  - If there is still no Dashboard auth and that first local save already includes remote/provider-chain settings, the backend first performs only the auth bootstrap; the remote embedding/reranker/LLM fields land on a later authenticated save.
 
 - **Local Debugging**: You can set an insecure local override (effective only for loopback):
 
@@ -613,7 +615,7 @@ If this command can normally output the version number, starting `mcp_server.py`
 
    > If your local service does not require an API key, drop the `Authorization` header. If the embedding provider rejects `dimensions`, the runtime retries once without that field, but the final vector size still needs to match `RETRIEVAL_EMBEDDING_DIM`.
    >
-   > If you switch to a remote embedding backend through the Setup Assistant, the saved config now also needs the real `RETRIEVAL_EMBEDDING_DIM`; the assistant persists that value together with the backend choice. `openai` is also a supported embedding backend there now. If the backend config is correct but existing vectors still use an older dimension, rebuild the affected scope.
+   > If you switch to a remote embedding backend through the Setup Assistant, the saved config still needs the real `RETRIEVAL_EMBEDDING_DIM`. On a normal authenticated save, the assistant persists that value together with the backend choice. On a first local save that is still only bootstrapping Dashboard auth, those remote/provider-chain fields may not land until the next save. `openai` is also a supported embedding backend there now. If the backend config is correct but existing vectors still use an older dimension, rebuild the affected scope.
 
    > **Suggested troubleshooting order**:
    > - First confirm if you are currently using the `router` solution, or directly configuring `RETRIEVAL_EMBEDDING_*`, `RETRIEVAL_RERANKER_*`, `WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*` separately.
@@ -638,7 +640,7 @@ If this command can normally output the version number, starting `mcp_server.py`
      -H "X-MCP-API-Key: <YOUR_MCP_API_KEY>"
    ```
 
-5. **Check configuration parameters**: Confirm `RETRIEVAL_RERANKER_WEIGHT` is in a reasonable range (`.env.example` comments suggest `0.20 ~ 0.40`, default `0.25`).
+5. **Check configuration parameters**: Confirm `RETRIEVAL_RERANKER_WEIGHT` is in a reasonable range (`.env.example` comments suggest `0.20 ~ 0.40`, generic default `0.40`; shipped `Profile C/D` templates still use their own explicit values).
 
 6. **Don't panic when seeing new fields on the observation page**:
 

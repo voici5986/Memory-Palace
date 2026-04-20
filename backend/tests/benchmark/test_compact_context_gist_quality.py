@@ -10,12 +10,16 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from helpers.common import load_thresholds_v1
+from helpers.common import (
+    BENCHMARK_ARTIFACT_DIR,
+    benchmark_artifact_path,
+    load_thresholds_v1,
+)
 
 
 GIST_GOLD_SET_PATH = BENCHMARK_DIR.parent / "fixtures" / "compact_context_gist_gold_set.jsonl"
-GIST_JSON_ARTIFACT = BENCHMARK_DIR / "compact_context_gist_quality_metrics.json"
-GIST_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "compact_context_gist_quality_metrics.md"
+GIST_JSON_ARTIFACT = benchmark_artifact_path("compact_context_gist_quality_metrics.json")
+GIST_MARKDOWN_ARTIFACT = benchmark_artifact_path("compact_context_gist_quality_metrics.md")
 
 
 def _load_gold_rows() -> List[Dict[str, Any]]:
@@ -68,6 +72,7 @@ def _rouge_l_f1(reference: str, candidate: str) -> float:
 
 
 def _write_artifacts(payload: Dict[str, Any]) -> None:
+    GIST_JSON_ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     GIST_JSON_ARTIFACT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -123,5 +128,7 @@ def test_compact_context_gist_quality_threshold_and_artifacts() -> None:
 
     assert payload["gate_pass"] is True
     assert all(0.0 <= float(row["rouge_l"]) <= 1.0 for row in case_rows)
+    assert GIST_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert GIST_JSON_ARTIFACT.parent != BENCHMARK_DIR
     assert GIST_JSON_ARTIFACT.exists()
     assert GIST_MARKDOWN_ARTIFACT.exists()

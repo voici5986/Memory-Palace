@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 import pytest
 
-import runtime_state as runtime_state_module
 from runtime_state import ReflectionLaneCoordinator
 
 
@@ -15,13 +14,18 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from helpers.common import load_thresholds_v1
+from helpers.common import (
+    BENCHMARK_ARTIFACT_DIR,
+    benchmark_artifact_path,
+    load_thresholds_v1,
+)
 
 
-REFLECTION_LANE_JSON_ARTIFACT = BENCHMARK_DIR / "reflection_lane_metrics.json"
+REFLECTION_LANE_JSON_ARTIFACT = benchmark_artifact_path("reflection_lane_metrics.json")
 
 
 def _write_artifact(payload: Dict[str, Any]) -> None:
+    REFLECTION_LANE_JSON_ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     REFLECTION_LANE_JSON_ARTIFACT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -34,34 +38,36 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
 ) -> None:
     monkeypatch.setenv("RUNTIME_REFLECTION_LANE_ENABLED", "true")
     monkeypatch.setenv("RUNTIME_REFLECTION_GLOBAL_CONCURRENCY", "1")
-    monkeypatch.setenv("RUNTIME_REFLECTION_ACQUIRE_TIMEOUT_SECONDS", "0.001")
-    real_wait_for = runtime_state_module.asyncio.wait_for
-    call_count = 0
+    monkeypatch.setenv("RUNTIME_REFLECTION_ACQUIRE_TIMEOUT_SECONDS", "0.1")
 
-    async def _fake_wait_for(awaitable, timeout):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            if asyncio.iscoroutine(awaitable):
-                awaitable.close()
-            raise asyncio.TimeoutError()
-        return await real_wait_for(awaitable, timeout)
-
-    monkeypatch.setattr(runtime_state_module.asyncio, "wait_for", _fake_wait_for)
     lane = ReflectionLaneCoordinator()
+    started = asyncio.Event()
+    release = asyncio.Event()
 
-    await lane.run_reflection(
-        operation="reflection_success",
-        task=lambda: asyncio.sleep(0.001, result="ok"),
+    async def _hold_lane() -> str:
+        started.set()
+        await release.wait()
+        return "ok"
+
+    first_task = asyncio.create_task(
+        lane.run_reflection(
+            operation="reflection_success",
+            task=_hold_lane,
+        )
     )
+    await started.wait()
+
     timeout_error = ""
     try:
         await lane.run_reflection(
             operation="reflection_timeout",
-            task=lambda: asyncio.sleep(0.01, result="late"),
+            task=lambda: asyncio.sleep(0, result="late"),
         )
     except RuntimeError as exc:
         timeout_error = str(exc)
+    finally:
+        release.set()
+        await first_task
 
     status = await lane.status()
     thresholds = load_thresholds_v1()["reflection_lane"]
@@ -87,4 +93,6 @@ async def test_reflection_lane_metrics_threshold_and_artifacts(
     assert int(payload["timeout_degrade_correct"]) == int(
         thresholds["timeout_degrade_correct_eq"]
     )
+    assert REFLECTION_LANE_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert REFLECTION_LANE_JSON_ARTIFACT.parent != BENCHMARK_DIR
     assert REFLECTION_LANE_JSON_ARTIFACT.exists()

@@ -146,6 +146,7 @@ The frontend does not hardcode keys at build time; instead, it reads them via ru
 1. `readRuntimeMaintenanceAuth()` reads `window.__MEMORY_PALACE_RUNTIME__`
 2. axios request interceptor `isProtectedApiRequest()` determines if the request needs authentication
 3. Automatically injects authentication headers for `/maintenance/*`, `/review/*`, `/browse/*`, and the new `/setup/*`
+4. Observability now reuses the same auth path for `/sse`: without a browser-side Dashboard key it stays on native `EventSource`; with a key it switches to fetch-based SSE so the same header/bearer auth can be sent without putting the key in the URL, transient disconnects can reconnect automatically, and terminal `4xx` auth failures stop retrying
 
 > Compatibility: Also supports the old field name `window.__MCP_RUNTIME_CONFIG__` (see the runtime config fallback logic in `frontend/src/lib/api.js`).
 
@@ -164,6 +165,7 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - when the current process is running inside Docker, the assistant explicitly returns `setup_apply_unsupported` and stays in guidance mode instead of pretending it persisted container env / proxy changes
 - existing secrets are never echoed back into the UI; the frontend only receives masked “configured vs missing” summaries
 - only the Dashboard `MCP_API_KEY` may be stored in the current browser session's `sessionStorage`; embedding / reranker / LLM provider keys are not stored in the browser. If a legacy `localStorage` value is detected, the frontend still only migrates it forward once, but now only removes the old copy when it can confirm that `localStorage` still holds that same old value. This avoids one tab deleting a newer value that was just written by another tab.
+- Observability `/sse` subscriptions now follow that same browser-side Dashboard auth path: without a browser-side key they stay on native `EventSource`; with a key they switch to fetch-based SSE. This keeps the key out of the URL, still allows reconnect after transient disconnects, and stops retrying on terminal `4xx` auth failures.
 - when you switch profiles or turn optional providers back off, the assistant now clears hidden stale router / API fields before saving. In plain language: once a field is no longer active on screen, the browser no longer quietly keeps the old secret around for the next save.
 - for remote embedding backends, the assistant now persists the actual `RETRIEVAL_EMBEDDING_DIM` together with the backend selection, and `openai` is part of the supported embedding backend list.
 - provider API base fields now go through normalization and validation first: common suffixes such as `/embeddings`, `/rerank`, `/chat/completions`, and `/responses` are trimmed automatically; malformed, credential-bearing, or link-local targets are rejected before save. Loopback IP literals such as `127.0.0.1` / `::1`, plus `localhost`, still stay allowed by default; if you intentionally point at another private IP literal, add it to `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` first.
@@ -175,8 +177,10 @@ The current release adds a Dashboard first-run setup assistant, but it is not a 
 - `backend/tests/test_setup_api.py` — Verifies loopback access, remote auth, white-listed `.env` writes, explicit remote embedding-dimension requirements, the runtime-default `/setup/status` summary, and Docker fail-closed behavior
 - `backend/tests/test_reflection_workflow_api.py` — Verifies reflection rollback still checks an explicitly supplied `session_id`, can recover the original `session_id` when only `job_id` is provided, and still performs best-effort namespace cleanup after the review rollback path
 - `frontend/src/App.test.jsx` — Verifies first-run auto-open behavior, including the browser-only Dashboard-key flow on the proxy-backed path
+- `frontend/src/features/observability/ObservabilityPage.test.jsx` — Verifies Observability switches to the auth-capable SSE path when browser auth exists and refreshes summary after receiving events
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — Verifies the Memory page blocks destructive actions when confirm is unavailable
 - `frontend/src/lib/api.contract.test.js` — Verifies `/setup/*` also goes through the unified auth-header injection path
+- `frontend/src/lib/sse.test.js` — Verifies the auth-capable fetch-based SSE path reconnects after transient disconnects and stops retrying on terminal `4xx` auth failures
 
 **Default approach for Docker one-click deployment is different:**
 

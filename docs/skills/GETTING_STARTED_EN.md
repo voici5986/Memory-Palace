@@ -269,7 +269,7 @@ Conclusion:
 - **The more stable default is still to start with `--scope user --with-mcp`**
 - If you also want a workspace entry in the current repository, add a workspace install afterwards.
 - If you see `Policy file warning in memory-palace-overrides.toml`, rerun `--scope user --with-mcp --force` first.
-- When documenting it for others, keep the wording conservative: regular smoke can be rerun separately, while `gemini_live` remains an explicit opt-in live verification path.
+- When documenting it for others, keep the wording conservative: regular `gemini` smoke passed in this session on the audited machine, while `gemini_live` remains an explicit opt-in path and stays `SKIP` by default.
 
 ### Codex CLI
 
@@ -282,12 +282,7 @@ Conclusion:
 - The accurate statement is:
   - Skill is repo-local auto-discoverable
   - MCP still primarily relies on user-scope registration
-- The safer public wording for `Codex` is: the skill is still repo-locally auto-discoverable, MCP still primarily goes through user-scope registration, and unless you have just rerun smoke on the target machine, do not describe it as "fully passed on this machine." In the current implementation, `mcp_bindings` / smoke should still be treated as `PARTIAL`:
-  - the user-scope MCP binding is aligned to the current repository
-  - `codex exec` smoke can still stop at `PARTIAL` because of timeout or
-    missing structured output
-  - the safer public wording is therefore "wired and reviewable on this
-    machine," not "fully passed everywhere"
+- The safer public wording for `Codex` is: the skill is still repo-locally auto-discoverable, MCP still primarily goes through user-scope registration, and this session's repo-local smoke passed on the audited machine. Keep that as a machine-scoped verification result rather than a blanket all-host guarantee.
 
 ### OpenCode
 
@@ -375,7 +370,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 Similarly, this report is a local artifact that "appears after running"; it is normal that it's not in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 It uses an isolated temporary database by default and won't touch your formal database; however, it may still write stderr, logs, or temporary directory paths into the report upon failure. Check the content yourself before forwarding it to others.
-This script now follows the same repo-local wrapper path that users actually connect to. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification note for this session is: after the follow-up fixes, backend tests are `1039 passed, 22 skipped`, frontend tests stay at `173 passed`, frontend `npm run typecheck` and frontend build both passed, and a repo-local macOS `Profile B` browser smoke was rerun. The last repo-local live MCP e2e pass still remains part of the public baseline, but this 2026-04-19 follow-up round did **not** rerun live MCP e2e or the benchmark tables. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
+This script now follows the same repo-local wrapper path that users actually connect to. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification note for this session is: backend tests are `1063 passed, 22 skipped`, frontend tests are `181 passed`, frontend build/typecheck both passed, and both a repo-local macOS `Profile B` browser smoke and repo-local live MCP e2e were rerun (`PASS`). Skill smoke was rerun as well: `claude`, `codex`, and `gemini` passed in this session; `cursor` / `agent` / `antigravity` remain `PARTIAL`; and `gemini_live` stays `SKIP`. `OpenCode` hit one timeout in the full multi-CLI sweep but passed on the immediate standalone rerun, so keep that result framed as a host-side fluctuation rather than a stable all-host `PASS` claim. In plain language: the repo-local live MCP path is rechecked, but each CLI / IDE host still keeps its own host-side boundary. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
 
 These two reports are primarily for reviewing results in the current environment and are not main entry documents.
 

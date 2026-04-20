@@ -36,6 +36,7 @@ _PRE_DOTENV_ENV_KEYS_MARKER = "MEMORY_PALACE_PRE_DOTENV_ENV_KEYS"
 _SETUP_MANAGED_ENV_KEYS = {
     "MCP_API_KEY",
     "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
+    "SEARCH_DEFAULT_MODE",
     "RETRIEVAL_EMBEDDING_BACKEND",
     "RETRIEVAL_EMBEDDING_API_BASE",
     "RETRIEVAL_EMBEDDING_API_KEY",
@@ -292,6 +293,28 @@ def _resolve_embedding_dim_update(payload: SetupConfigRequest) -> Optional[str]:
         return ""
 
     return None
+
+
+def _resolve_search_default_mode_update(payload: SetupConfigRequest) -> str:
+    if payload.embedding_backend == "none":
+        return "keyword"
+    return "hybrid"
+
+
+def _requires_followup_provider_chain_save(payload: SetupConfigRequest) -> bool:
+    return (
+        payload.embedding_backend in _REMOTE_EMBEDDING_BACKENDS
+        or payload.reranker_enabled
+        or payload.write_guard_llm_enabled
+        or payload.intent_llm_enabled
+    )
+
+
+def _should_limit_bootstrap_write(payload: SetupConfigRequest) -> bool:
+    return (
+        not _get_configured_mcp_api_key()
+        and _requires_followup_provider_chain_save(payload)
+    )
 
 
 def _build_summary() -> Dict[str, Any]:
@@ -565,16 +588,28 @@ def _validate_setup_payload(payload: SetupConfigRequest) -> None:
     _enforce_setup_bootstrap_policy(payload)
 
 
-def _build_env_updates(payload: SetupConfigRequest) -> Dict[str, str]:
+def _build_env_updates(
+    payload: SetupConfigRequest,
+    *,
+    bootstrap_minimal: bool = False,
+) -> Dict[str, str]:
     updates: Dict[str, str] = {
         "MCP_API_KEY_ALLOW_INSECURE_LOCAL": _bool_to_env(payload.allow_insecure_local),
-        "RETRIEVAL_EMBEDDING_BACKEND": payload.embedding_backend,
-        "RETRIEVAL_RERANKER_ENABLED": _bool_to_env(payload.reranker_enabled),
-        "WRITE_GUARD_LLM_ENABLED": _bool_to_env(payload.write_guard_llm_enabled),
-        "INTENT_LLM_ENABLED": _bool_to_env(payload.intent_llm_enabled),
     }
 
     _set_optional_update(updates, "MCP_API_KEY", payload.dashboard_api_key)
+    if bootstrap_minimal:
+        return updates
+
+    updates.update(
+        {
+            "SEARCH_DEFAULT_MODE": _resolve_search_default_mode_update(payload),
+            "RETRIEVAL_EMBEDDING_BACKEND": payload.embedding_backend,
+            "RETRIEVAL_RERANKER_ENABLED": _bool_to_env(payload.reranker_enabled),
+            "WRITE_GUARD_LLM_ENABLED": _bool_to_env(payload.write_guard_llm_enabled),
+            "INTENT_LLM_ENABLED": _bool_to_env(payload.intent_llm_enabled),
+        }
+    )
 
     direct_embedding_backend = payload.embedding_backend in {"api", "openai"}
     if direct_embedding_backend:
@@ -787,7 +822,10 @@ async def save_setup_config(payload: SetupConfigRequest) -> Dict[str, Any]:
         )
 
     _validate_setup_payload(payload)
-    updates = _build_env_updates(payload)
+    updates = _build_env_updates(
+        payload,
+        bootstrap_minimal=_should_limit_bootstrap_write(payload),
+    )
     if not updates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

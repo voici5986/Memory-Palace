@@ -570,7 +570,7 @@ class SQLiteClient:
         )
         self._validate_active_provider_placeholders()
         self._rerank_weight = min(
-            1.0, max(0.0, self._env_float("RETRIEVAL_RERANKER_WEIGHT", 0.25))
+            1.0, max(0.0, self._env_float("RETRIEVAL_RERANKER_WEIGHT", 0.4))
         )
         self._chunk_size = max(128, self._env_int("RETRIEVAL_CHUNK_SIZE", 500))
         self._chunk_overlap = max(
@@ -653,8 +653,13 @@ class SQLiteClient:
         self._sqlite_vec_extension_path = self._first_env(
             ["RETRIEVAL_SQLITE_VEC_EXTENSION_PATH"]
         )
-        self._vector_engine_requested = self._normalize_vector_engine(
-            os.getenv("RETRIEVAL_VECTOR_ENGINE", "legacy")
+        raw_vector_engine = os.getenv("RETRIEVAL_VECTOR_ENGINE", "legacy")
+        (
+            self._vector_engine_requested,
+            self._vector_engine_warning,
+        ) = self._normalize_vector_engine(raw_vector_engine, return_warning=True)
+        self._vector_engine_requested_raw = (
+            str(raw_vector_engine or "").strip().lower() or "legacy"
         )
         self._sqlite_vec_read_ratio = min(
             100, max(0, self._env_int("RETRIEVAL_SQLITE_VEC_READ_RATIO", 0))
@@ -1484,8 +1489,20 @@ class SQLiteClient:
         )
         self._sync_set_index_meta(
             connection,
+            "vector_engine_requested_raw",
+            self._vector_engine_requested_raw,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
             "vector_engine_effective",
             self._vector_engine_effective,
+            now,
+        )
+        self._sync_set_index_meta(
+            connection,
+            "vector_engine_warning",
+            str(self._vector_engine_warning or ""),
             now,
         )
         self._sync_set_index_meta(
@@ -1955,10 +1972,18 @@ class SQLiteClient:
             return ""
 
     @staticmethod
-    def _normalize_vector_engine(value: Optional[str]) -> str:
+    def _normalize_vector_engine(
+        value: Optional[str],
+        *,
+        return_warning: bool = False,
+    ) -> Any:
         engine = str(value or "legacy").strip().lower() or "legacy"
         if engine in {"legacy", "vec", "dual"}:
+            if return_warning:
+                return engine, None
             return engine
+        if return_warning:
+            return "legacy", f"unsupported_vector_engine:{engine}"
         return "legacy"
 
     @staticmethod
@@ -6350,7 +6375,9 @@ class SQLiteClient:
         }
         vector_engine_metadata = {
             "vector_engine_requested": self._vector_engine_requested,
+            "vector_engine_requested_raw": self._vector_engine_requested_raw,
             "vector_engine_effective": self._vector_engine_effective,
+            "vector_engine_warning": self._vector_engine_warning,
             "vector_engine_selected": "legacy",
             "vector_engine_path": "not_applicable",
             "indexed_vector_dims": [],
@@ -7182,7 +7209,9 @@ class SQLiteClient:
                     "sqlite_vec_knn_ready": bool(self._sqlite_vec_knn_ready),
                     "sqlite_vec_knn_dim": int(self._sqlite_vec_knn_dim),
                     "vector_engine_requested": self._vector_engine_requested,
+                    "vector_engine_requested_raw": self._vector_engine_requested_raw,
                     "vector_engine_effective": self._vector_engine_effective,
+                    "vector_engine_warning": self._vector_engine_warning,
                     "runtime_write_wal_enabled": self._runtime_write_wal_enabled,
                     "runtime_write_journal_mode_requested": self._runtime_write_journal_mode_requested,
                     "runtime_write_journal_mode_effective": self._runtime_write_journal_mode_effective,

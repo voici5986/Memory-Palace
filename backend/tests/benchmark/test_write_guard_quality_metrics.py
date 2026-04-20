@@ -13,12 +13,16 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from helpers.common import load_thresholds_v1
+from helpers.common import (
+    BENCHMARK_ARTIFACT_DIR,
+    benchmark_artifact_path,
+    load_thresholds_v1,
+)
 
 
 WRITE_GUARD_GOLD_SET_PATH = BENCHMARK_DIR.parent / "fixtures" / "write_guard_gold_set.jsonl"
-WRITE_GUARD_JSON_ARTIFACT = BENCHMARK_DIR / "write_guard_quality_metrics.json"
-WRITE_GUARD_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "write_guard_quality_metrics.md"
+WRITE_GUARD_JSON_ARTIFACT = benchmark_artifact_path("write_guard_quality_metrics.json")
+WRITE_GUARD_MARKDOWN_ARTIFACT = benchmark_artifact_path("write_guard_quality_metrics.md")
 _SQLITE_MEMORY_URL = "sqlite+aiosqlite:///:memory:"
 _PHASE5_DATASETS = ("beir_nq", "beir_hotpotqa", "beir_fiqa")
 
@@ -131,6 +135,7 @@ def _compute_precision_recall(cases: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _write_artifacts(payload: Dict[str, Any]) -> None:
+    WRITE_GUARD_JSON_ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     WRITE_GUARD_JSON_ARTIFACT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -232,5 +237,7 @@ async def test_write_guard_quality_metrics_threshold_and_artifacts(
     assert payload["gates"]["precision_pass"] is True
     assert payload["gates"]["recall_pass"] is True
     assert payload["gates"]["overall_pass"] is True
+    assert WRITE_GUARD_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert WRITE_GUARD_JSON_ARTIFACT.parent != BENCHMARK_DIR
     assert WRITE_GUARD_JSON_ARTIFACT.exists()
     assert WRITE_GUARD_MARKDOWN_ARTIFACT.exists()

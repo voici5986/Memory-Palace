@@ -148,6 +148,7 @@ Authorization: Bearer <MCP_API_KEY>
 1. `readRuntimeMaintenanceAuth()` 读取 `window.__MEMORY_PALACE_RUNTIME__`
 2. axios 请求拦截器 `isProtectedApiRequest()` 判断请求是否需要鉴权
 3. 对 `/maintenance/*`、`/review/*`、`/browse/*` 以及新的 `/setup/*` 自动注入鉴权头
+4. Observability 订阅 `/sse` 时也会复用这套鉴权：没有浏览器侧 Dashboard key 时继续走原生 `EventSource`；有 key 时切到可带 header/bearer 的 fetch-based SSE，这样不会把 key 拼到 URL 里，临时断流还能自动重连，明确的 `4xx` 鉴权失败则会停止重试
 
 > 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（见 `frontend/src/lib/api.js` 中的 runtime config fallback 逻辑）。
 >
@@ -168,6 +169,7 @@ Authorization: Bearer <MCP_API_KEY>
 - 如果当前进程运行在 Docker 内部，向导会明确返回 `setup_apply_unsupported`，停留在说明模式，不会伪装成已经持久化容器 env / 代理配置
 - 向导不会把现有 secret 值回显到前端；前端只能看到“是否已配置”的摘要状态
 - 浏览器本地只会把 Dashboard 使用的 `MCP_API_KEY` 放在当前浏览器会话的 `sessionStorage`；embedding / reranker / LLM key 不会保存在浏览器里。若检测到旧版 `localStorage` 值，前端仍只会做一次迁移，但现在只会在确认 `localStorage` 里还是**同一份旧值**时才删除它，避免多标签页并发迁移时误删另一标签页刚写入的新值。
+- Observability 的 `/sse` 订阅现在也跟随这条浏览器侧 Dashboard 鉴权：没有浏览器侧 key 时继续走原生 `EventSource`；有 key 时切到可带 header/bearer 的 fetch-based SSE。这样不会把 key 放进 URL，临时断流还能自动重连；明确的 `4xx` 鉴权失败则会停止重试。
 - 如果服务端 Dashboard 鉴权已经生效，前端不会只因为浏览器本地还没保存 Dashboard key 就自动弹出首启配置向导；这样能减少在 proxy-held key 部署里把真实 `MCP_API_KEY` 再存进浏览器的误操作。
 - 向导切档时，当前已经隐藏掉的旧字段会跟着本次保存一起清掉，减少把上一档残留的 router/API 字段继续带进本次提交的风险。
 - 切到远端 embedding backend 时，setup 保存会显式写入 `RETRIEVAL_EMBEDDING_DIM`；`/setup/config` 现在也支持 `openai` embedding backend。
@@ -180,7 +182,9 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 Docker fail-closed
 - `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 在已知 `session_id` 时会继续做一致性校验，只带 `job_id` 时会先恢复原始 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `frontend/src/App.test.jsx` — 验证首启自动弹出、“只保存 Dashboard 密钥”交互，以及 proxy-held auth 已生效时不误弹
+- `frontend/src/features/observability/ObservabilityPage.test.jsx` — 验证 Observability 在有浏览器侧鉴权时会改走可带鉴权头的 SSE 路径，并在事件到达后刷新 summary
 - `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
+- `frontend/src/lib/sse.test.js` — 验证带鉴权头的 fetch-based SSE 会在临时断流后重连，并在终态 `4xx` 鉴权失败时停止重试
 - `frontend/src/features/memory/MemoryBrowser.test.jsx` — 验证 `confirm()` 不可用时 Memory 页 fail-closed
 
 **Docker 一键部署的默认做法不一样：**

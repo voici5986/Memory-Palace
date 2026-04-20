@@ -405,6 +405,12 @@ def _python_command() -> str:
     return str(_require_backend_venv_python())
 
 
+def _render_launcher_path(path: Path, *, launcher: str) -> str:
+    if launcher == "bash" and os.name == "nt":
+        return path.as_posix()
+    return str(path)
+
+
 def _same_path(a: object, b: object) -> bool:
     return _normalized(a).lower() == _normalized(b).lower()
 
@@ -516,7 +522,7 @@ def _command_and_args(*, relative: bool) -> tuple[str, list[str]]:
         wrapper = python_wrapper_relative() if relative else python_wrapper_absolute()
         return _python_command(), [str(wrapper)]
     wrapper = shell_wrapper_relative() if relative else shell_wrapper_absolute()
-    return "bash", [str(wrapper)]
+    return "bash", [_render_launcher_path(wrapper, launcher=launcher)]
 
 
 def _claude_server_block(*, relative: bool) -> dict:

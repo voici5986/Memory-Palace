@@ -7,7 +7,7 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from helpers.common import load_thresholds_v1
+from helpers.common import BENCHMARK_ARTIFACT_DIR, load_thresholds_v1
 from helpers.profile_ab_runner import (
     PROFILE_JSON_ARTIFACT,
     PROFILE_MARKDOWN_ARTIFACTS,
@@ -69,6 +69,10 @@ def _assert_degradation_markdown_row(markdown: str, row: Dict[str, Any]) -> None
 def test_profile_a_latency_report_within_thresholds_and_json_consistent() -> None:
     payload = _run_profile_ab(sample_size=100)
     thresholds = load_thresholds_v1()
+
+    assert PROFILE_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert PROFILE_JSON_ARTIFACT.parent != BENCHMARK_DIR
+    assert PROFILE_MARKDOWN_ARTIFACTS["profile_a"].parent == BENCHMARK_ARTIFACT_DIR
 
     profile_a = payload["profiles"]["profile_a"]
     rows = profile_a["rows"]

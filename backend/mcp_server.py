@@ -228,6 +228,7 @@ FAST_INTERACTION_CANDIDATE_MULTIPLIER = _env_int(
     DEFAULT_SEARCH_CANDIDATE_MULTIPLIER,
     minimum=1,
 )
+FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER = 4
 DEEP_INTERACTION_CANDIDATE_MULTIPLIER = _env_int(
     "DEEP_INTERACTION_CANDIDATE_MULTIPLIER",
     8,
@@ -785,6 +786,8 @@ def _normalize_guard_decision(
 ) -> Dict[str, Any]:
     if not isinstance(decision, dict):
         decision = {}
+    has_method = "method" in decision
+    raw_method = str(decision.get("method") or "").strip()
     reason = str(decision.get("reason") or "").strip()
     has_action = "action" in decision
     raw_action = str(decision.get("action") or "").strip().upper() if has_action else ""
@@ -799,7 +802,29 @@ def _normalize_guard_decision(
         marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
         marker = f"invalid_guard_action:{marker_value}"
         reason = marker if not reason else f"{marker}; {reason}"
-    method = str(decision.get("method") or "none").strip().lower() or "none"
+    degrade_reasons = decision.get("degrade_reasons")
+    if not isinstance(degrade_reasons, list):
+        degrade_reasons = []
+    degrade_reasons = [item for item in degrade_reasons if isinstance(item, str) and item]
+    method = raw_method.lower() or "none"
+    valid_methods = {
+        "none",
+        "unknown",
+        "keyword",
+        "embedding",
+        "llm",
+        "write_guard_llm",
+        "exception",
+    }
+    invalid_method = False
+    if method not in valid_methods:
+        invalid_method = True
+        method_marker = method or ("empty" if has_method else "missing")
+        marker = f"invalid_guard_method:{method_marker}"
+        reason = marker if not reason else f"{marker}; {reason}"
+        if "guard_method_invalid" not in degrade_reasons:
+            degrade_reasons.append("guard_method_invalid")
+        method = "unknown"
     target_id = decision.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -807,20 +832,16 @@ def _normalize_guard_decision(
     if not isinstance(target_uri, str) or not target_uri.strip():
         target_uri = None
 
-    degrade_reasons = decision.get("degrade_reasons")
-    if not isinstance(degrade_reasons, list):
-        degrade_reasons = []
-    degrade_reasons = [item for item in degrade_reasons if isinstance(item, str) and item]
-
     return {
         "action": action,
         "method": method,
         "reason": reason,
         "target_id": target_id,
         "target_uri": target_uri,
-        "degraded": bool(decision.get("degraded")),
+        "degraded": bool(decision.get("degraded")) or invalid_method,
         "degrade_reasons": degrade_reasons,
         "invalid_action": invalid_action,
+        "invalid_method": invalid_method,
     }
 
 
@@ -832,6 +853,7 @@ def _guard_fields(decision: Dict[str, Any]) -> Dict[str, Any]:
         "guard_target_id": decision.get("target_id"),
         "guard_target_uri": decision.get("target_uri"),
         "guard_invalid_action": bool(decision.get("invalid_action")),
+        "guard_invalid_method": bool(decision.get("invalid_method")),
     }
 
 
@@ -2278,7 +2300,6 @@ async def generate_gist(
     1) llm_gist
     2) extractive_bullets
     3) sentence_fallback
-    4) truncate_fallback
     """
     source = (summary or "").strip()
     if not source:
@@ -2364,7 +2385,7 @@ async def generate_gist(
     gist_text = _trim_sentence(flattened, limit=max(32, max_chars))
     payload = {
         "gist_text": gist_text,
-        "gist_method": "truncate_fallback",
+        "gist_method": "sentence_fallback",
         "quality": 0.3,
     }
     if degrade_reasons:
@@ -2399,7 +2420,7 @@ async def _flush_session_summary_to_memory(
 
             gist_payload = await generate_gist(summary, client=client)
             gist_text = str(gist_payload.get("gist_text") or "").strip()
-            gist_method = str(gist_payload.get("gist_method") or "truncate_fallback")
+            gist_method = str(gist_payload.get("gist_method") or "sentence_fallback")
             quality_value = gist_payload.get("quality")
             try:
                 gist_quality = float(quality_value)
@@ -3557,6 +3578,13 @@ def _recent_read_state_token(
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+async def _invalidate_recent_read_cache(uri: str) -> None:
+    await runtime_state.recent_reads.invalidate(
+        session_id=get_session_id(),
+        uri=uri,
+    )
 
 
 def _should_expose_index_lite_in_boot() -> bool:
@@ -5032,6 +5060,7 @@ async def delete_memory(uri: str) -> str:
             if isinstance(remove_result, dict)
             else {}
         )
+        await _invalidate_recent_read_cache(full_uri)
 
         try:
             await _record_session_hit(
@@ -5135,6 +5164,7 @@ async def add_alias(
             return result
 
         result = await _run_write_lane("add_alias", _write_task)
+        await _invalidate_recent_read_cache(result["new_uri"])
 
         try:
             await _record_session_hit(
@@ -5242,7 +5272,7 @@ async def search_memory(
             default_tier=DEFAULT_INTERACTION_TIER,
         )
         default_candidate_multiplier = (
-            FAST_INTERACTION_CANDIDATE_MULTIPLIER
+            FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER
             if interaction_tier == "fast"
             else DEEP_INTERACTION_CANDIDATE_MULTIPLIER
         )
@@ -5267,7 +5297,7 @@ async def search_memory(
         if interaction_tier == "fast":
             resolved_candidate_multiplier = min(
                 resolved_candidate_multiplier,
-                FAST_INTERACTION_CANDIDATE_MULTIPLIER,
+                FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER,
             )
         else:
             resolved_candidate_multiplier = min(

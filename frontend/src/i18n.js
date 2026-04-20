@@ -123,6 +123,7 @@ i18n
     interpolation: {
       escapeValue: false,
     },
+    returnNull: false,
     react: {
       useSuspense: false,
     },

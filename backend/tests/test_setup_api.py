@@ -400,32 +400,36 @@ def test_setup_config_refreshes_startup_dotenv_values_after_local_save(
 ) -> None:
     env_example = tmp_path / ".env.example"
     env_example.write_text(
-        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        "MCP_API_KEY=router-secret\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
         encoding="utf-8",
     )
     target_env = tmp_path / ".env"
     target_env.write_text(
-        "MCP_API_KEY=\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        "MCP_API_KEY=router-secret\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
         encoding="utf-8",
     )
 
     try:
         with monkeypatch.context() as scoped:
-            scoped.delenv("MCP_API_KEY", raising=False)
+            scoped.setenv("MCP_API_KEY", "router-secret")
             scoped.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
             scoped.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
             # Simulate main.py having already loaded the same .env into process env.
             scoped.setenv("MEMORY_PALACE_PRE_DOTENV_ENV_KEYS", "[]")
-            scoped.setenv("RETRIEVAL_EMBEDDING_BACKEND", "hash")
-            scoped.setenv("RETRIEVAL_EMBEDDING_DIM", "64")
+            scoped.setenv("RETRIEVAL_EMBEDDING_BACKEND", "router")
+            scoped.setenv("RETRIEVAL_EMBEDDING_DIM", "2048")
             _reload_setup_api()
             scoped.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+            scoped.setenv("MCP_API_KEY", "router-secret")
+            scoped.setenv("RETRIEVAL_EMBEDDING_BACKEND", "router")
+            scoped.setenv("RETRIEVAL_EMBEDDING_DIM", "2048")
 
             with _build_client() as client:
                 response = client.post(
                     "/setup/config",
+                    headers={"X-MCP-API-Key": "router-secret"},
                     json={
-                        "dashboard_api_key": "router-secret",
+                        "dashboard_api_key": "   ",
                         "allow_insecure_local": False,
                         "embedding_backend": "router",
                         "embedding_dim": 1024,
@@ -446,7 +450,7 @@ def test_setup_config_refreshes_startup_dotenv_values_after_local_save(
         _reset_setup_api_state()
 
 
-def test_setup_config_writes_seeded_env_and_refreshes_process_env(
+def test_setup_config_first_local_save_limits_persistence_to_local_auth_fields(
     monkeypatch, tmp_path: Path
 ) -> None:
     env_example = tmp_path / ".env.example"
@@ -499,10 +503,15 @@ def test_setup_config_writes_seeded_env_and_refreshes_process_env(
     body = response.json()
     assert body["ok"] is True
     assert body["summary"]["dashboard_auth_configured"] is True
-    assert body["summary"]["reranker_enabled"] is True
-    assert body["summary"]["write_guard_enabled"] is True
-    assert body["summary"]["intent_llm_enabled"] is True
+    assert body["summary"]["embedding_backend"] == "hash"
+    assert body["summary"]["reranker_enabled"] is False
+    assert body["summary"]["write_guard_enabled"] is False
+    assert body["summary"]["intent_llm_enabled"] is False
     assert body["immediate_env_refresh"] == [
+        "MCP_API_KEY",
+        "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
+    ]
+    assert body["saved_keys"] == [
         "MCP_API_KEY",
         "MCP_API_KEY_ALLOW_INSECURE_LOCAL",
     ]
@@ -510,12 +519,14 @@ def test_setup_config_writes_seeded_env_and_refreshes_process_env(
     written = target_env.read_text(encoding="utf-8")
     assert "MCP_API_KEY=local-secret" in written
     assert "MCP_API_KEY_ALLOW_INSECURE_LOCAL=true" in written
-    assert "RETRIEVAL_EMBEDDING_BACKEND=api" in written
-    assert "RETRIEVAL_EMBEDDING_DIM=1024" in written
-    assert "RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:9100/v1" in written
-    assert "RETRIEVAL_RERANKER_ENABLED=true" in written
-    assert "WRITE_GUARD_LLM_ENABLED=true" in written
-    assert "INTENT_LLM_ENABLED=true" in written
+    assert "RETRIEVAL_EMBEDDING_BACKEND=hash" in written
+    assert "RETRIEVAL_RERANKER_ENABLED=false" in written
+    assert "WRITE_GUARD_LLM_ENABLED=false" in written
+    assert "INTENT_LLM_ENABLED=false" in written
+    assert "RETRIEVAL_EMBEDDING_API_BASE=http://127.0.0.1:9100/v1" not in written
+    assert "RETRIEVAL_RERANKER_API_BASE=http://127.0.0.1:9200/v1" not in written
+    assert "WRITE_GUARD_LLM_API_BASE=http://127.0.0.1:9300/v1" not in written
+    assert "INTENT_LLM_API_BASE=http://127.0.0.1:9400/v1" not in written
     assert written.count("MCP_API_KEY=") == 1
 
     assert setup_api._get_configured_mcp_api_key() == "local-secret"
@@ -725,6 +736,53 @@ def test_setup_config_clears_hidden_router_and_llm_fields_when_switching_back_to
     assert "INTENT_LLM_MODEL=" in written
 
 
+def test_setup_config_persists_profile_b_with_hybrid_search_mode(
+    monkeypatch, tmp_path: Path
+) -> None:
+    env_example = tmp_path / ".env.example"
+    env_example.write_text(
+        "\n".join(
+            [
+                "MCP_API_KEY=",
+                "SEARCH_DEFAULT_MODE=keyword",
+                "RETRIEVAL_EMBEDDING_BACKEND=none",
+                "RETRIEVAL_RERANKER_ENABLED=false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    target_env = tmp_path / ".env"
+    target_env.write_text(env_example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
+    monkeypatch.delenv("SEARCH_DEFAULT_MODE", raising=False)
+    monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
+    monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
+
+    with _build_client() as client:
+        response = client.post(
+            "/setup/config",
+            json={
+                "dashboard_api_key": "local-secret",
+                "allow_insecure_local": False,
+                "embedding_backend": "hash",
+                "reranker_enabled": False,
+                "write_guard_llm_enabled": False,
+                "intent_llm_enabled": False,
+            },
+        )
+
+    assert response.status_code == 200
+    written = target_env.read_text(encoding="utf-8")
+    assert "SEARCH_DEFAULT_MODE=hybrid" in written
+    assert "RETRIEVAL_EMBEDDING_BACKEND=hash" in written
+    assert "RETRIEVAL_EMBEDDING_DIM=64" in written
+    assert "RETRIEVAL_RERANKER_ENABLED=false" in written
+    assert setup_api._read_optional_env("SEARCH_DEFAULT_MODE") == "hybrid"
+
+
 def test_setup_config_accepts_openai_backend_and_persists_embedding_dim(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -745,8 +803,16 @@ def test_setup_config_accepts_openai_backend_and_persists_embedding_dim(
         encoding="utf-8",
     )
     target_env = tmp_path / ".env"
+    target_env.write_text(
+        env_example.read_text(encoding="utf-8").replace(
+            "MCP_API_KEY=",
+            "MCP_API_KEY=openai-secret",
+            1,
+        ),
+        encoding="utf-8",
+    )
 
-    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY", "openai-secret")
     monkeypatch.delenv("MCP_API_KEY_ALLOW_INSECURE_LOCAL", raising=False)
     monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
     monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
@@ -763,7 +829,11 @@ def test_setup_config_accepts_openai_backend_and_persists_embedding_dim(
     }
 
     with _build_client() as client:
-        response = client.post("/setup/config", json=payload)
+        response = client.post(
+            "/setup/config",
+            headers={"X-MCP-API-Key": "openai-secret"},
+            json=payload,
+        )
 
     assert response.status_code == 200
     body = response.json()
@@ -926,8 +996,12 @@ def test_setup_config_accepts_real_local_router_endpoint_with_real_models(
         encoding="utf-8",
     )
     target_env = tmp_path / ".env"
+    target_env.write_text(
+        "MCP_API_KEY=router-secret\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
 
-    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY", "router-secret")
     monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
     monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
     monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
@@ -935,8 +1009,9 @@ def test_setup_config_accepts_real_local_router_endpoint_with_real_models(
     with _build_client() as client:
         response = client.post(
             "/setup/config",
+            headers={"X-MCP-API-Key": "router-secret"},
             json={
-                "dashboard_api_key": "router-secret",
+                "dashboard_api_key": "   ",
                 "allow_insecure_local": False,
                 "embedding_backend": "router",
                 "embedding_dim": 1024,
@@ -999,8 +1074,12 @@ def test_setup_config_normalizes_provider_suffixes_before_writing(
         encoding="utf-8",
     )
     target_env = tmp_path / ".env"
+    target_env.write_text(
+        "MCP_API_KEY=local-secret\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
 
-    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY", "local-secret")
     monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
     monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
     monkeypatch.setenv("MEMORY_PALACE_SETUP_ENV_FILE", str(target_env))
@@ -1008,8 +1087,9 @@ def test_setup_config_normalizes_provider_suffixes_before_writing(
     with _build_client() as client:
         response = client.post(
             "/setup/config",
+            headers={"X-MCP-API-Key": "local-secret"},
             json={
-                "dashboard_api_key": "local-secret",
+                "dashboard_api_key": "   ",
                 "allow_insecure_local": False,
                 "embedding_backend": "api",
                 "embedding_api_base": "http://127.0.0.1:9100/v1/embeddings/",
@@ -1073,8 +1153,12 @@ def test_setup_config_allows_private_literal_provider_base_with_allowlist(
         encoding="utf-8",
     )
     target_env = tmp_path / ".env"
+    target_env.write_text(
+        "MCP_API_KEY=local-secret\nRETRIEVAL_EMBEDDING_BACKEND=hash\nRETRIEVAL_EMBEDDING_DIM=64\n",
+        encoding="utf-8",
+    )
 
-    monkeypatch.delenv("MCP_API_KEY", raising=False)
+    monkeypatch.setenv("MCP_API_KEY", "local-secret")
     monkeypatch.delenv("MEMORY_PALACE_RUNNING_IN_DOCKER", raising=False)
     monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.0/8")
     monkeypatch.setattr(setup_api, "_ENV_EXAMPLE_PATH", env_example)
@@ -1083,8 +1167,9 @@ def test_setup_config_allows_private_literal_provider_base_with_allowlist(
     with _build_client() as client:
         response = client.post(
             "/setup/config",
+            headers={"X-MCP-API-Key": "local-secret"},
             json={
-                "dashboard_api_key": "local-secret",
+                "dashboard_api_key": "   ",
                 "allow_insecure_local": False,
                 "embedding_backend": "api",
                 "embedding_api_base": "http://10.0.0.8:11435/v1",

@@ -1,19 +1,31 @@
+import argparse
 import sys
 from pathlib import Path
 
 import pytest
+import requests
 
 BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
+BACKEND_ROOT = BENCHMARK_DIR.parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
+from db.sqlite_client import SQLiteClient
+
+from helpers.common import BENCHMARK_ARTIFACT_DIR  # noqa: E402
 from helpers.profile_abcd_real_runner import (  # noqa: E402
     DatasetBundle,
     QueryCase,
+    REAL_PROFILE_CD_MARKDOWN_ARTIFACT,
+    REAL_PROFILE_JSON_ARTIFACT,
+    REAL_PROFILE_MARKDOWN_ARTIFACT,
     REAL_PROFILE_WORKDIR,
     PROFILE_CONFIGS,
     _build_comparison_rows,
     _evaluate_dataset,
+    _preflight_profile_remote_dependencies,
     _run_profile,
     build_phase6_gate,
     compute_percentile,
@@ -21,6 +33,15 @@ from helpers.profile_abcd_real_runner import (  # noqa: E402
     render_profile_cd_real_markdown,
     resolve_real_profile_workdir,
 )
+import run_profile_abcd_real  # noqa: E402
+
+
+def test_default_benchmark_artifacts_use_run_scoped_directory() -> None:
+    assert BENCHMARK_ARTIFACT_DIR.parent == BENCHMARK_DIR / "artifacts"
+    assert BENCHMARK_ARTIFACT_DIR != BENCHMARK_DIR
+    assert REAL_PROFILE_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert REAL_PROFILE_MARKDOWN_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert REAL_PROFILE_CD_MARKDOWN_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
 
 
 def test_compute_retrieval_metrics_binary_relevance_contract() -> None:
@@ -228,6 +249,163 @@ def test_resolve_real_profile_workdir_allocates_unique_run_dir_by_default(
     assert second.name.startswith("run-")
 
 
+class _FakeProbeResponse:
+    def __init__(self, *, status_code: int, payload=None, text: str = "") -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+class _FakeProbeSession:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+        self.closed = False
+
+    def post(self, url, *, json, headers, timeout):
+        self.calls.append(
+            {
+                "url": url,
+                "json": dict(json),
+                "headers": dict(headers),
+                "timeout": timeout,
+            }
+        )
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_profile_c_preflight_fails_fast_when_embedding_provider_returns_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "1024")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.8/32")
+
+    fake_session = _FakeProbeSession(
+        [
+            _FakeProbeResponse(
+                status_code=502,
+                payload={"error": {"message": "upstream unavailable"}},
+                text='{"error":{"message":"upstream unavailable"}}',
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        sys.modules[_run_profile.__module__],
+        "_build_remote_probe_session",
+        lambda: fake_session,
+    )
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_c")
+    try:
+        with pytest.raises(RuntimeError, match="profile_c embedding preflight failed"):
+            _preflight_profile_remote_dependencies(
+                config=config,
+                client=client,
+                timeout_sec=1.0,
+            )
+    finally:
+        await client.close()
+
+    assert fake_session.closed is True
+    assert fake_session.calls[0]["url"] == "http://10.0.0.8:11435/v1/embeddings"
+
+
+@pytest.mark.asyncio
+async def test_profile_c_preflight_wraps_request_errors_into_clear_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "1024")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.8/32")
+
+    fake_session = _FakeProbeSession([requests.ReadTimeout("timed out")])
+    monkeypatch.setattr(
+        sys.modules[_run_profile.__module__],
+        "_build_remote_probe_session",
+        lambda: fake_session,
+    )
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_c")
+    try:
+        with pytest.raises(RuntimeError, match="request_error:ReadTimeout"):
+            _preflight_profile_remote_dependencies(
+                config=config,
+                client=client,
+                timeout_sec=1.0,
+            )
+    finally:
+        await client.close()
+
+    assert fake_session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_profile_c_preflight_retries_without_dimensions_when_provider_rejects_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "api")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_BASE", "http://10.0.0.8:11435/v1")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_DIM", "1024")
+    monkeypatch.setenv("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS", "10.0.0.8/32")
+
+    fake_session = _FakeProbeSession(
+        [
+            _FakeProbeResponse(
+                status_code=400,
+                payload={"error": {"message": "dimensions not supported"}},
+                text='{"error":{"message":"dimensions not supported"}}',
+            ),
+            _FakeProbeResponse(
+                status_code=200,
+                payload={"data": [{"embedding": [0.1] * 1024}]},
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        sys.modules[_run_profile.__module__],
+        "_build_remote_probe_session",
+        lambda: fake_session,
+    )
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_c")
+    try:
+        _preflight_profile_remote_dependencies(
+            config=config,
+            client=client,
+            timeout_sec=1.0,
+        )
+    finally:
+        await client.close()
+
+    assert len(fake_session.calls) == 2
+    assert "dimensions" in fake_session.calls[0]["json"]
+    assert "dimensions" not in fake_session.calls[1]["json"]
+
+
 class _ProbeSearchClient:
     def __init__(self, result_rows):
         self._result_rows = list(result_rows)
@@ -334,6 +512,80 @@ class _PopulateStubClient:
         }
 
 
+class _PreflightStubClient:
+    instances = []
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        self.init_db_called = False
+        self.close_called = False
+        self.create_memory_calls = 0
+        self._remote_http_timeout_sec = 8.0
+        self._embedding_backend = "api"
+        self._embedding_api_base = "http://embed.local/v1"
+        self._embedding_api_key = "embed-key"
+        self._embedding_model = "embed-model"
+        self._embedding_dim = 1024
+        self._reranker_enabled = False
+        self._reranker_api_base = ""
+        self._reranker_api_key = ""
+        self._reranker_model = ""
+        type(self).instances.append(self)
+
+    def _resolve_embedding_api_base(self, _backend: str) -> str:
+        return self._embedding_api_base
+
+    def _resolve_embedding_model(self, _backend: str) -> str:
+        return self._embedding_model
+
+    @staticmethod
+    def _build_embedding_payload(model: str, content: str, *, dimensions: int):
+        payload = {"model": model, "input": content}
+        if int(dimensions) > 0:
+            payload["dimensions"] = int(dimensions)
+        return payload
+
+    @staticmethod
+    def _join_api_url(base: str, endpoint: str) -> str:
+        return f"{base.rstrip('/')}{endpoint}"
+
+    @staticmethod
+    def _build_embedding_retry_payload_without_dimensions(**_kwargs):
+        return None
+
+    def _extract_embedding_from_response(self, payload):
+        if not isinstance(payload, dict):
+            return None
+        rows = payload.get("data")
+        if not isinstance(rows, list) or not rows:
+            return None
+        row = rows[0]
+        if not isinstance(row, dict):
+            return None
+        embedding = row.get("embedding")
+        return embedding if isinstance(embedding, list) else None
+
+    def _validate_embedding_dimension(
+        self,
+        embedding,
+        degrade_reasons=None,
+        backend=None,
+    ):
+        del degrade_reasons, backend
+        if isinstance(embedding, list) and len(embedding) == self._embedding_dim:
+            return embedding
+        return None
+
+    async def init_db(self) -> None:
+        self.init_db_called = True
+
+    async def close(self) -> None:
+        self.close_called = True
+
+    async def create_memory(self, **_kwargs):
+        self.create_memory_calls += 1
+        raise AssertionError("provider preflight should fail before create_memory")
+
+
 @pytest.mark.asyncio
 async def test_run_profile_surfaces_index_time_degradation_provenance(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -366,6 +618,94 @@ async def test_run_profile_surfaces_index_time_degradation_provenance(
     assert row["indexing"]["degraded"] is True
     assert row["indexing"]["degrade_reasons"] == ["embedding_fallback_hash"]
     assert row["indexing"]["effective_backend"] == "hash"
+
+
+@pytest.mark.asyncio
+async def test_run_profile_fails_fast_when_embedding_preflight_returns_502(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = DatasetBundle(
+        key="squad_v2_dev",
+        label="SQuAD v2 Dev",
+        domain="bench_squad_v2_dev",
+        queries=[QueryCase(query_id="q-1", query="alpha", relevant_doc_ids={"doc-1"})],
+        docs=[("doc-1", "doc one")],
+        sample_bucket_size=100,
+        query_count_raw=1,
+    )
+    config = next(item for item in PROFILE_CONFIGS if item.key == "profile_c")
+    _PreflightStubClient.instances = []
+    fake_session = _FakeProbeSession(
+        [_FakeProbeResponse(status_code=502, text="bad gateway")]
+    )
+
+    monkeypatch.setattr(sys.modules[_run_profile.__module__], "SQLiteClient", _PreflightStubClient)
+    monkeypatch.setattr(
+        sys.modules[_run_profile.__module__],
+        "_build_remote_probe_session",
+        lambda: fake_session,
+    )
+
+    with pytest.raises(RuntimeError, match="profile_c embedding preflight failed.*status=502"):
+        await _run_profile(
+            config=config,
+            bundles=[bundle],
+            db_path=tmp_path / "profile-c.db",
+            max_results=10,
+            candidate_multiplier=8,
+            existing_mapping=None,
+            existing_indexing=None,
+            populate=True,
+            provider_preflight_timeout=1.5,
+        )
+
+    assert len(fake_session.calls) == 1
+    assert fake_session.calls[0]["url"] == "http://embed.local/v1/embeddings"
+    assert fake_session.calls[0]["json"]["model"] == "embed-model"
+    assert fake_session.calls[0]["json"]["input"]
+    assert fake_session.calls[0]["timeout"] == pytest.approx(1.5)
+    assert _PreflightStubClient.instances[0].init_db_called is False
+    assert _PreflightStubClient.instances[0].create_memory_calls == 0
+    assert _PreflightStubClient.instances[0].close_called is True
+
+
+def test_run_profile_cli_parse_args_exposes_provider_preflight_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_profile_abcd_real.py",
+            "--provider-preflight-timeout",
+            "1.5",
+            "--skip-provider-preflight",
+        ],
+    )
+
+    args = run_profile_abcd_real.parse_args()
+
+    assert args.provider_preflight_timeout == pytest.approx(1.5)
+    assert args.skip_provider_preflight is True
+
+
+def test_run_profile_cli_main_returns_clear_error_on_preflight_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(run_profile_abcd_real, "parse_args", lambda: argparse.Namespace())
+
+    async def _fake_run(_args) -> None:
+        raise RuntimeError("profile_c embedding preflight failed | status=502")
+
+    monkeypatch.setattr(run_profile_abcd_real, "_run", _fake_run)
+
+    assert run_profile_abcd_real.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        captured.err.strip()
+        == "[benchmark] failed: profile_c embedding preflight failed | status=502"
+    )
 
 
 def test_render_profile_cd_real_markdown_surfaces_observed_degradation_truthfully() -> None:

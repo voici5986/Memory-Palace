@@ -33,7 +33,7 @@ WINDOWS_VENV_PYTHON="${BACKEND_DIR}/.venv/Scripts/python.exe"
 ENV_FILE="${PROJECT_ROOT}/.env"
 DOCKER_ENV_FILE="${PROJECT_ROOT}/.env.docker"
 DEFAULT_DB_PATH="${PROJECT_ROOT}/demo.db"
-DOCKER_INTERNAL_SQLITE_PREFIXES=("/app/" "/data/")
+DOCKER_INTERNAL_SQLITE_ROOTS=("/app" "/data")
 
 is_windows_host_shell() {
   case "${OSTYPE:-}" in
@@ -370,9 +370,9 @@ is_docker_internal_database_url() {
     return 1
   fi
   normalized_path="$(printf '%s' "${info%%|*}" | tr '[:upper:]' '[:lower:]')"
-  local prefix
-  for prefix in "${DOCKER_INTERNAL_SQLITE_PREFIXES[@]}"; do
-    [[ "${normalized_path}" == "${prefix}"* ]] && return 0
+  local root
+  for root in "${DOCKER_INTERNAL_SQLITE_ROOTS[@]}"; do
+    [[ "${normalized_path}" == "${root}" || "${normalized_path}" == "${root}/"* ]] && return 0
   done
   return 1
 }

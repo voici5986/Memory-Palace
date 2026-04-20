@@ -1,11 +1,13 @@
 import asyncio
 import gc
 import weakref
+from pathlib import Path
 
 import pytest
 
 import mcp_server
 from api import browse as browse_api
+from db.sqlite_client import SQLiteClient
 from runtime_state import ImportLearnAuditTracker
 
 
@@ -139,6 +141,10 @@ class _SnapshotFailureCleanupClient(_ReflectionClient):
                 raise PermissionError("memory still has active paths")
         self.deleted_memory_ids.append(memory_id)
         return {"deleted_memory_id": memory_id}
+
+
+def _sqlite_url(db_path: Path) -> str:
+    return f"sqlite+aiosqlite:///{db_path}"
 
 
 @pytest.mark.asyncio
@@ -292,6 +298,64 @@ async def test_reflection_execute_can_be_rolled_back(
     assert payload["executed"] is True
     assert payload["snapshot_id"] > 0
     assert summary["operation_decision_breakdown"]["reflection_workflow|executed"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_reflection_execute_same_content_is_blocked_by_write_guard_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "reflection-execute-noop.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "import_learn_tracker",
+        ImportLearnAuditTracker(),
+    )
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker("Session compaction notes:\n- same stable reflection content"),
+    )
+
+    async def _snapshot_path_create(*_args, **_kwargs) -> bool:
+        return True
+
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _snapshot_path_create)
+
+    first = await mcp_server.run_reflection_workflow_service(
+        mode="execute",
+        source="session_summary",
+        reason="same reason",
+        session_id="same-session",
+        client=client,
+    )
+    second = await mcp_server.run_reflection_workflow_service(
+        mode="execute",
+        source="session_summary",
+        reason="same reason",
+        session_id="same-session",
+        client=client,
+    )
+
+    rows = await client.search_advanced(
+        query="same stable reflection content",
+        mode="keyword",
+        max_results=20,
+        filters={"domain": "notes", "path_prefix": "corrections/same-session"},
+    )
+    await client.close()
+
+    assert first["ok"] is True
+    assert first["executed"] is True
+    assert second["ok"] is False
+    assert second["executed"] is False
+    assert second["result"]["guard_action"] == "NOOP"
+    assert second["result"]["guard_target_uri"] == first["created_memory"]["uri"]
+    assert len(rows["results"]) == 1
 
 
 @pytest.mark.asyncio

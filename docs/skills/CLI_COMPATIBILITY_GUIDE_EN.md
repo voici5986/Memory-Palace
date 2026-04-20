@@ -268,7 +268,7 @@ Conclusion:
 - **The more stable default is still to start with `--scope user --with-mcp`.**
 - If you also want a workspace entry in this repository, add a workspace install afterward.
 - If you see `Policy file warning in memory-palace-overrides.toml`, rerun the same `--scope user --with-mcp --force` install first.
-- When documenting it for others, the safer wording is: "regular smoke can be rerun separately, while `gemini_live` remains an explicit opt-in live verification path."
+- When documenting it for others, the safer wording is: "regular `gemini` smoke passed in this session on the audited machine, while `gemini_live` remains an explicit opt-in path and stays `SKIP` by default."
 
 ### Codex CLI
 
@@ -283,12 +283,7 @@ Conclusion:
 - The accurate statement is:
   - Skill can be auto-discovered repo-locally.
   - MCP is still recommended to be registered to the current repository via `--scope user --with-mcp`.
-- The safer public wording for `Codex` is: the skill is still repo-locally auto-discoverable, MCP is still recommended through `--scope user --with-mcp`, and unless you have just rerun smoke on the target machine, do not describe it as "fully passed on this machine." In the current implementation, `mcp_bindings` / smoke should still be treated as `PARTIAL`:
-  - the user-scope MCP binding is aligned to the current repository
-  - `codex exec` smoke can still stop at `PARTIAL` because of timeout or
-    missing structured output
-  - the public wording should therefore stay at "wired and reviewable on this
-    machine," not "fully passed everywhere"
+- The safer public wording for `Codex` is: the skill is still repo-locally auto-discoverable, MCP is still recommended through `--scope user --with-mcp`, and this session's repo-local smoke passed on the audited machine. Keep that as a machine-scoped verification result rather than a blanket all-host guarantee.
 
 ### OpenCode
 
@@ -413,7 +408,7 @@ docs/skills/MCP_LIVE_E2E_REPORT.md
 These two reports are mainly used for supplemental verification and are not intended as primary entry documentation. They are local products that "appear only after running" by default, so it's normal if they aren't in the public GitHub repository.
 If you do not want to overwrite the default file during parallel review or CI, set `MEMORY_PALACE_MCP_E2E_REPORT_PATH` first. When you use a relative path, the script now redirects it under the system temp directory's `memory-palace-reports/` root; if you want a fully controlled destination, prefer an absolute path outside the repository.
 `MCP_LIVE_E2E_REPORT.md` defaults to using an isolated temporary database and won't touch your official database; however, upon failure, it might still include stderr, logs, or temporary directory paths in the report, so it's also recommended to review the content yourself before forwarding.
-This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification note for this session is: after the follow-up fixes, backend tests are `1039 passed, 22 skipped`, frontend tests stay at `173 passed`, frontend `npm run build` and `npm run typecheck` both passed, and a repo-local macOS `Profile B` browser smoke was rerun. The last repo-local live MCP e2e pass still remains part of the public baseline, but this 2026-04-19 follow-up round did **not** rerun live MCP e2e or the benchmark tables. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
+This live e2e now follows the same repo-local wrapper path that users actually connect to, and its launcher rule is aligned with `install_skill.py` and `render_ide_host_config.py`: native Windows uses `backend/mcp_wrapper.py`, while macOS / Linux / `Git Bash` / `WSL` / MSYS / Cygwin use `scripts/run_memory_palace_mcp_stdio.sh`. It also covers wrapper behavior and `compact_context` gist persistence instead of only checking the bare tool inventory. The current public verification note for this session is: backend tests are `1063 passed, 22 skipped`, frontend tests are `181 passed`, frontend build/typecheck both passed, and both a repo-local macOS `Profile B` browser smoke and repo-local live MCP e2e were rerun (`PASS`). Skill smoke was rerun as well: `claude`, `codex`, and `gemini` passed in this session; `cursor` / `agent` / `antigravity` remain `PARTIAL`; and `gemini_live` stays `SKIP`. `OpenCode` hit one timeout in the full multi-CLI sweep but passed on the immediate standalone rerun, so keep that result framed as a host-side fluctuation rather than a stable all-host `PASS` claim. In plain language: the repo-local live MCP path is rechecked, but CLI / IDE hosts still keep their own host-side boundaries. Docker one-click `Profile C/D` plus native Windows and native Linux host runtime paths still keep explicit target-environment recheck boundaries in this round.
 
 ## Positive / Negative Prompts
 

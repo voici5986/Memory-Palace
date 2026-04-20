@@ -7,6 +7,7 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
+from helpers.common import BENCHMARK_ARTIFACT_DIR, render_repo_relative_path
 from helpers.profile_ab_runner import (
     MEMORY_GOLD_SET_PATH,
     PROFILE_JSON_ARTIFACT,
@@ -70,6 +71,10 @@ def test_profile_a_retrieval_report_complete_and_json_consistent() -> None:
     _assert_memory_gold_set_ready()
     payload = _run_profile_ab(sample_size=100)
 
+    assert PROFILE_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert PROFILE_JSON_ARTIFACT.parent != BENCHMARK_DIR
+    assert PROFILE_MARKDOWN_ARTIFACTS["profile_a"].parent == BENCHMARK_ARTIFACT_DIR
+
     profile_a = payload["profiles"]["profile_a"]
     assert profile_a["mode"] == "keyword"
     rows = profile_a["rows"]
@@ -86,6 +91,10 @@ def test_profile_a_retrieval_report_complete_and_json_consistent() -> None:
     assert markdown_path.exists()
     markdown = markdown_path.read_text(encoding="utf-8")
     assert "## Retrieval Quality" in markdown
+    assert (
+        f"- json_artifact: `{render_repo_relative_path(PROFILE_JSON_ARTIFACT)}`"
+        in markdown
+    )
     for row in rows:
         _assert_retrieval_markdown_row(markdown, row)
 

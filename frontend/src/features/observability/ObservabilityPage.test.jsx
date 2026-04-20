@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
 import { formatDateTime as formatDateTimeValue } from '../../lib/format';
 import i18n, { LOCALE_STORAGE_KEY } from '../../i18n';
@@ -10,6 +10,7 @@ vi.mock('../../lib/api', () => ({
   cancelIndexJob: vi.fn(),
   extractApiError: vi.fn((error, fallback = 'Request failed') => error?.message || fallback),
   getIndexJob: vi.fn(),
+  getMaintenanceAuthState: vi.fn(() => null),
   getObservabilitySummary: vi.fn(),
   retryIndexJob: vi.fn(),
   runObservabilitySearch: vi.fn(),
@@ -66,6 +67,29 @@ const createDeferred = () => {
   return { promise, resolve, reject };
 };
 
+const createMockEventSource = () => {
+  const listeners = new Map();
+  return {
+    addEventListener: vi.fn((eventName, listener) => {
+      const entries = listeners.get(eventName) || [];
+      entries.push(listener);
+      listeners.set(eventName, entries);
+    }),
+    removeEventListener: vi.fn((eventName, listener) => {
+      const entries = listeners.get(eventName) || [];
+      listeners.set(
+        eventName,
+        entries.filter((entry) => entry !== listener),
+      );
+    }),
+    close: vi.fn(),
+    emit(eventName, event = {}) {
+      const entries = listeners.get(eventName) || [];
+      entries.forEach((listener) => listener(event));
+    },
+  };
+};
+
 describe('ObservabilityPage', () => {
   const getJobCardById = async (jobId) => {
     const jobLabel = await screen.findByText(jobId);
@@ -77,7 +101,12 @@ describe('ObservabilityPage', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     window.localStorage?.removeItem?.(LOCALE_STORAGE_KEY);
+    window.localStorage?.removeItem?.('memory-palace.dashboardAuth');
+    window.sessionStorage?.removeItem?.('memory-palace.dashboardAuth');
+    delete window.__MEMORY_PALACE_RUNTIME__;
+    delete window.__MCP_RUNTIME_CONFIG__;
     await i18n.changeLanguage('en');
+    api.getMaintenanceAuthState.mockReturnValue(null);
     api.getObservabilitySummary.mockResolvedValue(buildSummary());
     api.getIndexJob.mockResolvedValue({ job: null });
     api.retryIndexJob.mockResolvedValue({ job_id: 'retry-default' });
@@ -86,6 +115,10 @@ describe('ObservabilityPage', () => {
     api.triggerMemoryReindex.mockResolvedValue({ job_id: 'reindex-default' });
     api.triggerSleepConsolidation.mockResolvedValue({ job_id: 'sleep-default' });
     api.cancelIndexJob.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('shows translated validation errors in zh-CN for invalid integer inputs', async () => {
@@ -540,6 +573,74 @@ describe('ObservabilityPage', () => {
       expect(screen.getByText(/queue depth:\s*2/i)).toBeInTheDocument();
       expect(screen.queryByText(/queue depth:\s*9/i)).not.toBeInTheDocument();
     });
+  });
+
+  it('refreshes summary from live SSE events and closes the stream on unmount', async () => {
+    const liveSource = createMockEventSource();
+    vi.stubGlobal('EventSource', vi.fn(() => liveSource));
+    api.getObservabilitySummary
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 1, timestamp: '2026-01-01T00:00:00Z' }))
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 4, timestamp: '2026-01-01T00:00:04Z' }));
+
+    const { unmount } = render(<ObservabilityPage />);
+
+    expect(await screen.findByText(/queue depth:\s*1/i)).toBeInTheDocument();
+
+    await act(async () => {
+      liveSource.emit('endpoint', { data: '/messages?session_id=live-observability' });
+    });
+
+    await waitFor(() => {
+      expect(api.getObservabilitySummary).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText(/queue depth:\s*4/i)).toBeInTheDocument();
+
+    unmount();
+
+    expect(liveSource.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses authenticated fetch-based SSE when maintenance auth is present', async () => {
+    const encoder = new TextEncoder();
+    api.getMaintenanceAuthState.mockReturnValue({
+      key: 'week6-sse-secret',
+      mode: 'header',
+      source: 'runtime',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('event: endpoint\ndata: /messages?session_id=auth-live\n\n')
+            );
+            controller.close();
+          },
+        }),
+      }))
+    );
+    api.getObservabilitySummary
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 1, timestamp: '2026-01-01T00:00:00Z' }))
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 6, timestamp: '2026-01-01T00:00:06Z' }));
+
+    render(<ObservabilityPage />);
+
+    expect(await screen.findByText(/queue depth:\s*1/i)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/sse'),
+        expect.objectContaining({
+          method: 'GET',
+          headers: { 'X-MCP-API-Key': 'week6-sse-secret' },
+        })
+      );
+    });
+
+    expect(await screen.findByText(/queue depth:\s*6/i)).toBeInTheDocument();
   });
 
   it('blocks diagnostic search when max priority is not an integer', async () => {

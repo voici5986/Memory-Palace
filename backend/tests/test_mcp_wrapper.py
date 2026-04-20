@@ -79,6 +79,10 @@ def test_resolve_backend_python_prefers_windows_layout_on_msys_like_hosts(
 @pytest.mark.parametrize(
     ("database_url", "expected"),
     [
+        ("sqlite+aiosqlite:////app", True),
+        ("sqlite+aiosqlite:////data", True),
+        ("sqlite+aiosqlite:////%2Fapp", True),
+        ("sqlite+aiosqlite:////%2Fdata", True),
         ("SQLITE+AIOSQLITE://////APP/data/memory_palace.db", True),
         ("sqlite+aiosqlite://///DATA/memory_palace.db", True),
         ("sqlite+aiosqlite:////Users/test/app/data/memory_palace.db", False),
@@ -143,6 +147,33 @@ def test_build_runtime_env_rejects_data_prefixed_docker_internal_database_url(
         "DATABASE_URL=sqlite+aiosqlite:////data/memory_palace.db\n",
         encoding="utf-8",
     )
+
+    monkeypatch.setattr(module, "ENV_FILE", env_file)
+    monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
+    monkeypatch.setattr(module, "DEFAULT_DB_PATH", tmp_path / "demo.db")
+    monkeypatch.setattr(module.os, "environ", {})
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.build_runtime_env()
+
+    assert str(excinfo.value) == "1"
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "sqlite+aiosqlite:////app",
+        "sqlite+aiosqlite:////data",
+        "sqlite+aiosqlite:////%2Fapp",
+        "sqlite+aiosqlite:////%2Fdata",
+    ],
+)
+def test_build_runtime_env_rejects_exact_docker_internal_database_url(
+    monkeypatch, tmp_path: Path, database_url: str
+) -> None:
+    module = _load_module()
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"DATABASE_URL={database_url}\n", encoding="utf-8")
 
     monkeypatch.setattr(module, "ENV_FILE", env_file)
     monkeypatch.setattr(module, "DOCKER_ENV_FILE", tmp_path / ".env.docker")
@@ -427,6 +458,24 @@ def test_repo_local_stdio_wrapper_rejects_urlencoded_docker_internal_database_ur
     result = _run_stdio_wrapper(
         "sqlite+aiosqlite:////%2Fapp%2Fdata%2Fmemory_palace.db"
     )
+
+    assert result.returncode == 1
+    assert "Docker-internal DATABASE_URL" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "sqlite+aiosqlite:////app",
+        "sqlite+aiosqlite:////data",
+        "sqlite+aiosqlite:////%2Fapp",
+        "sqlite+aiosqlite:////%2Fdata",
+    ],
+)
+def test_repo_local_stdio_wrapper_rejects_exact_docker_internal_database_url(
+    database_url: str,
+) -> None:
+    result = _run_stdio_wrapper(database_url)
 
     assert result.returncode == 1
     assert "Docker-internal DATABASE_URL" in result.stderr

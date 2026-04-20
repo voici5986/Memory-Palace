@@ -109,6 +109,12 @@ def resolve_launcher(launcher: str) -> str:
     return launcher
 
 
+def _render_launcher_path(path: Path, *, launcher: str) -> str:
+    if launcher == "bash" and os.name == "nt":
+        return path.as_posix()
+    return str(path)
+
+
 def build_mcp_config(launcher: str) -> dict[str, object]:
     resolved = resolve_launcher(launcher)
     if resolved == "python-wrapper":
@@ -125,7 +131,7 @@ def build_mcp_config(launcher: str) -> dict[str, object]:
         "mcpServers": {
             "memory-palace": {
                 "command": "bash",
-                "args": [str(repo_wrapper_absolute())],
+                "args": [_render_launcher_path(repo_wrapper_absolute(), launcher=resolved)],
             }
         }
     }

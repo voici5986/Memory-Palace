@@ -72,7 +72,6 @@ async def test_generate_gist_llm_exception_falls_back_and_is_observable() -> Non
     assert payload["gist_method"] in {
         "extractive_bullets",
         "sentence_fallback",
-        "truncate_fallback",
     }
     assert isinstance(payload.get("gist_text"), str) and payload["gist_text"]
     reasons = payload.get("degrade_reasons")
@@ -165,7 +164,6 @@ async def test_compact_context_surfaces_degrade_reasons_when_gist_llm_fails(
     assert payload["gist_method"] in {
         "extractive_bullets",
         "sentence_fallback",
-        "truncate_fallback",
     }
     reasons = payload.get("degrade_reasons")
     assert isinstance(reasons, list)

@@ -9,6 +9,10 @@ Current real-run scope:
 - Profile C: hybrid + API embedding (no reranker)
 - Profile D: hybrid + API embedding + reranker
 
+This benchmark-only C/D split is narrower than the shipped deployment
+templates. Do not treat helper `profile_c` as the same contract as the
+repository `profile-c.env`, which still enables the reranker by default.
+
 Datasets in this runner focus on corpora that can be materialized in-repo:
 - squad_v2_dev
 - beir_nfcorpus
@@ -40,16 +44,23 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from db.sqlite_client import SQLiteClient
 
-from .common import BENCHMARK_DIR, DATASETS_DIR
+from .common import BENCHMARK_DIR, DATASETS_DIR, benchmark_artifact_path
 
-REAL_PROFILE_JSON_ARTIFACT = BENCHMARK_DIR / "profile_abcd_real_metrics.json"
-REAL_PROFILE_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_abcd_real.md"
-REAL_PROFILE_CD_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "benchmark_results_profile_cd_real.md"
+REAL_PROFILE_JSON_ARTIFACT = benchmark_artifact_path("profile_abcd_real_metrics.json")
+REAL_PROFILE_MARKDOWN_ARTIFACT = benchmark_artifact_path(
+    "benchmark_results_profile_abcd_real.md"
+)
+REAL_PROFILE_CD_MARKDOWN_ARTIFACT = benchmark_artifact_path(
+    "benchmark_results_profile_cd_real.md"
+)
 REAL_PROFILE_WORKDIR = BENCHMARK_DIR / ".real_profile_cache"
 REAL_PROFILE_WORKDIR_ENV = "BENCHMARK_REAL_PROFILE_WORKDIR"
+REAL_PROVIDER_PREFLIGHT_TIMEOUT_ENV = "BENCHMARK_REAL_PROVIDER_PREFLIGHT_TIMEOUT_SEC"
 REAL_PROFILE_METRIC_TOP_K = 10
 REAL_PROFILE_DEFAULT_MAX_RESULTS = 10
 REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER = 8
+REAL_PROVIDER_PREFLIGHT_DEFAULT_TIMEOUT_SEC = 2.0
+REAL_PROVIDER_PREFLIGHT_PROBE_TEXT = "memory palace benchmark provider preflight"
 
 PROFILE_D_INVALID_GATE_REASONS = {
     "embedding_fallback_hash",
@@ -183,6 +194,25 @@ def _sanitize_report_path(raw_path: Path | str) -> str:
     return f"<abs>/{path_obj.name}"
 
 
+def build_profile_abcd_real_artifact_paths(
+    artifact_dir: Path | str | None = None,
+) -> Dict[str, Path]:
+    return {
+        "json": benchmark_artifact_path(
+            "profile_abcd_real_metrics.json",
+            artifact_dir=artifact_dir,
+        ),
+        "markdown": benchmark_artifact_path(
+            "benchmark_results_profile_abcd_real.md",
+            artifact_dir=artifact_dir,
+        ),
+        "cd_markdown": benchmark_artifact_path(
+            "benchmark_results_profile_cd_real.md",
+            artifact_dir=artifact_dir,
+        ),
+    }
+
+
 def resolve_real_profile_workdir(workdir: Optional[Path] = None) -> Path:
     if workdir is not None:
         return Path(workdir).expanduser()
@@ -198,6 +228,24 @@ def resolve_real_profile_workdir(workdir: Optional[Path] = None) -> Path:
     )
 
 
+def resolve_provider_preflight_timeout(timeout_sec: Optional[float] = None) -> float:
+    raw_value: object
+    if timeout_sec is not None:
+        raw_value = timeout_sec
+    else:
+        raw_value = os.getenv(
+            REAL_PROVIDER_PREFLIGHT_TIMEOUT_ENV,
+            str(REAL_PROVIDER_PREFLIGHT_DEFAULT_TIMEOUT_SEC),
+        )
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid provider preflight timeout: {raw_value!r}") from exc
+    if parsed <= 0:
+        raise ValueError(f"provider preflight timeout must be > 0, got {parsed!r}")
+    return parsed
+
+
 def _slugify(value: str) -> str:
     lowered = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
     compact = "_".join(chunk for chunk in lowered.split("_") if chunk)
@@ -210,6 +258,276 @@ def _sample_bucket_size(sample_size: int) -> int:
     if sample_size <= 200:
         return 200
     return 500
+
+
+def _build_remote_probe_session() -> requests.Session:
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
+def _probe_timeout_seconds(
+    client: SQLiteClient,
+    timeout_sec: Optional[float] = None,
+) -> float:
+    requested = resolve_provider_preflight_timeout(timeout_sec)
+    try:
+        configured = float(getattr(client, "_remote_http_timeout_sec", requested))
+    except (TypeError, ValueError):
+        configured = requested
+    if configured <= 0:
+        return requested
+    return max(0.2, min(configured, requested))
+
+
+def _truncate_probe_body(body: Any) -> str:
+    text = str(body or "").strip()
+    if len(text) <= 240:
+        return text
+    return text[:237].rstrip() + "..."
+
+
+def _raise_remote_preflight_error(
+    *,
+    config_key: str,
+    surface: str,
+    url: str,
+    response: Optional[requests.Response] = None,
+    message: Optional[str] = None,
+) -> None:
+    details = [f"{config_key} {surface} preflight failed", f"url={url}"]
+    if response is not None:
+        details.append(f"status={response.status_code}")
+        body = _truncate_probe_body(getattr(response, "text", ""))
+        if body:
+            details.append(f"body={body}")
+    if message:
+        details.append(message)
+    details.append(
+        "refusing to continue before profile_c/profile_d indexing can amplify the same remote failure per document"
+    )
+    raise RuntimeError(" | ".join(details))
+
+
+def _post_preflight_request(
+    *,
+    session: requests.Session,
+    url: str,
+    payload: Dict[str, Any],
+    headers: Dict[str, str],
+    timeout: float,
+) -> requests.Response:
+    try:
+        return session.post(url, json=payload, headers=headers, timeout=timeout)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"request_error:{type(exc).__name__}:{exc}") from exc
+
+
+def _probe_profile_embedding_provider(
+    *,
+    config_key: str,
+    client: SQLiteClient,
+    session: requests.Session,
+    timeout_sec: Optional[float] = None,
+) -> None:
+    backend_value = str(getattr(client, "_embedding_backend", "") or "").strip().lower()
+    if backend_value not in {"router", "api", "openai"}:
+        return
+
+    api_base = client._resolve_embedding_api_base(backend_value)
+    model = client._resolve_embedding_model(backend_value)
+    if not api_base or not model:
+        raise RuntimeError(
+            f"{config_key} embedding preflight failed | missing remote embedding config"
+        )
+
+    payload = client._build_embedding_payload(
+        model,
+        REAL_PROVIDER_PREFLIGHT_PROBE_TEXT,
+        dimensions=int(client._embedding_dim),
+    )
+    url = client._join_api_url(api_base, "/embeddings")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if client._embedding_api_key:
+        headers["Authorization"] = f"Bearer {client._embedding_api_key}"
+        headers["X-API-Key"] = client._embedding_api_key
+
+    timeout = _probe_timeout_seconds(client, timeout_sec)
+    try:
+        response = _post_preflight_request(
+            session=session,
+            url=url,
+            payload=payload,
+            headers=headers,
+            timeout=timeout,
+        )
+    except RuntimeError as exc:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="embedding",
+            url=url,
+            message=str(exc),
+        )
+    if response.status_code >= 400:
+        retry_payload = client._build_embedding_retry_payload_without_dimensions(
+            endpoint="/embeddings",
+            payload=payload,
+            response=response,
+        )
+        if retry_payload is not None:
+            try:
+                response = _post_preflight_request(
+                    session=session,
+                    url=url,
+                    payload=retry_payload,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            except RuntimeError as exc:
+                _raise_remote_preflight_error(
+                    config_key=config_key,
+                    surface="embedding",
+                    url=url,
+                    message=str(exc),
+                )
+    if response.status_code >= 400:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="embedding",
+            url=url,
+            response=response,
+        )
+
+    try:
+        parsed = response.json()
+    except ValueError as exc:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="embedding",
+            url=url,
+            message=f"invalid_json:{type(exc).__name__}",
+        )
+    if not isinstance(parsed, dict):
+        parsed = {"data": parsed}
+    embedding = client._extract_embedding_from_response(parsed)
+    degrade_reasons: List[str] = []
+    embedding = client._validate_embedding_dimension(
+        embedding,
+        degrade_reasons=degrade_reasons,
+        backend=backend_value,
+    )
+    if embedding is None:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="embedding",
+            url=url,
+            message=";".join(degrade_reasons) or "embedding_response_invalid",
+        )
+
+
+def _probe_profile_reranker_provider(
+    *,
+    config_key: str,
+    client: SQLiteClient,
+    session: requests.Session,
+    timeout_sec: Optional[float] = None,
+) -> None:
+    if not bool(getattr(client, "_reranker_enabled", False)):
+        return
+    api_base = str(getattr(client, "_reranker_api_base", "") or "").strip()
+    model = str(getattr(client, "_reranker_model", "") or "").strip()
+    if not api_base or not model:
+        raise RuntimeError(
+            f"{config_key} reranker preflight failed | missing reranker config"
+        )
+
+    url = client._join_api_url(api_base, "/rerank")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    api_key = str(getattr(client, "_reranker_api_key", "") or "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+        headers["X-API-Key"] = api_key
+
+    try:
+        response = _post_preflight_request(
+            session=session,
+            url=url,
+            payload={
+                "model": model,
+                "query": REAL_PROVIDER_PREFLIGHT_PROBE_TEXT,
+                "documents": [
+                    "persistent memory for agents",
+                    "totally unrelated text",
+                ],
+            },
+            headers=headers,
+            timeout=_probe_timeout_seconds(client, timeout_sec),
+        )
+    except RuntimeError as exc:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="reranker",
+            url=url,
+            message=str(exc),
+        )
+    if response.status_code >= 400:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="reranker",
+            url=url,
+            response=response,
+        )
+
+    try:
+        parsed = response.json()
+    except ValueError as exc:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="reranker",
+            url=url,
+            message=f"invalid_json:{type(exc).__name__}",
+        )
+    scores = client._extract_rerank_scores(parsed, 2)
+    if not scores:
+        _raise_remote_preflight_error(
+            config_key=config_key,
+            surface="reranker",
+            url=url,
+            message="reranker_response_invalid",
+        )
+
+
+def _preflight_profile_remote_dependencies(
+    *,
+    config: ProfileConfig,
+    client: SQLiteClient,
+    timeout_sec: Optional[float] = None,
+) -> None:
+    if config.key not in {"profile_c", "profile_d"}:
+        return
+    session = _build_remote_probe_session()
+    try:
+        _probe_profile_embedding_provider(
+            config_key=config.key,
+            client=client,
+            session=session,
+            timeout_sec=timeout_sec,
+        )
+        if config.key == "profile_d":
+            _probe_profile_reranker_provider(
+                config_key=config.key,
+                client=client,
+                session=session,
+                timeout_sec=timeout_sec,
+            )
+    finally:
+        session.close()
 
 
 def _load_jsonl_rows(path: Path) -> List[Dict[str, Any]]:
@@ -965,6 +1283,8 @@ async def _run_profile(
     existing_mapping: Optional[Mapping[str, Mapping[int, str]]] = None,
     existing_indexing: Optional[Mapping[str, Mapping[str, Any]]] = None,
     populate: bool,
+    provider_preflight: bool = True,
+    provider_preflight_timeout: Optional[float] = None,
 ) -> tuple[Dict[str, Any], Dict[str, Dict[int, str]], Dict[str, Dict[str, Any]]]:
     profile_mapping: Dict[str, Dict[int, str]] = (
         {key: dict(value) for key, value in existing_mapping.items()}
@@ -980,6 +1300,12 @@ async def _run_profile(
     with patched_env(config.env_overrides):
         client = SQLiteClient(_sqlite_url(db_path))
         try:
+            if provider_preflight:
+                _preflight_profile_remote_dependencies(
+                    config=config,
+                    client=client,
+                    timeout_sec=provider_preflight_timeout,
+                )
             await client.init_db()
 
             if populate:
@@ -1038,6 +1364,8 @@ async def build_profile_abcd_real_metrics(
     candidate_multiplier: int = REAL_PROFILE_DEFAULT_CANDIDATE_MULTIPLIER,
     seed: int = REAL_RANDOM_SEED,
     workdir: Optional[Path] = None,
+    provider_preflight: bool = True,
+    provider_preflight_timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     if int(sample_size) <= 0:
         raise ValueError("sample_size must be > 0")
@@ -1103,6 +1431,8 @@ async def build_profile_abcd_real_metrics(
             existing_mapping=existing_mapping,
             existing_indexing=existing_indexing,
             populate=populate,
+            provider_preflight=provider_preflight,
+            provider_preflight_timeout=provider_preflight_timeout,
         )
         profile_results[config.key] = profile_payload
         profile_doc_mappings[config.key] = mapping
@@ -1378,27 +1708,39 @@ def render_profile_cd_real_markdown(payload: Mapping[str, Any]) -> str:
 def write_profile_abcd_real_artifacts(
     payload: Mapping[str, Any],
     *,
-    json_path: Path = REAL_PROFILE_JSON_ARTIFACT,
-    markdown_path: Path = REAL_PROFILE_MARKDOWN_ARTIFACT,
-    cd_markdown_path: Path = REAL_PROFILE_CD_MARKDOWN_ARTIFACT,
+    json_path: Path | None = None,
+    markdown_path: Path | None = None,
+    cd_markdown_path: Path | None = None,
+    artifact_dir: Path | str | None = None,
 ) -> Dict[str, Path]:
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(
+    default_paths = build_profile_abcd_real_artifact_paths(artifact_dir)
+    json_output_path = Path(json_path) if json_path is not None else default_paths["json"]
+    markdown_output_path = (
+        Path(markdown_path) if markdown_path is not None else default_paths["markdown"]
+    )
+    cd_markdown_output_path = (
+        Path(cd_markdown_path)
+        if cd_markdown_path is not None
+        else default_paths["cd_markdown"]
+    )
+
+    json_output_path.parent.mkdir(parents=True, exist_ok=True)
+    json_output_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    markdown_path.write_text(
+    markdown_output_path.write_text(
         render_profile_abcd_real_markdown(payload),
         encoding="utf-8",
     )
-    cd_markdown_path.write_text(
+    cd_markdown_output_path.write_text(
         render_profile_cd_real_markdown(payload),
         encoding="utf-8",
     )
     return {
-        "json": json_path,
-        "markdown": markdown_path,
-        "cd_markdown": cd_markdown_path,
+        "json": json_output_path,
+        "markdown": markdown_output_path,
+        "cd_markdown": cd_markdown_output_path,
     }
 
 

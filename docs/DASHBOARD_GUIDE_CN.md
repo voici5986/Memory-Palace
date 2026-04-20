@@ -50,7 +50,7 @@
 
 > 如果你在本地调试时设置了 `MCP_API_KEY_ALLOW_INSECURE_LOCAL=true`，并且请求是直连 loopback 地址，页面也可以不手动输入密钥就直接显示受保护数据。
 
-> **只保存 Dashboard 密钥** 会把这把 key 保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。现在这一步保存成功后会立刻在当前页面生效，不需要刷新再试；就算你打开向导前页面已经在用“运行时密钥已启用”，这里新保存的浏览器 key 也会马上接手当前页面的受保护请求。如果当前右上角显示的是“运行时密钥已启用”，打开 **配置向导** 后，当前 key 会直接预填进来，你可以不重打一遍，直接把它保存到浏览器会话或本地 `.env`。如果你在 **保存到本地 `.env`** 时 Dashboard key 输入框里有值，向导现在也会顺手把当前浏览器会话里的 key 同步刷新成这个值；如果你先把 Dashboard key 清空再保存 `.env`，它也会把浏览器里旧的 key 一起清掉。第一次往本地 `.env` 保存时，Dashboard key 现在也必须非空；留空会被后端直接拒绝。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在按文档口径走 `router + reranker` 路线；但它们只是建议起点，不代表已经配好。`Profile C` 更像本地 / private router 的起点，所以它预填的 `http://127.0.0.1:8001/v1` 会被当成真实本地地址，不算占位值。`Profile D` 保留的是远端模板地址，保存前还是要换成你自己的真实值。保存到本地 `.env` 前，向导会要求你把必填的远端字段补成真实值；现在真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都必须填一个真实的正整数维度，向导也不会再替你猜一个默认值。provider base 这里请填服务 base，不要手动填 `/embeddings`、`/rerank`、`/chat/completions` 这类具体接口后缀；这些常见后缀会自动去掉，但格式不对或指到 link-local 的地址会直接拦下。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的字段补齐，或者先把 reranker 关掉。
+> **只保存 Dashboard 密钥** 会把这把 key 保存在当前浏览器会话里（`sessionStorage`），直到你手动清除或这次浏览器会话结束。现在这一步保存成功后会立刻在当前页面生效，不需要刷新再试；就算你打开向导前页面已经在用“运行时密钥已启用”，这里新保存的浏览器 key 也会马上接手当前页面的受保护请求。如果当前右上角显示的是“运行时密钥已启用”，打开 **配置向导** 后，当前 key 会直接预填进来，你可以不重打一遍，直接把它保存到浏览器会话或本地 `.env`。如果你在 **保存到本地 `.env`** 时 Dashboard key 输入框里有值，向导现在也会顺手把当前浏览器会话里的 key 同步刷新成这个值；如果你先把 Dashboard key 清空再保存 `.env`，它也会把浏览器里旧的 key 一起清掉。第一次往本地 `.env` 保存时，Dashboard key 现在也必须非空；留空会被后端直接拒绝。向导里的“档位 C/D”预设（英文界面显示为 `Profile C/D`）现在按文档口径走 `router + reranker` 路线；但它们只是建议起点，不代表已经配好。`Profile C` 更像本地 / private router 的起点，所以它预填的 `http://127.0.0.1:8001/v1` 会被当成真实本地地址，不算占位值。`Profile D` 保留的是远端模板地址，保存前还是要换成你自己的真实值。保存到本地 `.env` 前，向导会要求你把必填的远端字段补成真实值；现在真正会卡住保存的是 `https://router.example.com/v1`、`router-embedding-model`、`router-reranker-model` 这类示例占位值。对任何远端 embedding backend（`api` / `router` / `openai`）来说，本地 `.env` 保存前都必须填一个真实的正整数维度，向导也不会再替你猜一个默认值。如果当前还没有任何 Dashboard 鉴权配置，而你第一次本地保存就把远端/provider-chain 配置一起带上，后端会先把这一步收敛成 auth bootstrap，只写 `MCP_API_KEY` / `MCP_API_KEY_ALLOW_INSECURE_LOCAL`；要真正把远端 embedding/reranker/LLM 字段写进去，还要等 auth 生效后再保存一次。provider base 这里请填服务 base，不要手动填 `/embeddings`、`/rerank`、`/chat/completions` 这类具体接口后缀；这些常见后缀会自动去掉，但格式不对或指到 link-local 的地址会直接拦下。如果你本机的 router 还没准备好，就手动把检索字段切回直连 `api` / `openai` 模式排障；如果此时 reranker 还保持开启，就也要把直连 reranker 的字段补齐，或者先把 reranker 关掉。
 
 > 如果你选择的是 **保存到本地 `.env`**，并且同时填了 Dashboard key，要记住 `.env` 写入和浏览器 key 保存是两步。现在只要浏览器本地存储失败，向导就会明确提示保存失败，不再给出误导性的成功提示。实际使用时，这通常意味着 `.env` 可能已经写进去了，但浏览器侧鉴权还没准备好。
 
@@ -385,7 +385,7 @@
 
 页面能打开但看不到数据，通常是因为 **还没配置 API 密钥**。点击右上角 **设置 API 密钥** 打开首启配置向导，输入你在 `.env` 中配置的 `MCP_API_KEY`，然后先用“只保存 Dashboard 密钥”让浏览器通过鉴权即可。这一步现在会立刻在当前页面生效，成功提示也会继续留在弹窗里，直到你自己关掉。只有在“本地 checkout + 非 Docker 运行”场景下，才建议顺手用它写 `.env`。如果“保存到本地 `.env`”提示失败，一个常见情况是后端 `.env` 已经写好了，但浏览器还是没把 Dashboard key 存下来。
 
-如果你走的是“保存到本地 `.env`”，再记一条当前边界：第一次本地保存要求 Dashboard key 非空；provider base 请填服务 base，不要手填 `/embeddings`、`/rerank`、`/chat/completions`。这些常见后缀会自动归一化，但格式不对或指到 link-local 的地址会直接被拒绝。
+如果你走的是“保存到本地 `.env`”，再记两条当前边界：第一次本地保存要求 Dashboard key 非空；如果当前还没有任何 Dashboard 鉴权，而这次保存又已经启用了远端/provider-chain 配置，后端会先只做 auth bootstrap，远端字段要等下一次带鉴权的保存再真正落盘。provider base 也请填服务 base，不要手填 `/embeddings`、`/rerank`、`/chat/completions`。这些常见后缀会自动归一化，但格式不对或指到 link-local 的地址会直接被拒绝。
 
 ### Q: 点击"写入记忆"后提示"已跳过"？
 

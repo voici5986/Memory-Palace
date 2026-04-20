@@ -43,6 +43,27 @@ async def test_sqlite_vec_rollout_defaults_keep_legacy_engine(
 
 
 @pytest.mark.asyncio
+async def test_sqlite_vec_rollout_invalid_requested_engine_surfaces_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "hash")
+    monkeypatch.setenv("RETRIEVAL_SQLITE_VEC_ENABLED", "true")
+    monkeypatch.setenv("RETRIEVAL_VECTOR_ENGINE", "sqlite_vec")
+    monkeypatch.setenv("RETRIEVAL_SQLITE_VEC_READ_RATIO", "100")
+
+    client = SQLiteClient(_sqlite_url(tmp_path / "sqlite-vec-invalid-engine.db"))
+    await client.init_db()
+    status_payload = await client.get_index_status()
+    await client.close()
+
+    capabilities = status_payload["capabilities"]
+    assert capabilities["vector_engine_requested"] == "legacy"
+    assert capabilities["vector_engine_requested_raw"] == "sqlite_vec"
+    assert capabilities["vector_engine_warning"] == "unsupported_vector_engine:sqlite_vec"
+    assert capabilities["vector_engine_effective"] == "legacy"
+
+
+@pytest.mark.asyncio
 async def test_sqlite_vec_rollout_enabled_without_extension_falls_back_to_legacy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

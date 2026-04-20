@@ -714,6 +714,8 @@ def test_explicit_learn_job_uses_dedicated_learn_pool(
         assert payload.get("status") == "prepared"
         job_id = str(payload.get("job_id") or "")
         assert job_id.startswith("learn-")
+        assert payload.get("rollback_endpoint") is None
+        assert payload.get("rollback_endpoint_aliases") == []
 
         assert job_id in maintenance_api._LEARN_JOBS
         assert job_id not in maintenance_api._IMPORT_JOBS

@@ -225,6 +225,37 @@ async def test_create_memory_returns_guard_fields_on_success(
     assert payload["ok"] is True
     assert payload["created"] is True
     assert payload["guard_action"] == "ADD"
+    assert payload["guard_method"] == "keyword"
+    assert fake_client.create_called is True
+
+
+@pytest.mark.asyncio
+async def test_create_memory_normalizes_invalid_guard_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "ADD",
+            "reason": "allow",
+            "method": "  BAD METHOD  ",
+        }
+    )
+    _patch_mcp_dependencies(monkeypatch, fake_client)
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://agent",
+        content="new information",
+        priority=2,
+        title="fresh_note",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["created"] is True
+    assert payload["guard_action"] == "ADD"
+    assert payload["guard_method"] == "unknown"
+    assert payload["guard_invalid_method"] is True
+    assert "invalid_guard_method:bad method" in str(payload.get("guard_reason") or "")
     assert fake_client.create_called is True
 
 
@@ -609,6 +640,38 @@ async def test_browse_create_node_is_blocked_by_write_guard(
     assert payload["created"] is False
     assert payload["guard_action"] == "NOOP"
     assert fake_client.create_called is False
+
+
+@pytest.mark.asyncio
+async def test_browse_create_node_normalizes_invalid_guard_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient(
+        guard_decision={
+            "action": "ADD",
+            "reason": "allow",
+            "method": "  BAD METHOD  ",
+        }
+    )
+    monkeypatch.setattr(browse_api, "get_sqlite_client", lambda: fake_client)
+
+    payload = await browse_api.create_node(
+        browse_api.NodeCreate(
+            parent_path="agent",
+            title="new_note",
+            content="create payload",
+            priority=1,
+            domain="core",
+        )
+    )
+
+    assert payload["success"] is True
+    assert payload["created"] is True
+    assert payload["guard_action"] == "ADD"
+    assert payload["guard_method"] == "unknown"
+    assert payload["guard_invalid_method"] is True
+    assert "invalid_guard_method:bad method" in str(payload.get("guard_reason") or "")
+    assert fake_client.create_called is True
 
 
 @pytest.mark.asyncio

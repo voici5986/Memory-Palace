@@ -119,6 +119,27 @@ async def test_search_memory_defaults_to_fast_tier_without_explicit_override(
 
 
 @pytest.mark.asyncio
+async def test_search_memory_fast_tier_ignores_raised_env_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _FakeClient()
+    monkeypatch.setattr(mcp_server, "FAST_INTERACTION_CANDIDATE_MULTIPLIER", 9)
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    raw = await mcp_server.search_memory(
+        query="recent release note",
+        include_session=False,
+    )
+    payload = json.loads(raw)
+
+    assert payload["interaction_tier"] == "fast"
+    assert payload["candidate_multiplier"] == 4
+    assert payload["candidate_multiplier_applied"] == 4
+
+
+@pytest.mark.asyncio
 async def test_search_memory_accepts_explicit_deep_tier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -632,6 +653,79 @@ async def test_read_memory_fast_path_refreshes_after_rollback(
         assert "first body" in rolled_back
         assert render_calls == 3
         assert rolled_back_cached == rolled_back
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_read_memory_alias_fast_path_invalidates_after_alias_remove_and_readd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "read-memory-fast-path-alias-readd.db"
+    snapshots_dir = tmp_path / "snapshots"
+    client = SQLiteClient(_sqlite_url(db_path))
+    manager = SnapshotManager(str(snapshots_dir))
+    await client.init_db()
+
+    original_fetch = mcp_server._fetch_and_format_memory
+    render_calls = 0
+    session_id = "fast-path-alias-remove-readd"
+
+    async def _counting_fetch(*args: Any, **kwargs: Any) -> str:
+        nonlocal render_calls
+        render_calls += 1
+        return await original_fetch(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "get_snapshot_manager", lambda: manager)
+    monkeypatch.setattr(mcp_server.runtime_state, "recent_reads", SessionRecentReadCache())
+    monkeypatch.setattr(mcp_server, "_fetch_and_format_memory", _counting_fetch)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+    monkeypatch.setattr(mcp_server, "_SESSION_ID", session_id)
+
+    try:
+        created = await client.create_memory(
+            parent_path="",
+            content="first body",
+            priority=1,
+            title="foo",
+            domain="core",
+        )
+        assert created["uri"] == "core://foo"
+
+        created_alias = await mcp_server.add_alias(
+            "core://foo-alias",
+            "core://foo",
+            priority=9,
+            disclosure="alias disclosure",
+        )
+        assert "core://foo-alias" in created_alias
+
+        first = await mcp_server.read_memory("core://foo-alias")
+        second = await mcp_server.read_memory("core://foo-alias")
+
+        assert second == first
+        assert render_calls == 1
+
+        delete_raw = await mcp_server.delete_memory("core://foo-alias")
+        delete_payload = json.loads(delete_raw)
+        assert delete_payload["deleted"] is True
+
+        recreated_alias = await mcp_server.add_alias(
+            "core://foo-alias",
+            "core://foo",
+            priority=9,
+            disclosure="alias disclosure",
+        )
+        assert "core://foo-alias" in recreated_alias
+
+        third = await mcp_server.read_memory("core://foo-alias")
+        fourth = await mcp_server.read_memory("core://foo-alias")
+
+        assert fourth == third
+        assert render_calls == 2
     finally:
         await client.close()
 

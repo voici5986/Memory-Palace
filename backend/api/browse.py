@@ -96,6 +96,8 @@ def _ensure_writable_domain_or_422(domain: str, *, operation: str) -> str:
 def _normalize_guard_decision(payload: Any, *, allow_bypass: bool = False) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
+    has_method = "method" in payload
+    raw_method = str(payload.get("method") or "").strip()
     reason = str(payload.get("reason") or "").strip()
     has_action = "action" in payload
     raw_action = str(payload.get("action") or "").strip().upper() if has_action else ""
@@ -108,7 +110,23 @@ def _normalize_guard_decision(payload: Any, *, allow_bypass: bool = False) -> di
         marker_value = raw_action or ("EMPTY" if has_action else "MISSING")
         marker = f"invalid_guard_action:{marker_value}"
         reason = marker if not reason else f"{marker}; {reason}"
-    method = str(payload.get("method") or "none").strip().lower() or "none"
+    method = raw_method.lower() or "none"
+    valid_methods = {
+        "none",
+        "unknown",
+        "keyword",
+        "embedding",
+        "llm",
+        "write_guard_llm",
+        "exception",
+    }
+    invalid_method = False
+    if method not in valid_methods:
+        invalid_method = True
+        marker_value = method or ("empty" if has_method else "missing")
+        marker = f"invalid_guard_method:{marker_value}"
+        reason = marker if not reason else f"{marker}; {reason}"
+        method = "unknown"
     target_id = payload.get("target_id")
     if not isinstance(target_id, int) or target_id <= 0:
         target_id = None
@@ -121,6 +139,7 @@ def _normalize_guard_decision(payload: Any, *, allow_bypass: bool = False) -> di
         "method": method,
         "target_id": target_id,
         "target_uri": target_uri,
+        "invalid_method": invalid_method,
     }
 
 
@@ -131,6 +150,7 @@ def _guard_fields(payload: dict[str, Any]) -> dict[str, Any]:
         "guard_method": payload.get("method"),
         "guard_target_id": payload.get("target_id"),
         "guard_target_uri": payload.get("target_uri"),
+        "guard_invalid_method": bool(payload.get("invalid_method")),
     }
 
 

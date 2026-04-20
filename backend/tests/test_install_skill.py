@@ -364,9 +364,7 @@ def test_codex_server_block_uses_shell_wrapper_for_git_bash_windows_host(
     rendered = module._codex_server_block_text()
 
     assert 'command = "bash"' in rendered
-    assert str(project_root / "scripts" / "run_memory_palace_mcp_stdio.sh").replace(
-        "\\", "\\\\"
-    ) in rendered
+    assert (project_root / "scripts" / "run_memory_palace_mcp_stdio.sh").as_posix() in rendered
     assert "mcp_wrapper.py" not in rendered
 
 

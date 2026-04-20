@@ -2,7 +2,7 @@
 
 本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
-> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-19 review 后修复的补充验证一起收口到公开口径里。2026-04-19 这轮补充验证只重跑了完整 backend 测试（`1039 passed, 22 skipped`）、frontend 测试（`173 passed`）、frontend build、frontend typecheck，以及一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮补跑里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
+> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-20 的收口验证一起收口到公开口径里。2026-04-20 这轮收口验证重跑了完整 backend 测试（`1071 passed, 22 skipped`）、frontend 测试（`187 passed`）、frontend build、frontend typecheck、repo-local live MCP e2e（`PASS`）和一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮收口里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
 
 ---
 
@@ -16,7 +16,9 @@
 | 当前发布说明 | `docs/changelog/release_v3.7.1_2026-03-26.md` |
 | 发布对比摘要 | `docs/changelog/release_summary_vs_old_project_2026-03-06.md` |
 
-> 数据生成时间：`2026-02-19T06:55:30+00:00`（早期门禁基线）/ `2026-04-17T10:35:51+00:00`（当前公开验证）/ `2026-04-18T06:31:05+00:00`（本 session rerun）/ `2026-04-19`（review 后修复验证刷新；benchmark 表未重跑）
+> 数据生成时间：`2026-02-19T06:55:30+00:00`（早期门禁基线）/ `2026-04-17T10:35:51+00:00`（当前公开验证）/ `2026-04-18T06:31:05+00:00`（本 session rerun）/ `2026-04-20`（收口验证刷新；benchmark 表未重跑）
+
+> 工件路径补充：当前公开 benchmark helpers 默认把运行产物写到 `backend/tests/benchmark/artifacts/<run-token>/...`；如果你要固定路径，显式传 `artifact_dir` 即可。这个目录默认已被 `.gitignore` 忽略，避免并行 benchmark 把临时工件带进工作树。
 
 ---
 
@@ -41,7 +43,7 @@
 
 ## 2. 检索评测（A/B/CD 小样本门禁）
 
-**来源**：`profile_ab_metrics.json`（`sample_size=100`，每档 3 个数据集 × 100 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped benchmark 产物 `backend/tests/benchmark/artifacts/<run-token>/profile_ab_metrics.json`（`sample_size=100`，每档 3 个数据集 × 100 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
 
 | 档位 | 模式 | 数据集 | HR@10 | MRR | NDCG@10 | Recall@10 | p50(ms) | p95(ms) | 降级率 |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -59,7 +61,7 @@
 
 ## 3. 检索评测（真实 A/B/C/D 运行）
 
-**来源**：`profile_abcd_real_metrics.json`（`sample_size_requested=8`，2 个数据集 × 8 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped real-run 产物 `backend/tests/benchmark/artifacts/<run-token>/profile_abcd_real_metrics.json`（`sample_size_requested=8`，2 个数据集 × 8 条查询；通常由 `backend/tests/benchmark/` 下的 benchmark helpers 在维护阶段生成）
 
 策略：每条查询按 `first_relevant_only=true` 仅保留首个相关文档，额外灌入 `200` 条干扰文档，`candidate_multiplier=8`，随机种子 `20260219`。
 
@@ -77,11 +79,11 @@
 > **说明**：
 >
 > - `Profile B` 仍然是**默认交互档**：延迟最低，适合 CLI / IDE 日常 recall。
-> - `Profile C` 是**显式深检索档**：质量明显高于 B，p95 仍在百毫秒级。
-> - `Profile D` 仍然是**最高质量档**：质量最高，但 p95 已到秒级，只适合“质量优先于时延”的场景。
-> - C/D 为真实外部 embedding + reranker 链路调用，延迟显著高于本地 keyword/hash 档位。
+> - `Profile C` 是**显式深检索档**：在这套 benchmark helper 口径里，它走的是 `hybrid + API embedding`，**不带 reranker**，质量明显高于 B，p95 仍在百毫秒级。
+> - `Profile D` 仍然是**最高质量档**：在同一套 helper 口径里，它是在 `Profile C` 基础上再加 reranker，所以质量最高，但 p95 已到秒级，只适合“质量优先于时延”的场景。
+> - 这套 real benchmark helper 的 `Profile C/D` 是维护期评测契约，不等于 shipped deployment templates 里的 `Profile C/D` 默认值与默认开关。
 > - 这轮 C/D 指标是基于**运行时注入的、用户显式提供的 embedding 维度**得到的；公开模板现在不再发布 `4096` 这类猜测默认值。
-> - 当前 real runner 还会把**查询阶段**与**建索引阶段**的降级一起记进公开门禁口径；如果 reranker 缺配置、响应无效，或索引阶段已经 fallback，这轮结果不会再被写成“干净 PASS”。
+> - 当前 real runner 还会把**查询阶段**与**建索引阶段**的降级一起记进公开门禁口径；其中 embedding 侧降级会影响 C/D，reranker 缺配置或响应无效这类无效原因则主要属于 D 的 gate 语义，不再被写成“干净 PASS”。
 > - 这轮结果是在**当前档位的有效 embedding 维度已经对齐**的前提下得到的，不表示你可以把 B 的旧向量和 C/D 的旧向量拿来直接混用；如果切档后维度不一致，当前运行时会返回 `embedding_dim_mismatch_requires_reindex` / `vector_dim_mismatch_requires_reindex`，需要重建索引或分开数据库。
 > - 所有 Phase 6 Gate 均为 PASS，表明当前公开档位在这轮复核里没有出现失效或请求失败。
 
@@ -123,7 +125,16 @@
 - `Profile B` 还是默认交互档，质量已经明显高于 A，延迟也还很低。
 - `Profile C/D` 这轮质量都跑满了，但时延明显更高，属于按需打开的深检索档。
 - `Profile A` 依旧只是低配兜底，不适合拿来代表语义检索质量。
-- 后续 2026-04-19 的补跑只覆盖完整 backend/frontend 测试、frontend build/typecheck 和 repo-local `Profile B` 真实浏览器 smoke；这张 benchmark 表和 live MCP e2e 都没有在那轮重跑里重算。
+- 后续 2026-04-20 的收口验证重跑了完整 backend/frontend 测试、frontend build/typecheck、repo-local live MCP e2e 和 repo-local `Profile B` 真实浏览器 smoke；这张 benchmark 表本身没有在那轮重算。
+
+### 3.3 2026-04-20 同配置 follow-up（默认 reranker 权重）
+
+这轮 follow-up 不是新公开基线，而是针对同配置 maintenance rerun 里 `Profile D` 的 rerank 融合回退做的一次补充复核。
+
+- 对照的是同一组 `sample_size=8`、`extra_distractors=200`、`candidate_multiplier=8` 的小样本 real-run 口径。
+- 当 generic runtime 默认 `RETRIEVAL_RERANKER_WEIGHT` 还是 `0.25` 时，`Profile D` 在 `BEIR NFCorpus` 上出现过一轮回退：`MRR=0.59375`、`NDCG@10=0.632701`。
+- 把 generic runtime 默认值调回 `0.40` 后，同配置 follow-up 下 `Profile D` 的 `BEIR NFCorpus` 回到 `HR@10=0.750`、`MRR=0.65625`、`NDCG@10=0.678835`，`p95≈3158ms`。
+- 这条 follow-up 只说明 D 档位的 rerank 融合默认值已经按当前仓库真值收口，不代表 shipped `Profile C/D` 模板的显式权重也跟着变成 `0.40`。
 
 ## 3.5 旧版 vs 当前版本（同口径摘要）
 
@@ -206,7 +217,7 @@
 
 ### Write Guard（写入守卫）
 
-**来源**：`write_guard_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped 产物 `backend/tests/benchmark/artifacts/<run-token>/write_guard_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -225,7 +236,7 @@
 
 ### Intent 分类（查询意图识别）
 
-**来源**：`intent_accuracy_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped 产物 `backend/tests/benchmark/artifacts/<run-token>/intent_accuracy_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -247,7 +258,7 @@
 
 ### Gist 质量（上下文压缩摘要）
 
-**来源**：`compact_context_gist_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped 产物 `backend/tests/benchmark/artifacts/<run-token>/compact_context_gist_quality_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -271,7 +282,7 @@
 
 ### Prompt Safety（反射提示安全契约）
 
-**来源**：`prompt_safety_contract_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped 产物 `backend/tests/benchmark/artifacts/<run-token>/prompt_safety_contract_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | 指标 | 值 | 阈值 | 状态 |
 |---|---:|---:|---|
@@ -283,7 +294,7 @@
 
 ### Reflection Lane（反射并发通道）
 
-**来源**：`reflection_lane_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
+**来源**：当前最新一轮 run-scoped 产物 `backend/tests/benchmark/artifacts/<run-token>/reflection_lane_metrics.json`（通常由 benchmark helpers 在维护阶段生成）
 
 | Metric | Value | Threshold | Status |
 |---|---:|---:|---|
@@ -313,14 +324,15 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`1039 passed / 22 skipped`
-- Frontend 全量：`173 passed`
+- Backend 非 benchmark 全量：`1071 passed / 22 skipped`
+- Frontend 全量：`187 passed`
 - Frontend `typecheck` / `build`：通过
 - repo-local `Profile B` 真实浏览器 smoke：通过
-- repo-local live MCP e2e：这轮未重跑，继续沿用上一轮已通过口径
-- 真实 A/B/C/D benchmark：这轮未重跑，沿用 2026-04-18 rerun 表格
+- repo-local live MCP e2e：通过（`docs/skills/MCP_LIVE_E2E_REPORT.md` 全 `PASS`）
+- Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close
+- 真实 A/B/C/D benchmark：本 session 早些时候已重跑；这轮收口未重算，继续沿用第 3 节表格
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界
-- `skills+MCP` / `single-MCP`：本轮未重跑，这里不追加新结论
+- `skills+MCP` / `single-MCP`：skill smoke 已重跑；`claude` / `codex` / `gemini` 为 `PASS`，`cursor` / `agent` / `antigravity` 为 `PARTIAL`，`gemini_live` 为 `SKIP`。`OpenCode` 在整轮脚本里出现过一次 timeout，但单独重跑通过；这里更适合按宿主波动理解，不把它写成稳定全绿
 
 这里故意不把这轮结果写成“全链路全绿”。尤其是 `skills-only`，现在还只能写 PARTIAL，不能往上拔。
 

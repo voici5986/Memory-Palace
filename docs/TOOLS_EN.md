@@ -71,7 +71,7 @@ The URI here means a **Memory Palace memory address**, not an operating-system f
 - Detect duplicate content (avoiding redundant writes)
 - Suggest merging into existing memories (returning `UPDATE` / `NOOP` actions)
 
-Write Guard decision methods may include `llm`, `embedding`, `keyword`, `fallback`, `none`, or `exception`, depending on current configuration and service availability.
+Write Guard decision methods may include `keyword`, `embedding`, `llm`, `write_guard_llm`, `unknown`, `none`, or `exception`, depending on current configuration and service availability.
 
 ---
 
@@ -316,7 +316,7 @@ search_memory(
 )
 ```
 
-> 📌 `candidate_multiplier` is only a first-round expansion hint, not an unlimited pool-size switch. The current implementation still keeps a hard cap, and the metadata now reports the effective value as `candidate_limit_applied`.
+> 📌 `candidate_multiplier` is only a first-round expansion hint, not an unlimited pool-size switch. The current implementation still keeps a hard cap; the public response now exposes `candidate_multiplier_applied`, while backend metadata still carries `candidate_limit_applied` for the hard ceiling.
 
 **Retrieval Modes:**
 
@@ -353,7 +353,7 @@ search_memory(
 - The default is `verbose=true`, which keeps debug-heavy fields such as `query_preprocess`, `intent_profile`, `session_first_metrics`, and `backend_metadata`
 - If you only care about the final results, scores, and degrade reasons, pass `verbose=false` to keep the response shorter and more MCP-context-friendly
 - If the final path-state revalidation itself hits a lookup error, the current implementation drops that result and appends `path_revalidation_lookup_failed` to `degrade_reasons`; it no longer fail-opens by returning a stale URI as if it were still current
-- `candidate_multiplier` is still only a hint about how far you want the first-round pool to expand; the real applied cap is `candidate_limit_applied`, and the fast interaction tier no longer gets widened again later by backend intent heuristics
+- `candidate_multiplier` is still only a hint about how far you want the first-round pool to expand; check `candidate_multiplier_applied` in the public response first and `candidate_limit_applied` in backend metadata for the hard ceiling; on the `fast` interaction tier the first-round multiplier is now hard-capped at `4`, and later intent heuristics no longer widen it again
 
 **Usage Examples:**
 
@@ -399,7 +399,6 @@ compact_context(
 1. `llm_gist` — Call LLM to generate summary (requires OpenAI-compatible API in `.env`)
 2. `extractive_bullets` — Extracted key points
 3. `sentence_fallback` — Sentence-level fallback
-4. `truncate_fallback` — Truncation fallback
 
 **Practical Note:**
 
@@ -525,7 +524,7 @@ Return values for `create_memory` and `update_memory` include the following Writ
 |---|---|---|
 | `guard_action` | `ADD` / `UPDATE` / `NOOP` / `DELETE` / `BYPASS` | Decision action from Guard |
 | `guard_reason` | String | Reason for the decision |
-| `guard_method` | `llm` / `embedding` / `keyword` / `fallback` / `none` / `exception` | Detection method used |
+| `guard_method` | `keyword` / `embedding` / `llm` / `write_guard_llm` / `unknown` / `none` / `exception` | Detection method used |
 
 ### Indexing Queue Stats Fields
 
@@ -635,12 +634,12 @@ RETRIEVAL_RERANKER_API_KEY=           # API Key
 RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 # ── Weight Tuning ──
-RETRIEVAL_RERANKER_WEIGHT=0.25        # Reranker weight (primary tuning parameter)
+RETRIEVAL_RERANKER_WEIGHT=0.40        # Reranker weight (primary tuning parameter)
 RETRIEVAL_HYBRID_KEYWORD_WEIGHT=0.7   # Keyword weight
 RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # Semantic weight
 ```
 
-> 💡 The **primary tuning parameter** is `RETRIEVAL_RERANKER_WEIGHT`. Even for locally deployed Embedding / Rerankers, OpenAI-compatible API parameters must be configured.
+> 💡 The **primary tuning parameter** is `RETRIEVAL_RERANKER_WEIGHT`. The `0.40` shown here is the generic `.env.example` default; shipped `Profile C/D` templates can still pin their own explicit values. Even for locally deployed Embedding / Rerankers, OpenAI-compatible API parameters must be configured.
 >
 > Configuration semantics: `RETRIEVAL_EMBEDDING_BACKEND` only controls the embedding path; there is no `RETRIEVAL_RERANKER_BACKEND` switch. Reranker parameters prioritize `RETRIEVAL_RERANKER_*`, falling back to `ROUTER_*` (and finally `OPENAI_*` base/key) if missing.
 >

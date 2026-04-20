@@ -14,7 +14,7 @@
 >
 > The frontend currently defaults to English; the language button in the upper-right corner lets you switch between English and Chinese with one click, and the browser will remember your choice. If a stored language already exists, the current frontend now applies that choice to `document.lang` and the page title before React mounts.
 
-> Current docs in this English set reflect the 2026-04-18 verified behavior for Review rollback safety, fail-closed search revalidation, side-effect-free setup status probing, and the latest Dashboard language/setup interaction details.
+> Current docs in this English set reflect the 2026-04-20 verified behavior for Review rollback safety, fail-closed search revalidation, auth-aware Observability SSE, side-effect-free setup status probing, and the latest Dashboard language/setup interaction details.
 
 ![System Architecture Diagram](images/系统架构图.png)
 
@@ -63,4 +63,4 @@
 |---|---|
 | [EVALUATION_EN.md](EVALUATION_EN.md) | Public benchmark methodology, summary of key A/B/C/D metrics, and reproduction commands |
 
-> Verification note for this session: backend reruns were `1017 passed / 22 skipped`; frontend reruns were `173 passed`; frontend `typecheck`, build, `bash scripts/pre_publish_check.sh`, and `docker compose -f docker-compose.ghcr.yml config` all passed. This same session also reran a repo-local macOS `Profile B` real-browser smoke and a local C/D retrieval + reranker + LLM smoke behind an explicit private-target allowlist. Repo-local live MCP e2e, Docker one-click `Profile C/D`, native Windows, and native Linux host runtime paths were not rerun in this round and still keep explicit target-environment recheck boundaries.
+> Verification note for this session: backend reruns were `1071 passed / 22 skipped`; frontend reruns were `187 passed`; frontend typecheck and build both passed. This same session also reran a repo-local macOS `Profile B` real-browser smoke, reran repo-local live MCP e2e with a full `PASS` summary, and rechecked the Docker readiness/auth path: Dashboard `/` returned `200`, backend `/health` returned `200`, and protected setup/SSE requests remained fail-closed. The public A/B/C/D benchmark tables were not recalculated in this closeout pass. Docker one-click `Profile C/D`, native Windows, and native Linux host runtime paths still keep explicit target-environment recheck boundaries.

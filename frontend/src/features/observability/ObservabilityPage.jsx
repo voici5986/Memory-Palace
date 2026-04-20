@@ -18,6 +18,7 @@ import {
   cancelIndexJob,
   extractApiError,
   getIndexJob,
+  getMaintenanceAuthState,
   getObservabilitySummary,
   retryIndexJob,
   runObservabilitySearch,
@@ -26,6 +27,7 @@ import {
   triggerSleepConsolidation,
 } from '../../lib/api';
 import { formatDateTime as formatDateTimeValue, formatNumber as formatNumberValue } from '../../lib/format';
+import { bindEventSourceListeners, createEventSource, DEFAULT_SSE_REFRESH_EVENT_NAMES } from '../../lib/sse';
 
 const MODE_OPTIONS = ['hybrid', 'semantic', 'keyword'];
 const PANEL_CLASS =
@@ -530,6 +532,39 @@ export default function ObservabilityPage() {
 
   useEffect(() => {
     loadSummary();
+  }, [loadSummary]);
+
+  useEffect(() => {
+    let eventSource;
+    try {
+      const maintenanceAuth = getMaintenanceAuthState();
+      eventSource = createEventSource('/sse', {
+        auth: maintenanceAuth
+          ? {
+            key: maintenanceAuth.key,
+            mode: maintenanceAuth.mode === 'bearer' ? 'bearer' : 'header',
+          }
+          : null,
+      });
+    } catch (_error) {
+      return undefined;
+    }
+
+    const refreshFromLiveEvent = () => {
+      void loadSummary();
+    };
+    const detachListeners = bindEventSourceListeners(
+      eventSource,
+      DEFAULT_SSE_REFRESH_EVENT_NAMES,
+      refreshFromLiveEvent,
+    );
+
+    return () => {
+      detachListeners();
+      if (typeof eventSource?.close === 'function') {
+        eventSource.close();
+      }
+    };
   }, [loadSummary]);
 
   useEffect(() => {

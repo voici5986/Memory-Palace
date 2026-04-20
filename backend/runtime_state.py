@@ -856,6 +856,29 @@ class SessionRecentReadCache:
             self._mark_session_seen(sid)
             return entry.payload
 
+    async def invalidate(
+        self,
+        *,
+        session_id: Optional[str],
+        uri: str,
+    ) -> None:
+        sid = _normalize_session_id(session_id)
+        clean_uri = str(uri or "").strip()
+        if not clean_uri:
+            return
+
+        async with self._guard:
+            self._prune_session_unlocked(sid)
+            entries = self._values.get(sid)
+            if not entries:
+                return
+            entries.pop(clean_uri, None)
+            if not entries:
+                self._values.pop(sid, None)
+                self._session_last_seen.pop(sid, None)
+                return
+            self._mark_session_seen(sid)
+
 
 class SessionFlushTracker:
     """Tracks session activity and produces compact flush summaries."""
@@ -1480,42 +1503,29 @@ class VitalityDecayCoordinator:
             "applied": False,
             "reason": "not_started",
         }
+        self._inflight_task: Optional[asyncio.Task[Dict[str, Any]]] = None
+        self._inflight_force = False
 
-    async def run_decay(
+    async def _run_decay_once(
         self,
         *,
         client_factory: Callable[[], Any],
-        force: bool = False,
-        reason: str = "runtime",
+        force: bool,
+        reason: str,
+        started_at: float,
     ) -> Dict[str, Any]:
-        async with self._guard:
-            now_ts = time.time()
-            if (
-                not force
-                and self._last_check_ts > 0
-                and (now_ts - self._last_check_ts) < self._check_interval_seconds
-            ):
-                return dict(self._last_result)
-
-            if not callable(client_factory):
-                self._last_result = {
-                    "applied": False,
-                    "degraded": True,
-                    "reason": "client_factory_unavailable",
-                }
-                self._last_check_ts = now_ts
-                return dict(self._last_result)
-
+        current_task = asyncio.current_task()
+        payload: Optional[Dict[str, Any]] = None
+        try:
             client = client_factory()
             decay_method = getattr(client, "apply_vitality_decay", None)
             if not callable(decay_method):
-                self._last_result = {
+                payload = {
                     "applied": False,
                     "degraded": True,
                     "reason": "apply_vitality_decay_unavailable",
                 }
-                self._last_check_ts = now_ts
-                return dict(self._last_result)
+                return dict(payload)
 
             try:
                 payload = decay_method(force=bool(force), reason=(reason or "runtime"))
@@ -1531,9 +1541,73 @@ class VitalityDecayCoordinator:
                     "reason": str(exc),
                 }
 
-            self._last_result = payload
-            self._last_check_ts = now_ts
             return dict(payload)
+        finally:
+            async with self._guard:
+                if payload is not None:
+                    self._last_result = payload
+                    self._last_check_ts = started_at
+                if self._inflight_task is current_task:
+                    self._inflight_task = None
+                    self._inflight_force = False
+
+    async def run_decay(
+        self,
+        *,
+        client_factory: Callable[[], Any],
+        force: bool = False,
+        reason: str = "runtime",
+    ) -> Dict[str, Any]:
+        while True:
+            async with self._guard:
+                now_ts = time.time()
+                inflight_task = self._inflight_task
+                inflight_force = self._inflight_force
+
+                if inflight_task is not None:
+                    wait_task = inflight_task
+                    created_task = False
+                    rerun_after_wait = bool(force and not inflight_force)
+                else:
+                    if (
+                        not force
+                        and self._last_check_ts > 0
+                        and (now_ts - self._last_check_ts) < self._check_interval_seconds
+                    ):
+                        return dict(self._last_result)
+
+                    if not callable(client_factory):
+                        self._last_result = {
+                            "applied": False,
+                            "degraded": True,
+                            "reason": "client_factory_unavailable",
+                        }
+                        self._last_check_ts = now_ts
+                        return dict(self._last_result)
+
+                    wait_task = asyncio.create_task(
+                        self._run_decay_once(
+                            client_factory=client_factory,
+                            force=force,
+                            reason=reason,
+                            started_at=now_ts,
+                        )
+                    )
+                    self._inflight_task = wait_task
+                    self._inflight_force = bool(force)
+                    created_task = True
+                    rerun_after_wait = False
+
+            try:
+                result = await asyncio.shield(wait_task)
+            except Exception:
+                if created_task:
+                    raise
+                continue
+
+            if rerun_after_wait:
+                continue
+            return dict(result)
 
     async def status(self) -> Dict[str, Any]:
         async with self._guard:

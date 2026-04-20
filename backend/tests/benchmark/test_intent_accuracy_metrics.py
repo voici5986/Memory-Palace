@@ -13,12 +13,16 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))
 
-from helpers.common import load_thresholds_v1
+from helpers.common import (
+    BENCHMARK_ARTIFACT_DIR,
+    benchmark_artifact_path,
+    load_thresholds_v1,
+)
 
 
 INTENT_GOLD_SET_PATH = BENCHMARK_DIR.parent / "fixtures" / "intent_gold_set.jsonl"
-INTENT_JSON_ARTIFACT = BENCHMARK_DIR / "intent_accuracy_metrics.json"
-INTENT_MARKDOWN_ARTIFACT = BENCHMARK_DIR / "intent_accuracy_metrics.md"
+INTENT_JSON_ARTIFACT = benchmark_artifact_path("intent_accuracy_metrics.json")
+INTENT_MARKDOWN_ARTIFACT = benchmark_artifact_path("intent_accuracy_metrics.md")
 _SQLITE_MEMORY_URL = "sqlite+aiosqlite:///:memory:"
 
 
@@ -39,6 +43,7 @@ def _load_gold_rows() -> List[Dict[str, Any]]:
 
 
 def _write_artifacts(payload: Dict[str, Any]) -> None:
+    INTENT_JSON_ARTIFACT.parent.mkdir(parents=True, exist_ok=True)
     INTENT_JSON_ARTIFACT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -112,5 +117,7 @@ async def test_intent_accuracy_metrics_threshold_and_artifacts() -> None:
     _write_artifacts(payload)
 
     assert payload["gate_pass"] is True
+    assert INTENT_JSON_ARTIFACT.parent == BENCHMARK_ARTIFACT_DIR
+    assert INTENT_JSON_ARTIFACT.parent != BENCHMARK_DIR
     assert INTENT_JSON_ARTIFACT.exists()
     assert INTENT_MARKDOWN_ARTIFACT.exists()

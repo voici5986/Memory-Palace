@@ -38,7 +38,7 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "demo.db"
 WINDOWS_VENV_PYTHON = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
 POSIX_VENV_PYTHON = BACKEND_DIR / ".venv" / "bin" / "python"
 SQLITE_DATABASE_URL_SCHEME = "sqlite+aiosqlite:"
-DOCKER_INTERNAL_SQLITE_PREFIXES = ("/app/", "/data/")
+DOCKER_INTERNAL_SQLITE_ROOTS = ("/app", "/data")
 _LOCAL_NO_PROXY_HOSTS = ("localhost", "127.0.0.1", "::1", "host.docker.internal")
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -149,8 +149,8 @@ def is_docker_internal_database_url(value: str | None) -> bool:
         return False
     normalized_path = normalized_path.casefold()
     return any(
-        normalized_path.startswith(prefix)
-        for prefix in DOCKER_INTERNAL_SQLITE_PREFIXES
+        normalized_path == root or normalized_path.startswith(f"{root}/")
+        for root in DOCKER_INTERNAL_SQLITE_ROOTS
     )
 
 

@@ -12,13 +12,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Set
 
-from .common import BENCHMARK_DIR, DATASETS_DIR
+from .common import (
+    DATASETS_DIR,
+    benchmark_artifact_path,
+    render_repo_relative_path,
+)
 
-PROFILE_JSON_ARTIFACT = BENCHMARK_DIR / "profile_ab_metrics.json"
+PROFILE_JSON_ARTIFACT = benchmark_artifact_path("profile_ab_metrics.json")
 PROFILE_MARKDOWN_ARTIFACTS: Dict[str, Path] = {
-    "profile_a": BENCHMARK_DIR / "benchmark_results_profile_a.md",
-    "profile_b": BENCHMARK_DIR / "benchmark_results_profile_b.md",
-    "profile_cd": BENCHMARK_DIR / "benchmark_results_profile_cd.md",
+    "profile_a": benchmark_artifact_path("benchmark_results_profile_a.md"),
+    "profile_b": benchmark_artifact_path("benchmark_results_profile_b.md"),
+    "profile_cd": benchmark_artifact_path("benchmark_results_profile_cd.md"),
 }
 MEMORY_GOLD_SET_PATH = DATASETS_DIR.parent / "fixtures" / "memory_gold_set.jsonl"
 PROFILE_CD_INVALID_GATE_REASONS = {
@@ -121,6 +125,29 @@ def _resolve_path(project_root: Path, value: str) -> Path:
     if path.is_absolute():
         return path
     return project_root / path
+
+
+def build_profile_ab_artifact_paths(
+    artifact_dir: Path | str | None = None,
+) -> Dict[str, Path]:
+    return {
+        "json": benchmark_artifact_path(
+            "profile_ab_metrics.json",
+            artifact_dir=artifact_dir,
+        ),
+        "profile_a": benchmark_artifact_path(
+            "benchmark_results_profile_a.md",
+            artifact_dir=artifact_dir,
+        ),
+        "profile_b": benchmark_artifact_path(
+            "benchmark_results_profile_b.md",
+            artifact_dir=artifact_dir,
+        ),
+        "profile_cd": benchmark_artifact_path(
+            "benchmark_results_profile_cd.md",
+            artifact_dir=artifact_dir,
+        ),
+    }
 
 
 def _load_manifest(dataset_key: str) -> Mapping[str, Any]:
@@ -328,6 +355,7 @@ def build_profile_ab_metrics(
 def _render_profile_markdown(
     profile_payload: Mapping[str, Any],
     generated_at_utc: str,
+    json_artifact_path: Path,
     phase6_payload: Mapping[str, Any] | None = None,
 ) -> str:
     profile_key = str(profile_payload["profile"])
@@ -403,7 +431,7 @@ def _render_profile_markdown(
             "",
             "## Contract",
             "",
-            "- json_artifact: `backend/tests/benchmark/profile_ab_metrics.json`",
+            f"- json_artifact: `{render_repo_relative_path(json_artifact_path)}`",
             "- source: `backend/tests/benchmark_results.md`",
             "- memory_gold_set: `backend/tests/fixtures/memory_gold_set.jsonl`",
             "",
@@ -472,26 +500,31 @@ def _render_profile_markdown(
     return "\n".join(lines)
 
 
-def write_profile_ab_artifacts(payload: Mapping[str, Any]) -> Dict[str, Path]:
-    BENCHMARK_DIR.mkdir(parents=True, exist_ok=True)
-    PROFILE_JSON_ARTIFACT.write_text(
+def write_profile_ab_artifacts(
+    payload: Mapping[str, Any],
+    *,
+    artifact_dir: Path | str | None = None,
+) -> Dict[str, Path]:
+    artifacts = build_profile_ab_artifact_paths(artifact_dir)
+    artifacts["json"].parent.mkdir(parents=True, exist_ok=True)
+    artifacts["json"].write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
     generated_at_utc = str(payload["generated_at_utc"])
-    artifacts: Dict[str, Path] = {"json": PROFILE_JSON_ARTIFACT}
     profiles = payload["profiles"]
     phase6_payload = payload.get("phase6")
-    for profile_key, artifact_path in PROFILE_MARKDOWN_ARTIFACTS.items():
+    for profile_key in ("profile_a", "profile_b", "profile_cd"):
+        artifact_path = artifacts[profile_key]
         profile_payload = profiles[profile_key]
         artifact_path.write_text(
             _render_profile_markdown(
                 profile_payload,
                 generated_at_utc,
+                artifacts["json"],
                 phase6_payload=phase6_payload if profile_key == "profile_cd" else None,
             ),
             encoding="utf-8",
         )
-        artifacts[profile_key] = artifact_path
     return artifacts

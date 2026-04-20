@@ -185,6 +185,7 @@ _FAST_INTERACTION_CANDIDATE_MULTIPLIER = _shared_env_int(
     _DEFAULT_SEARCH_CANDIDATE_MULTIPLIER,
     minimum=1,
 )
+_FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER = 4
 _DEEP_INTERACTION_CANDIDATE_MULTIPLIER = _shared_env_int(
     "DEEP_INTERACTION_CANDIDATE_MULTIPLIER",
     8,
@@ -868,23 +869,11 @@ def _build_reflection_learn_job_response(
             "updated_at": now,
         }
 
-    rollback_endpoint = f"/maintenance/import/jobs/{batch_id}/rollback"
-    rollback_endpoint_aliases = [
-        f"/maintenance/import/jobs/{batch_id}/rollback",
-        f"/maintenance/learn/jobs/{batch_id}/rollback",
-    ]
-    if executed and review_snapshot:
-        review_session_id = str(review_snapshot.get("session_id") or "").strip()
-        review_resource_id = str(review_snapshot.get("resource_id") or "").strip()
-        if review_session_id and review_resource_id:
-            rollback_endpoint = (
-                f"/review/sessions/{review_session_id}/rollback/"
-                f"{quote(review_resource_id, safe='')}"
-            )
-            rollback_endpoint_aliases = [
-                rollback_endpoint,
-                f"/maintenance/learn/jobs/{batch_id}/rollback",
-            ]
+    rollback_endpoint, rollback_endpoint_aliases = _build_learn_job_rollback_paths(
+        job_status=job_status,
+        batch_id=batch_id,
+        review_snapshot=review_snapshot if executed else None,
+    )
 
     response_payload = dict(result)
     response_payload.update(
@@ -897,6 +886,37 @@ def _build_reflection_learn_job_response(
         }
     )
     return accepted, batch_id, job_payload, response_payload
+
+
+def _build_learn_job_rollback_paths(
+    *,
+    job_status: str,
+    batch_id: str,
+    review_snapshot: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[str], List[str]]:
+    if job_status == "prepared":
+        return None, []
+
+    rollback_endpoint = f"/maintenance/import/jobs/{batch_id}/rollback"
+    rollback_endpoint_aliases = [
+        f"/maintenance/import/jobs/{batch_id}/rollback",
+        f"/maintenance/learn/jobs/{batch_id}/rollback",
+    ]
+
+    if job_status == "executed" and isinstance(review_snapshot, dict):
+        review_session_id = str(review_snapshot.get("session_id") or "").strip()
+        review_resource_id = str(review_snapshot.get("resource_id") or "").strip()
+        if review_session_id and review_resource_id:
+            rollback_endpoint = (
+                f"/review/sessions/{review_session_id}/rollback/"
+                f"{quote(review_resource_id, safe='')}"
+            )
+            rollback_endpoint_aliases = [
+                rollback_endpoint,
+                f"/maintenance/learn/jobs/{batch_id}/rollback",
+            ]
+
+    return rollback_endpoint, rollback_endpoint_aliases
 
 
 def _normalize_import_parent_path(parent_path: Optional[str]) -> str:
@@ -3565,6 +3585,11 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
 
     await _put_learn_job(job_payload)
 
+    rollback_endpoint, rollback_endpoint_aliases = _build_learn_job_rollback_paths(
+        job_status=job_status,
+        batch_id=batch_id,
+    )
+
     response_payload = {
         "ok": accepted,
         "status": job_status,
@@ -3572,11 +3597,8 @@ async def trigger_explicit_learn(payload: LearnTriggerRequest):
         "job_type": "learn",
         "result": result,
         "job": _public_import_job_payload(job_payload),
-        "rollback_endpoint": f"/maintenance/import/jobs/{batch_id}/rollback",
-        "rollback_endpoint_aliases": [
-            f"/maintenance/import/jobs/{batch_id}/rollback",
-            f"/maintenance/learn/jobs/{batch_id}/rollback",
-        ],
+        "rollback_endpoint": rollback_endpoint,
+        "rollback_endpoint_aliases": rollback_endpoint_aliases,
     }
     if not accepted:
         raise _http_error_for_learn_trigger(
@@ -4424,14 +4446,14 @@ async def run_observability_search(payload: SearchConsoleRequest):
 
     intent_for_search: Optional[Dict[str, Any]] = None
     if intent_profile.get("intent") in {"factual", "exploratory", "temporal", "causal"}:
-        intent_for_search = intent_profile
+        intent_for_search = dict(intent_profile)
 
     candidate_multiplier_provided = "candidate_multiplier" in payload.model_fields_set
     resolved_candidate_multiplier = (
         payload.candidate_multiplier
         if candidate_multiplier_provided
         else (
-            _FAST_INTERACTION_CANDIDATE_MULTIPLIER
+            _FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER
             if interaction_tier == "fast"
             else _DEEP_INTERACTION_CANDIDATE_MULTIPLIER
         )
@@ -4439,12 +4461,16 @@ async def run_observability_search(payload: SearchConsoleRequest):
     if interaction_tier == "fast":
         resolved_candidate_multiplier = min(
             resolved_candidate_multiplier,
-            _FAST_INTERACTION_CANDIDATE_MULTIPLIER,
+            _FIXED_FAST_INTERACTION_CANDIDATE_MULTIPLIER,
         )
     else:
         resolved_candidate_multiplier = min(
             resolved_candidate_multiplier,
             _SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER,
+        )
+    if intent_for_search is not None:
+        intent_for_search["max_candidate_multiplier"] = (
+            resolved_candidate_multiplier
         )
 
     include_session_provided = "include_session" in payload.model_fields_set

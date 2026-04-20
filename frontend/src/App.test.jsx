@@ -569,6 +569,20 @@ describe('App routing', () => {
     expect(await screen.findByRole('button', { name: '设置 API 密钥' })).toBeInTheDocument();
   });
 
+  it('keeps header language and auth buttons from collapsing their labels on narrow screens', async () => {
+    window.history.pushState({}, '', '/memory');
+
+    render(<App />);
+
+    const languageToggle = await screen.findByTestId('language-toggle');
+    const authButton = screen.getByTestId('auth-set-api-key');
+
+    expect(languageToggle.className).toContain('shrink-0');
+    expect(languageToggle.className).toContain('whitespace-nowrap');
+    expect(authButton.className).toContain('shrink-0');
+    expect(authButton.className).toContain('whitespace-nowrap');
+  });
+
   it('auto-opens setup assistant on first load when no auth is configured', async () => {
     clearSetupAssistantDismissedState();
     window.history.pushState({}, '', '/memory');
@@ -1234,6 +1248,59 @@ describe('App routing', () => {
         intent_llm_api_key: '',
         intent_llm_model: '',
         router_chat_model: '',
+      })
+    );
+  });
+
+  it('saves preset B from the documented baseline without remote residue', async () => {
+    const user = userEvent.setup();
+    clearSetupAssistantDismissedState();
+    window.history.pushState({}, '', '/memory');
+    setupApi.saveSetupConfig.mockResolvedValueOnce({
+      ok: true,
+      target_label: '.env',
+      restart_targets: ['backend', 'sse'],
+      summary: {
+        dashboard_auth_configured: true,
+        allow_insecure_local: false,
+        embedding_backend: 'hash',
+        embedding_configured: true,
+        reranker_enabled: false,
+        reranker_configured: false,
+        write_guard_enabled: false,
+        write_guard_configured: false,
+        intent_llm_enabled: false,
+        intent_llm_configured: false,
+      },
+    });
+
+    render(<App />);
+
+    const dialog = await screen.findByRole('dialog', { name: i18n.t('setup.title') });
+    await user.type(
+      within(dialog).getByPlaceholderText(i18n.t('setup.dashboard.apiKeyPlaceholder')),
+      'local-secret'
+    );
+
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.retrieval.presets.b') }));
+    await user.click(within(dialog).getByRole('button', { name: i18n.t('setup.actions.saveEnv') }));
+
+    expect(setupApi.saveSetupConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dashboard_api_key: 'local-secret',
+        embedding_backend: 'hash',
+        embedding_dim: null,
+        reranker_enabled: false,
+        write_guard_llm_enabled: false,
+        intent_llm_enabled: false,
+        embedding_api_base: '',
+        embedding_api_key: '',
+        embedding_model: '',
+        router_api_base: '',
+        router_api_key: '',
+        router_chat_model: '',
+        router_embedding_model: '',
+        router_reranker_model: '',
       })
     );
   });

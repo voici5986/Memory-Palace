@@ -526,7 +526,7 @@ async def test_search_advanced_invalid_weight_env_falls_back_defaults_and_runs(
     )
     await client.close()
 
-    assert client._rerank_weight == pytest.approx(0.25)
+    assert client._rerank_weight == pytest.approx(0.4)
     assert client._weight_vector == pytest.approx(0.7)
     assert client._weight_text == pytest.approx(0.3)
     assert client._weight_priority == pytest.approx(0.1)

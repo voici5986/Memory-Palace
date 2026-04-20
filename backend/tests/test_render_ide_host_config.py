@@ -163,7 +163,7 @@ def test_render_payload_auto_keeps_bash_for_windows_posix_shell_hosts(
     assert payload["launcher"] == "bash"
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["command"] == "bash"
     assert payload["mcp_config"]["mcpServers"]["memory-palace"]["args"] == [
-        str(project_root / "scripts" / "run_memory_palace_mcp_stdio.sh")
+        (project_root / "scripts" / "run_memory_palace_mcp_stdio.sh").as_posix()
     ]
 
 

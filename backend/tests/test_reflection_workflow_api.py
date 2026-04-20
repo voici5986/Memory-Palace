@@ -130,7 +130,8 @@ def test_reflection_prepare_registers_learn_job(monkeypatch: pytest.MonkeyPatch)
     assert payload["job_id"] == "reflect-job-prepare"
     assert payload["job_type"] == "learn"
     assert payload["job"]["workflow_operation"] == "reflection_workflow"
-    assert payload["rollback_endpoint"] == "/maintenance/import/jobs/reflect-job-prepare/rollback"
+    assert payload["rollback_endpoint"] is None
+    assert payload["rollback_endpoint_aliases"] == []
     assert "reflect-job-prepare" in maintenance_api._LEARN_JOBS
 
 

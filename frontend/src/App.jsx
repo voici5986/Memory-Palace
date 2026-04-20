@@ -165,15 +165,15 @@ function AuthControls({ authState, onOpenSetup, onClearApiKey }) {
 
   if (authState?.source === 'runtime') {
     return (
-      <div className="flex items-center gap-2">
-        <div className="hidden md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
+      <div className="flex max-w-full flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
+        <div className="hidden shrink-0 whitespace-nowrap md:flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 shadow-sm">
           {t('app.auth.runtimeBadge')}
         </div>
         <button
           type="button"
           onClick={onOpenSetup}
           data-testid="auth-open-setup"
-          className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+          className="shrink-0 whitespace-nowrap rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
         >
           {t('app.auth.openSetup')}
         </button>
@@ -182,12 +182,12 @@ function AuthControls({ authState, onOpenSetup, onClearApiKey }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2 sm:flex-nowrap">
       <button
         type="button"
         onClick={onOpenSetup}
         data-testid="auth-set-api-key"
-        className="rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+        className="shrink-0 whitespace-nowrap rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
       >
         {authState ? t('app.auth.updateApiKey') : t('app.auth.setApiKey')}
       </button>
@@ -196,7 +196,7 @@ function AuthControls({ authState, onOpenSetup, onClearApiKey }) {
           type="button"
           onClick={onClearApiKey}
           data-testid="auth-clear-api-key"
-          className="rounded-full border border-white/30 bg-white/20 px-3 py-2 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md transition hover:bg-white/40 hover:text-[color:var(--palace-ink)]"
+          className="shrink-0 whitespace-nowrap rounded-full border border-white/30 bg-white/20 px-3 py-2 text-xs font-medium text-[color:var(--palace-muted)] backdrop-blur-md transition hover:bg-white/40 hover:text-[color:var(--palace-ink)]"
         >
           {t('app.auth.clearKey')}
         </button>
@@ -227,7 +227,7 @@ function LanguageToggle() {
       data-testid="language-toggle"
       aria-label={ariaLabel}
       title={ariaLabel}
-      className="inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
+      className="inline-flex shrink-0 whitespace-nowrap items-center gap-2 rounded-full border border-white/40 bg-white/40 px-3 py-2 text-xs font-medium text-[color:var(--palace-ink)] backdrop-blur-md transition hover:bg-white/60"
     >
       <Languages size={14} />
       <span>{nextLabel}</span>
@@ -255,11 +255,11 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
 
       {/* Floating Header */}
       <div className="relative z-20 shrink-0 px-6 pt-6 pb-2">
-        <div className="mx-auto flex max-w-7xl items-center justify-between">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 md:flex-nowrap md:justify-between md:gap-4">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3 rounded-2xl bg-white/40 px-4 py-2 backdrop-blur-md border border-white/40 shadow-sm"
+            className="order-1 flex shrink-0 items-center gap-3 rounded-2xl border border-white/40 bg-white/40 px-4 py-2 backdrop-blur-md shadow-sm"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[linear-gradient(135deg,var(--palace-accent),var(--palace-accent-2))] text-white shadow-md">
               <LibraryBig size={18} />
@@ -270,7 +270,7 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
           <motion.nav
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/30 bg-white/20 p-1.5 backdrop-blur-xl shadow-[0_8px_32px_rgba(179,133,79,0.05)] scrollbar-hide"
+            className="order-3 flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto rounded-full border border-white/30 bg-white/20 p-1.5 backdrop-blur-xl shadow-[0_8px_32px_rgba(179,133,79,0.05)] scrollbar-hide md:order-2 md:w-auto md:flex-1"
           >
             <NavItem to="/memory" icon={Database} label={t('app.nav.memory')} />
             <NavItem to="/review" icon={ShieldCheck} label={t('app.nav.review')} />
@@ -278,7 +278,7 @@ function Layout({ authState, authRevision, onOpenSetup, onClearApiKey }) {
             <NavItem to="/observability" icon={Eye} label={t('app.nav.observability')} />
           </motion.nav>
 
-          <div className="flex items-center gap-2">
+          <div className="order-2 ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 md:order-3 md:flex-nowrap">
             <LanguageToggle />
             <AuthControls
               authState={authState}

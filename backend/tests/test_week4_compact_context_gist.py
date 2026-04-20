@@ -718,6 +718,42 @@ async def test_generate_compact_gist_skips_llm_for_short_summary(
 
 
 @pytest.mark.asyncio
+async def test_generate_compact_gist_keeps_shorter_than_280_chars_local_even_with_tight_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COMPACT_GIST_LLM_ENABLED", "true")
+    monkeypatch.setenv("COMPACT_GIST_LLM_API_BASE", "http://fake.llm")
+    monkeypatch.setenv("COMPACT_GIST_LLM_MODEL", "fake-model")
+
+    client = SQLiteClient("sqlite+aiosqlite:///:memory:")
+    called = False
+
+    async def _fake_post_json(
+        base: str,
+        endpoint: str,
+        payload: Dict[str, Any],
+        api_key: str = "",
+    ) -> Dict[str, Any]:
+        nonlocal called
+        called = True
+        _ = base
+        _ = endpoint
+        _ = payload
+        _ = api_key
+        return {}
+
+    monkeypatch.setattr(client, "_post_json", _fake_post_json)
+    payload = await client.generate_compact_gist(
+        summary="x" * 200,
+        max_chars=100,
+    )
+    await client.close()
+
+    assert called is False
+    assert payload is None
+
+
+@pytest.mark.asyncio
 async def test_generate_compact_gist_records_degrade_reason_on_invalid_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -870,7 +906,7 @@ async def test_upsert_memory_gist_uses_latest_created_at_across_hashes(tmp_path:
         memory_id=created["id"],
         gist_text="gist B",
         source_hash="hash_b",
-        gist_method="truncate_fallback",
+        gist_method="sentence_fallback",
         quality_score=0.45,
     )
     await asyncio.sleep(0.01)
@@ -1092,7 +1128,7 @@ async def test_browse_get_node_returns_gist_fields(
         memory_id=child["id"],
         gist_text="browse child gist",
         source_hash="browse_child_hash",
-        gist_method="truncate_fallback",
+        gist_method="sentence_fallback",
         quality_score=0.51,
     )
 
@@ -1123,7 +1159,7 @@ async def test_observability_summary_includes_gist_stats(
                 "coverage_ratio": 0.3,
                 "quality_coverage_ratio": 1.0,
                 "avg_quality_score": 0.71,
-                "method_breakdown": {"extractive_bullets": 3, "truncate_fallback": 1},
+                "method_breakdown": {"extractive_bullets": 3, "sentence_fallback": 1},
                 "latest_created_at": "2026-02-17T00:00:00Z",
             }
 

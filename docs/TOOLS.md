@@ -71,7 +71,7 @@ system://boot             ← 系统内置 URI（只读）
 - 检测是否已有重复内容（避免冗余写入）
 - 建议合并到已有记忆（返回 `UPDATE` / `NOOP` 动作）
 
-Write Guard 的决策方法可能包括 `llm`、`embedding`、`keyword`、`fallback`、`none`、`exception`，取决于当前配置和服务可用性。
+Write Guard 的决策方法可能包括 `keyword`、`embedding`、`llm`、`write_guard_llm`、`unknown`、`none`、`exception`，取决于当前配置和服务可用性。
 
 ---
 
@@ -316,7 +316,7 @@ search_memory(
 )
 ```
 
-> 📌 `candidate_multiplier` 只是第一轮扩候选池的提示值，不是无限放大开关。当前实现仍有硬上限，返回 metadata 里会带 `candidate_limit_applied` 告诉你这次实际用了多大的候选池。
+> 📌 `candidate_multiplier` 只是第一轮扩候选池的提示值，不是无限放大开关。当前实现仍有硬上限；公开返回里会带 `candidate_multiplier_applied`，而 backend metadata 里仍会保留 `candidate_limit_applied` 说明这次真正打到的硬上限。
 
 **检索模式：**
 
@@ -353,7 +353,7 @@ search_memory(
 - 默认 `verbose=true`，会带上 `query_preprocess`、`intent_profile`、`session_first_metrics`、`backend_metadata` 这类调试信息
 - 如果你只关心结果、分数和降级原因，可以传 `verbose=false`，这样返回更短，更适合 MCP 上下文窗口
 - 如果最终路径状态复核本身查库失败，当前实现会直接丢掉那条结果，并在 `degrade_reasons` 里追加 `path_revalidation_lookup_failed`；不会再把一条“当前状态不确定”的旧结果继续当成正常命中返回
-- `candidate_multiplier` 仍然只是“你希望放大多少”的提示值；真正生效的上限请看 `candidate_limit_applied`，尤其是 `fast` 交互档下，后端现在不会再因为后续意图策略把它悄悄抬高
+- `candidate_multiplier` 仍然只是“你希望放大多少”的提示值；公开返回先看 `candidate_multiplier_applied`，backend metadata 再看 `candidate_limit_applied`；尤其是 `fast` 交互档下，第一轮 multiplier 现在硬上限固定为 `4`，后续意图策略也不会再把它悄悄抬高
 
 **使用示例：**
 
@@ -399,7 +399,6 @@ compact_context(
 1. `llm_gist` — 调用 LLM 生成摘要（需在 `.env` 中配置 OpenAI-compatible API）
 2. `extractive_bullets` — 提取式要点
 3. `sentence_fallback` — 句子级降级
-4. `truncate_fallback` — 截断降级
 
 **实用说明：**
 
@@ -525,7 +524,7 @@ index_status()
 |---|---|---|
 | `guard_action` | `ADD` / `UPDATE` / `NOOP` / `DELETE` / `BYPASS` | Guard 的决策动作 |
 | `guard_reason` | 字符串 | 决策原因 |
-| `guard_method` | `llm` / `embedding` / `keyword` / `fallback` / `none` / `exception` | 检测方法 |
+| `guard_method` | `keyword` / `embedding` / `llm` / `write_guard_llm` / `unknown` / `none` / `exception` | 检测方法 |
 
 ### 索引入队统计字段
 
@@ -635,12 +634,12 @@ RETRIEVAL_RERANKER_API_KEY=           # API 密钥
 RETRIEVAL_RERANKER_MODEL=your-reranker-model-id
 
 # ── 权重调参 ──
-RETRIEVAL_RERANKER_WEIGHT=0.25        # Reranker 权重（首要调参项）
+RETRIEVAL_RERANKER_WEIGHT=0.40        # Reranker 权重（首要调参项）
 RETRIEVAL_HYBRID_KEYWORD_WEIGHT=0.7   # 关键词权重
 RETRIEVAL_HYBRID_SEMANTIC_WEIGHT=0.3  # 语义权重
 ```
 
-> 💡 **首要调参项**是 `RETRIEVAL_RERANKER_WEIGHT`。即使 Embedding / Reranker 是本地部署的，也必须配置 OpenAI-compatible API 参数。
+> 💡 **首要调参项**是 `RETRIEVAL_RERANKER_WEIGHT`。这里写的是 generic `.env.example` 默认值 `0.40`；如果你用的是 shipped `Profile C/D` 模板，还要以模板里显式写死的档位值为准。即使 Embedding / Reranker 是本地部署的，也必须配置 OpenAI-compatible API 参数。
 >
 > 配置语义说明：`RETRIEVAL_EMBEDDING_BACKEND` 仅控制 Embedding 路径；Reranker 没有 `RETRIEVAL_RERANKER_BACKEND` 开关。Reranker 参数优先使用 `RETRIEVAL_RERANKER_*`，缺失时才回退 `ROUTER_*`（最后回退 `OPENAI_*` 的 base/key）。
 >
