@@ -224,6 +224,57 @@ describe('createEventSource', () => {
     );
   });
 
+  it('reuses the most recent SSE event id as Last-Event-ID on authenticated reconnects', async () => {
+    const encoder = new TextEncoder();
+    let callCount = 0;
+    const fetchImpl = vi.fn(async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        body: createMockReadableBody([
+          encoder.encode(
+            `id: endpoint-${callCount}\nevent: endpoint\ndata: /messages?session_id=reconnect-${callCount}\n\n`
+          ),
+        ]),
+        status: 200,
+      };
+    });
+
+    const client = createEventSource('/sse', {
+      auth: { key: 'secret-token', mode: 'header' },
+      baseUrl: 'http://127.0.0.1:5173',
+      fetchImpl,
+      retryDelayMs: 1,
+    });
+
+    await new Promise((resolve) => {
+      let seen = 0;
+      client.addEventListener('endpoint', (event) => {
+        seen += 1;
+        if (seen >= 2) {
+          expect(event).toEqual(
+            expect.objectContaining({
+              lastEventId: 'endpoint-2',
+            })
+          );
+          client.close();
+          resolve();
+        }
+      });
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:5173/sse',
+      expect.objectContaining({
+        headers: {
+          'X-MCP-API-Key': 'secret-token',
+          'Last-Event-ID': 'endpoint-1',
+        },
+      })
+    );
+  });
+
   it('uses exponential backoff instead of a fixed retry interval for repeated authenticated SSE reconnects', async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => ({

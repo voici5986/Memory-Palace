@@ -285,6 +285,73 @@ def test_parse_args_defaults_to_cli_targets_only(monkeypatch) -> None:
     assert module.resolve_targets(args.targets) == ["claude", "codex", "opencode"]
 
 
+def test_resolve_targets_rejects_ide_host_targets_with_render_guidance() -> None:
+    module = _load_install_skill_module()
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.resolve_targets("claude,windsurf,vscode")
+
+    message = str(excinfo.value)
+    assert message.startswith("Unsupported install_skill IDE host target(s):")
+    assert "render_ide_host_config.py" in message
+    assert "--host windsurf" in message
+    assert "--host vscode-host" in message
+    assert "install_skill.py" in message
+    assert "vscode," not in message
+    assert message.count("--host windsurf") == 1
+    assert message.count("--host vscode-host") == 1
+
+
+@pytest.mark.parametrize(
+    ("raw_target", "canonical_host"),
+    [
+        ("windsurf", "windsurf"),
+        ("vscode-host", "vscode-host"),
+        ("vscode", "vscode-host"),
+        ("Windsurf", "windsurf"),
+        ("VSCODE", "vscode-host"),
+    ],
+)
+def test_resolve_targets_rejects_ide_host_aliases_with_canonical_render_guidance(
+    raw_target: str, canonical_host: str
+) -> None:
+    module = _load_install_skill_module()
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.resolve_targets(raw_target)
+
+    message = str(excinfo.value)
+    assert message.startswith("Unsupported install_skill IDE host target(s):")
+    assert "render_ide_host_config.py" in message
+    assert f"--host {canonical_host}" in message
+    assert "IDE host" in message
+
+
+def test_resolve_targets_deduplicates_canonical_ide_hosts_in_error_message() -> None:
+    module = _load_install_skill_module()
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.resolve_targets("claude,vscode,vscode-host,windsurf,claude")
+
+    message = str(excinfo.value)
+    assert "vscode-host, windsurf" in message
+    assert message.count("vscode-host") == 2
+    assert message.count("windsurf") == 2
+
+
+def test_resolve_targets_all_still_yields_to_explicit_ide_host_guidance() -> None:
+    module = _load_install_skill_module()
+
+    assert module.resolve_targets("all") == list(module.TARGET_MAP)
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.resolve_targets("all,windsurf")
+
+    message = str(excinfo.value)
+    assert message.startswith("Unsupported install_skill IDE host target(s):")
+    assert "--host windsurf" in message
+
+
 def test_install_skill_round_trip_workspace_then_check(
     monkeypatch, tmp_path: Path
 ) -> None:

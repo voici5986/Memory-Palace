@@ -417,6 +417,7 @@ def test_sse_auth_does_not_raise_on_streaming_disconnect(tmp_path) -> None:
                     break
             received = "".join(chunks)
             assert "200 OK" in received
+            assert "id: " in received
             assert "event: endpoint" in received
 
         time.sleep(0.5)
@@ -478,6 +479,7 @@ def test_sse_auth_does_not_raise_on_streaming_shutdown(tmp_path) -> None:
             if "event: endpoint" in received:
                 break
         assert "200 OK" in received
+        assert "id: " in received
         assert "event: endpoint" in received
 
         _request_graceful_shutdown(server)
@@ -551,6 +553,7 @@ def test_sse_insecure_local_does_not_raise_on_streaming_shutdown(tmp_path) -> No
             if "event: endpoint" in received:
                 break
         assert "200 OK" in received
+        assert "id: " in received
         assert "event: endpoint" in received
 
         _request_graceful_shutdown(server)

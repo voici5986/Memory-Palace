@@ -189,6 +189,22 @@ export default function MaintenancePage() {
   const detailRequestSeqRef = useRef(0);
   const vitalityRequestSeqRef = useRef(0);
   const vitalityPrepareSeqRef = useRef(0);
+  const translateRef = useRef(t);
+  const vitalityFiltersRef = useRef({
+    threshold: vitalityThreshold,
+    inactiveDays: vitalityInactiveDays,
+    limit: vitalityLimit,
+    domain: vitalityDomain,
+    pathPrefix: vitalityPathPrefix,
+  });
+  translateRef.current = t;
+  vitalityFiltersRef.current = {
+    threshold: vitalityThreshold,
+    inactiveDays: vitalityInactiveDays,
+    limit: vitalityLimit,
+    domain: vitalityDomain,
+    pathPrefix: vitalityPathPrefix,
+  };
   const error = useMemo(() => {
     if (!errorState) return null;
     return `${t('maintenance.errors.loadOrphans')}: ${extractApiError(
@@ -221,12 +237,7 @@ export default function MaintenancePage() {
     setVitalityPreparedReview(null);
   }, []);
 
-  useEffect(() => {
-    loadOrphans();
-    loadVitalityCandidates();
-  }, []);
-
-  const loadOrphans = async () => {
+  const loadOrphans = useCallback(async () => {
     const requestSeq = orphanRequestSeqRef.current + 1;
     orphanRequestSeqRef.current = requestSeq;
     setLoading(true);
@@ -243,81 +254,111 @@ export default function MaintenancePage() {
       if (requestSeq !== orphanRequestSeqRef.current) return;
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadVitalityCandidates = async ({ forceDecay = false } = {}) => {
-    const requestSeq = vitalityRequestSeqRef.current + 1;
-    vitalityRequestSeqRef.current = requestSeq;
-    setVitalityLoading(true);
-    setVitalityErrorState(null);
-    invalidatePreparedReview();
-    try {
-      const thresholdRaw = String(vitalityThreshold ?? '').trim();
-      const inactiveDaysRaw = String(vitalityInactiveDays ?? '').trim();
-      const limitRaw = String(vitalityLimit ?? '').trim();
-      if (!thresholdRaw) {
-        throw new Error(t('maintenance.errors.thresholdRequired'));
+  const loadVitalityCandidates = useCallback(
+    /**
+     * @param {{
+     *   forceDecay?: boolean,
+     *   thresholdValue?: NumericInputState,
+     *   inactiveDaysValue?: NumericInputState,
+     *   limitValue?: NumericInputState,
+     *   domainValue?: string,
+     *   pathPrefixValue?: string,
+     * }} [options]
+     */
+    async (options = {}) => {
+      const {
+        forceDecay = false,
+        thresholdValue,
+        inactiveDaysValue,
+        limitValue,
+        domainValue,
+        pathPrefixValue,
+      } = options;
+      const requestSeq = vitalityRequestSeqRef.current + 1;
+      vitalityRequestSeqRef.current = requestSeq;
+      setVitalityLoading(true);
+      setVitalityErrorState(null);
+      invalidatePreparedReview();
+      try {
+        const translate = translateRef.current;
+        const latestFilters = vitalityFiltersRef.current;
+        const thresholdRaw = String(thresholdValue ?? latestFilters.threshold ?? '').trim();
+        const inactiveDaysRaw = String(
+          inactiveDaysValue ?? latestFilters.inactiveDays ?? ''
+        ).trim();
+        const limitRaw = String(limitValue ?? latestFilters.limit ?? '').trim();
+        if (!thresholdRaw) {
+          throw new Error(translate('maintenance.errors.thresholdRequired'));
+        }
+        if (!inactiveDaysRaw) {
+          throw new Error(translate('maintenance.errors.inactiveDaysRequired'));
+        }
+        if (!limitRaw) {
+          throw new Error(translate('maintenance.errors.limitRequired'));
+        }
+        const parsedThreshold = Number(thresholdRaw);
+        const parsedInactiveDays = Number(inactiveDaysRaw);
+        const parsedLimit = Number(limitRaw);
+        const domainRaw = String(domainValue ?? latestFilters.domain ?? '').trim();
+        const pathPrefixRaw = String(pathPrefixValue ?? latestFilters.pathPrefix ?? '').trim();
+        if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0) {
+          throw new Error(translate('maintenance.errors.thresholdNonNegative'));
+        }
+        if (!Number.isFinite(parsedInactiveDays) || parsedInactiveDays < 0) {
+          throw new Error(translate('maintenance.errors.inactiveDaysNonNegative'));
+        }
+        if (
+          !Number.isFinite(parsedLimit)
+          || !Number.isInteger(parsedLimit)
+          || parsedLimit < 1
+          || parsedLimit > 500
+        ) {
+          throw new Error(translate('maintenance.errors.limitRange'));
+        }
+        if (forceDecay) {
+          await triggerVitalityDecay({ force: true, reason: 'maintenance.manual_refresh' });
+        }
+        /** @type {{ threshold: number, inactive_days: number, limit: number, domain?: string, path_prefix?: string }} */
+        const payload = {
+          threshold: parsedThreshold,
+          inactive_days: parsedInactiveDays,
+          limit: parsedLimit,
+        };
+        if (domainRaw) {
+          payload.domain = domainRaw;
+        }
+        if (pathPrefixRaw) {
+          payload.path_prefix = pathPrefixRaw;
+        }
+        const res = await queryVitalityCleanupCandidates(payload);
+        if (requestSeq !== vitalityRequestSeqRef.current) return;
+        setVitalityCandidates(Array.isArray(res.items) ? res.items : []);
+        setVitalityQueryMeta({
+          status: res?.status || 'ok',
+          decay: res?.decay || null,
+        });
+        setVitalitySelectedIds(new Set());
+      } catch (err) {
+        if (requestSeq !== vitalityRequestSeqRef.current) return;
+        setVitalityQueryMeta(null);
+        setVitalityErrorState({
+          error: err,
+          fallbackKey: 'maintenance.errors.loadVitalityCandidates',
+        });
+      } finally {
+        if (requestSeq !== vitalityRequestSeqRef.current) return;
+        setVitalityLoading(false);
       }
-      if (!inactiveDaysRaw) {
-        throw new Error(t('maintenance.errors.inactiveDaysRequired'));
-      }
-      if (!limitRaw) {
-        throw new Error(t('maintenance.errors.limitRequired'));
-      }
-      const parsedThreshold = Number(thresholdRaw);
-      const parsedInactiveDays = Number(inactiveDaysRaw);
-      const parsedLimit = Number(limitRaw);
-      const domainRaw = String(vitalityDomain ?? '').trim();
-      const pathPrefixRaw = String(vitalityPathPrefix ?? '').trim();
-      if (!Number.isFinite(parsedThreshold) || parsedThreshold < 0) {
-        throw new Error(t('maintenance.errors.thresholdNonNegative'));
-      }
-      if (!Number.isFinite(parsedInactiveDays) || parsedInactiveDays < 0) {
-        throw new Error(t('maintenance.errors.inactiveDaysNonNegative'));
-      }
-      if (
-        !Number.isFinite(parsedLimit)
-        || !Number.isInteger(parsedLimit)
-        || parsedLimit < 1
-        || parsedLimit > 500
-      ) {
-        throw new Error(t('maintenance.errors.limitRange'));
-      }
-      if (forceDecay) {
-        await triggerVitalityDecay({ force: true, reason: 'maintenance.manual_refresh' });
-      }
-      /** @type {{ threshold: number, inactive_days: number, limit: number, domain?: string, path_prefix?: string }} */
-      const payload = {
-        threshold: parsedThreshold,
-        inactive_days: parsedInactiveDays,
-        limit: parsedLimit,
-      };
-      if (domainRaw) {
-        payload.domain = domainRaw;
-      }
-      if (pathPrefixRaw) {
-        payload.path_prefix = pathPrefixRaw;
-      }
-      const res = await queryVitalityCleanupCandidates(payload);
-      if (requestSeq !== vitalityRequestSeqRef.current) return;
-      setVitalityCandidates(Array.isArray(res.items) ? res.items : []);
-      setVitalityQueryMeta({
-        status: res?.status || 'ok',
-        decay: res?.decay || null,
-      });
-      setVitalitySelectedIds(new Set());
-    } catch (err) {
-      if (requestSeq !== vitalityRequestSeqRef.current) return;
-      setVitalityQueryMeta(null);
-      setVitalityErrorState({
-        error: err,
-        fallbackKey: 'maintenance.errors.loadVitalityCandidates',
-      });
-    } finally {
-      if (requestSeq !== vitalityRequestSeqRef.current) return;
-      setVitalityLoading(false);
-    }
-  };
+    },
+    [invalidatePreparedReview]
+  );
+
+  useEffect(() => {
+    void loadOrphans();
+    void loadVitalityCandidates();
+  }, [loadOrphans, loadVitalityCandidates]);
 
   /**
    * @param {string | number} id

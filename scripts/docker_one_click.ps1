@@ -365,6 +365,119 @@ function Set-EnvValueInFile {
     Write-LinesUtf8 -FilePath $FilePath -Lines $newLines
 }
 
+function Get-HostnameFromUrl {
+    param([string]$Url)
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return ''
+    }
+
+    try {
+        $uri = [System.Uri]$Url
+    }
+    catch {
+        return ''
+    }
+
+    return ([string]$uri.Host).Trim().ToLowerInvariant()
+}
+
+function Rewrite-LoopbackApiBaseForDocker {
+    param([string]$ApiBase)
+
+    if ([string]::IsNullOrWhiteSpace($ApiBase)) {
+        return ''
+    }
+
+    try {
+        $builder = [System.UriBuilder]$ApiBase
+    }
+    catch {
+        return $ApiBase
+    }
+
+    $host = ([string]$builder.Host).Trim().ToLowerInvariant()
+    if ($host -notin @('127.0.0.1', 'localhost', '::1')) {
+        return $ApiBase
+    }
+
+    $builder.Host = 'host.docker.internal'
+    return $builder.Uri.GetLeftPart([System.UriPartial]::Path).TrimEnd('/')
+}
+
+function Append-EnvCsvValueInFile {
+    param(
+        [string]$FilePath,
+        [string]$Key,
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    $entries = New-Object System.Collections.Generic.List[string]
+    foreach ($rawGroup in @((Get-EnvValueFromFile -FilePath $FilePath -Key $Key), $Value)) {
+        foreach ($rawEntry in [string]$rawGroup -split ',') {
+            $entry = $rawEntry.Trim()
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+                continue
+            }
+            if (-not $entries.Contains($entry)) {
+                [void]$entries.Add($entry)
+            }
+        }
+    }
+
+    $updatedValue = $entries -join ','
+    if ($updatedValue -eq (Get-EnvValueFromFile -FilePath $FilePath -Key $Key)) {
+        return $false
+    }
+
+    Set-EnvValueInFile -FilePath $FilePath -Key $Key -Value $updatedValue
+    return $true
+}
+
+function Rewrite-EnvApiBaseForDocker {
+    param(
+        [string]$EnvFile,
+        [string]$Key
+    )
+
+    $currentValue = Get-EnvValueFromFile -FilePath $EnvFile -Key $Key
+    if ([string]::IsNullOrWhiteSpace($currentValue)) {
+        return
+    }
+
+    $rewrittenValue = Rewrite-LoopbackApiBaseForDocker -ApiBase $currentValue
+    if ([string]::IsNullOrWhiteSpace($rewrittenValue) -or $rewrittenValue -eq $currentValue) {
+        return
+    }
+
+    Set-EnvValueInFile -FilePath $EnvFile -Key $Key -Value $rewrittenValue
+    Write-Host "[override] $Key mapped loopback host to host.docker.internal for docker runtime injection."
+}
+
+function Append-ProviderAllowlistHostFromApiBase {
+    param(
+        [string]$EnvFile,
+        [string]$ApiBase,
+        [string]$SourceKey
+    )
+
+    $providerHost = Get-HostnameFromUrl -Url $ApiBase
+    if ([string]::IsNullOrWhiteSpace($providerHost)) {
+        return
+    }
+    if ($providerHost -in @('127.0.0.1', '::1', 'localhost', 'host.docker.internal')) {
+        return
+    }
+
+    if (Append-EnvCsvValueInFile -FilePath $EnvFile -Key 'MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS' -Value $providerHost) {
+        Write-Host "[override] MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS appended $providerHost from $SourceKey."
+    }
+}
+
 function Apply-ProfileRuntimeOverrides {
     param(
         [string]$EnvFile,
@@ -398,6 +511,7 @@ function Apply-ProfileRuntimeOverrides {
         'INTENT_LLM_API_BASE',
         'INTENT_LLM_API_KEY',
         'INTENT_LLM_MODEL',
+        'MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS',
         'MCP_API_KEY',
         'MCP_API_KEY_ALLOW_INSECURE_LOCAL'
     )
@@ -449,6 +563,20 @@ function Apply-ProfileRuntimeOverrides {
             Set-EnvValueInFile -FilePath $EnvFile -Key 'RETRIEVAL_RERANKER_MODEL' -Value $routerRerankerModel
             Write-Host "[override] RETRIEVAL_RERANKER_MODEL copied from ROUTER_RERANKER_MODEL for local profile $SelectedProfile runtime injection."
         }
+
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'ROUTER_API_BASE'
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'RETRIEVAL_EMBEDDING_API_BASE'
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'RETRIEVAL_RERANKER_API_BASE'
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'WRITE_GUARD_LLM_API_BASE'
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'COMPACT_GIST_LLM_API_BASE'
+        Rewrite-EnvApiBaseForDocker -EnvFile $EnvFile -Key 'INTENT_LLM_API_BASE'
+
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'RETRIEVAL_EMBEDDING_API_BASE') -SourceKey 'RETRIEVAL_EMBEDDING_API_BASE'
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'RETRIEVAL_RERANKER_API_BASE') -SourceKey 'RETRIEVAL_RERANKER_API_BASE'
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'WRITE_GUARD_LLM_API_BASE') -SourceKey 'WRITE_GUARD_LLM_API_BASE'
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'COMPACT_GIST_LLM_API_BASE') -SourceKey 'COMPACT_GIST_LLM_API_BASE'
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'INTENT_LLM_API_BASE') -SourceKey 'INTENT_LLM_API_BASE'
+        Append-ProviderAllowlistHostFromApiBase -EnvFile $EnvFile -ApiBase (Get-EnvValueFromFile -FilePath $EnvFile -Key 'ROUTER_API_BASE') -SourceKey 'ROUTER_API_BASE'
     }
 }
 

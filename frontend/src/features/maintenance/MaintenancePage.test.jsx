@@ -164,6 +164,45 @@ describe('MaintenancePage', () => {
     });
   });
 
+  it('does not auto-refresh vitality candidates while editing filters before apply', async () => {
+    const user = userEvent.setup();
+    render(<MaintenancePage />);
+
+    await waitFor(() => {
+      expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+    });
+    api.queryVitalityCleanupCandidates.mockClear();
+
+    await user.type(screen.getByLabelText(i18n.t('maintenance.vitality.domain')), 'notes');
+    await user.type(screen.getByLabelText(i18n.t('maintenance.vitality.pathPrefix')), 'scope/');
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    });
+
+    expect(api.queryVitalityCleanupCandidates).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: i18n.t('maintenance.vitality.applyFilters') }));
+
+    await waitFor(() => {
+      expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('does not reload vitality candidates when the language changes', async () => {
+    render(<MaintenancePage />);
+
+    await waitFor(() => {
+      expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+
+    expect(api.queryVitalityCleanupCandidates).toHaveBeenCalledTimes(1);
+  });
+
   it('shows translated error when vitality prepare selection exceeds limit', async () => {
     const user = userEvent.setup();
     api.queryVitalityCleanupCandidates.mockResolvedValue({

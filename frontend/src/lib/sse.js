@@ -115,7 +115,7 @@ const createFetchEventSource = (url, options = {}) => {
 
   const decoder = new TextDecoder();
   const listeners = new Map();
-  const headers = buildSseAuthHeaders(auth) || {};
+  const authHeaders = buildSseAuthHeaders(auth) || {};
   let closed = false;
   const normalizedRetryDelayMs = clampPositiveNumber(retryDelayMs, DEFAULT_SSE_RETRY_DELAY_MS);
   const normalizedMaxRetryDelayMs = clampPositiveNumber(
@@ -141,6 +141,7 @@ const createFetchEventSource = (url, options = {}) => {
   let lifecyclePaused = false;
   let currentController = null;
   let currentAbortReason = null;
+  let lastEventId = '';
 
   const emit = (eventName, payload = {}) => {
     dispatchEventSourceMessage(listeners, eventName, {
@@ -149,11 +150,15 @@ const createFetchEventSource = (url, options = {}) => {
     });
   };
 
-  const flushEvent = (eventName, dataLines) => {
-    if (!dataLines.length) return;
+  const flushEvent = (state) => {
+    if (state.pendingLastEventId !== null) {
+      lastEventId = state.pendingLastEventId;
+    }
+    if (!state.dataLines.length) return;
     retryAttempt = 0;
-    emit(eventName || 'message', {
-      data: dataLines.join('\n'),
+    emit(state.eventName || 'message', {
+      data: state.dataLines.join('\n'),
+      lastEventId,
     });
   };
 
@@ -170,9 +175,10 @@ const createFetchEventSource = (url, options = {}) => {
         line = line.slice(0, -1);
       }
       if (!line) {
-        flushEvent(state.eventName, state.dataLines);
+        flushEvent(state);
         state.eventName = 'message';
         state.dataLines = [];
+        state.pendingLastEventId = null;
         continue;
       }
       if (line.startsWith(':')) {
@@ -188,6 +194,8 @@ const createFetchEventSource = (url, options = {}) => {
         state.eventName = value || 'message';
       } else if (field === 'data') {
         state.dataLines.push(value);
+      } else if (field === 'id' && !value.includes('\0')) {
+        state.pendingLastEventId = value;
       }
     }
     return working;
@@ -196,7 +204,14 @@ const createFetchEventSource = (url, options = {}) => {
   const state = {
     eventName: 'message',
     dataLines: [],
+    pendingLastEventId: null,
   };
+
+  const buildRequestHeaders = () => (
+    lastEventId
+      ? { ...authHeaders, 'Last-Event-ID': lastEventId }
+      : authHeaders
+  );
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -303,13 +318,14 @@ const createFetchEventSource = (url, options = {}) => {
 
       state.eventName = 'message';
       state.dataLines = [];
+      state.pendingLastEventId = null;
       currentController = controller;
       currentAbortReason = null;
       scheduleIdleWatchdog();
 
       const response = await fetchImpl(url, {
         method: 'GET',
-        headers,
+        headers: buildRequestHeaders(),
         signal: controller.signal,
         credentials: withCredentials ? 'include' : 'same-origin',
         cache: 'no-store',
@@ -340,11 +356,11 @@ const createFetchEventSource = (url, options = {}) => {
       }
       buffer += decoder.decode();
       buffer = parseChunk(buffer, state);
-      if (!closed && (buffer || state.dataLines.length > 0)) {
+      if (!closed && (buffer || state.dataLines.length > 0 || state.pendingLastEventId !== null)) {
         if (buffer) {
           state.dataLines.push(buffer.replace(/\r$/, ''));
         }
-        flushEvent(state.eventName, state.dataLines);
+        flushEvent(state);
       }
     } catch (error) {
       abortReason = currentAbortReason;

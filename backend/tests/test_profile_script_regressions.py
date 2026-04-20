@@ -496,6 +496,149 @@ def test_apply_profile_shell_defaults_docker_target_to_env_docker(
     assert not (project_root / ".env").exists()
 
 
+def test_docker_one_click_shell_auto_allowlists_private_runtime_provider_hosts(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "repo"
+    docker_script_path = project_root / "scripts" / "docker_one_click.sh"
+    _copy_script(PROJECT_ROOT / "scripts" / "docker_one_click.sh", docker_script_path)
+
+    fake_apply_profile = project_root / "scripts" / "apply_profile.sh"
+    _write_shell_script(
+        fake_apply_profile,
+        """#!/usr/bin/env bash
+set -euo pipefail
+target_path="$3"
+cat > "${target_path}" <<'EOF'
+DATABASE_URL=sqlite+aiosqlite:////app/data/memory_palace.db
+SEARCH_DEFAULT_MODE=hybrid
+RETRIEVAL_EMBEDDING_BACKEND=router
+RETRIEVAL_RERANKER_ENABLED=false
+EOF
+""",
+    )
+
+    fake_docker = project_root / "bin" / "docker"
+    _write_shell_script(
+        fake_docker,
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "compose" && "${2:-}" == "version" ]]; then
+  exit 0
+fi
+if [[ "${1:-}" == "volume" && "${2:-}" == "inspect" ]]; then
+  exit 1
+fi
+if [[ "${1:-}" == "ps" ]]; then
+  format=""
+  service="backend"
+  prev=""
+  for arg in "$@"; do
+    if [[ "${prev}" == "--filter" && "${arg}" == *"com.docker.compose.service=frontend"* ]]; then
+      service="frontend"
+    fi
+    if [[ "${prev}" == "--format" ]]; then
+      format="${arg}"
+    fi
+    prev="${arg}"
+  done
+  case "${format}" in
+    "{{.Ports}}")
+      if [[ "${service}" == "frontend" ]]; then
+        echo "0.0.0.0:3312->8080/tcp"
+      else
+        echo "0.0.0.0:18112->8000/tcp"
+      fi
+      ;;
+    "{{.Names}}")
+      if [[ "${service}" == "frontend" ]]; then
+        echo "fake-frontend-1"
+      else
+        echo "fake-backend-1"
+      fi
+      ;;
+  esac
+  exit 0
+fi
+if [[ "${1:-}" == "port" ]]; then
+  if [[ "${3:-}" == "8080" ]]; then
+    echo "0.0.0.0:3312"
+  else
+    echo "0.0.0.0:18112"
+  fi
+  exit 0
+fi
+if [[ "${1:-}" == "compose" ]]; then
+  args_text=" $* "
+  if [[ "${args_text}" == *" port frontend 8080 "* ]]; then
+    echo "0.0.0.0:3312"
+  elif [[ "${args_text}" == *" port backend 8000 "* ]]; then
+    echo "0.0.0.0:18112"
+  fi
+  exit 0
+fi
+exit 0
+""",
+    )
+
+    (project_root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    target_env = project_root / ".env.docker"
+
+    result = _run_command(
+        [
+            "bash",
+            "scripts/docker_one_click.sh",
+            "--profile",
+            "c",
+            "--frontend-port",
+            "3312",
+            "--backend-port",
+            "18112",
+            "--allow-runtime-env-injection",
+            "--no-build",
+        ],
+        cwd=project_root,
+        env={
+            **os.environ,
+            "PATH": f"{project_root / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}",
+            "COMPOSE_PROJECT_NAME": "mp-test-runtime-allowlist",
+            "MEMORY_PALACE_DOCKER_ENV_FILE": str(target_env),
+            "ROUTER_API_BASE": "http://127.0.0.1:8318/v1",
+            "ROUTER_API_KEY": "router-key",
+            "ROUTER_CHAT_MODEL": "gpt-5.4-mini",
+            "RETRIEVAL_EMBEDDING_API_BASE": "http://10.88.1.144:11435/v1",
+            "RETRIEVAL_EMBEDDING_API_KEY": "embed-key",
+            "RETRIEVAL_EMBEDDING_MODEL": "qwen3-embedding:8b-q8_0-ctx8192",
+            "RETRIEVAL_EMBEDDING_DIM": "1024",
+            "RETRIEVAL_RERANKER_ENABLED": "true",
+            "RETRIEVAL_RERANKER_API_BASE": "http://10.88.1.144:8080/v1",
+            "RETRIEVAL_RERANKER_API_KEY": "rerank-key",
+            "RETRIEVAL_RERANKER_MODEL": "Qwen3-Reranker-8B",
+            "WRITE_GUARD_LLM_API_BASE": "http://10.88.1.144:8318/v1/chat/completions",
+            "WRITE_GUARD_LLM_API_KEY": "llm-key",
+            "WRITE_GUARD_LLM_MODEL": "gpt-5.4-mini",
+            "INTENT_LLM_API_BASE": "http://localhost:8317/v1/chat/completions",
+            "INTENT_LLM_API_KEY": "intent-key",
+            "INTENT_LLM_MODEL": "gpt-5.4-mini",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    values = dotenv_values(target_env)
+    assert values.get("ROUTER_API_BASE") == "http://host.docker.internal:8318/v1"
+    assert values.get("RETRIEVAL_EMBEDDING_BACKEND") == "api"
+    assert values.get("RETRIEVAL_EMBEDDING_API_BASE") == "http://10.88.1.144:11435/v1"
+    assert values.get("RETRIEVAL_RERANKER_API_BASE") == "http://10.88.1.144:8080/v1"
+    assert (
+        values.get("INTENT_LLM_API_BASE")
+        == "http://host.docker.internal:8317/v1/chat/completions"
+    )
+    assert values.get("MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS") == "10.88.1.144"
+    assert "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS appended 10.88.1.144" in result.stdout
+    assert "ROUTER_API_BASE mapped loopback host to host.docker.internal" in result.stdout
+    assert "INTENT_LLM_API_BASE mapped loopback host to host.docker.internal" in result.stdout
+
+
 def test_apply_profile_shell_injects_runtime_auto_flush_default_when_profile_omits_it(
     tmp_path: Path,
 ) -> None:

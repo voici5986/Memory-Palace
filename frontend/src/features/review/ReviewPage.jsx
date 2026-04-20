@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   approveSnapshot,
@@ -94,10 +94,7 @@ function ReviewPage() {
     currentSessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
 
-  // --- Data Loading Logic (Keep existing logic, refine UI) ---
-  useEffect(() => { loadSessions(); }, []);
-
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     const requestId = ++sessionsRequestRef.current;
     try {
       const rawList = await getSessions();
@@ -124,16 +121,9 @@ function ReviewPage() {
       if (requestId !== sessionsRequestRef.current) return;
       setDiffErrorState({ error: err, fallbackKey: 'review.errors.loadSessions' });
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (currentSessionId) {
-      setSelectedSnapshot(null);
-      loadSnapshots(currentSessionId);
-    }
-  }, [currentSessionId]);
-
-  const loadSnapshots = async (sessionId) => {
+  const loadSnapshots = useCallback(async (sessionId) => {
     const requestId = ++snapshotsRequestRef.current;
     setLoading(true);
     setDiffErrorState(null);
@@ -163,15 +153,9 @@ function ReviewPage() {
       if (requestId !== snapshotsRequestRef.current) return;
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (currentSessionId && selectedSnapshot) {
-      loadDiff(currentSessionId, selectedSnapshot.resource_id);
-    }
-  }, [currentSessionId, selectedSnapshot]);
-
-  const loadDiff = async (sessionId, resourceId) => {
+  const loadDiff = useCallback(async (sessionId, resourceId) => {
     const requestId = ++diffRequestRef.current;
     setDiffErrorState(null);
     setDiffData(null);
@@ -184,7 +168,25 @@ function ReviewPage() {
         setDiffData(null);
       }
     }
-  };
+  }, []);
+
+  // --- Data Loading Logic (Keep existing logic, refine UI) ---
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
+
+  useEffect(() => {
+    if (currentSessionId) {
+      setSelectedSnapshot(null);
+      loadSnapshots(currentSessionId);
+    }
+  }, [currentSessionId, loadSnapshots]);
+
+  useEffect(() => {
+    if (currentSessionId && selectedSnapshot) {
+      loadDiff(currentSessionId, selectedSnapshot.resource_id);
+    }
+  }, [currentSessionId, loadDiff, selectedSnapshot]);
 
   // --- Handlers ---
   const handleRollback = async () => {

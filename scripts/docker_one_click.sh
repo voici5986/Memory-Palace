@@ -391,6 +391,120 @@ append_no_proxy_entry() {
   fi
 }
 
+extract_hostname_from_url() {
+  local raw_url="${1:-}"
+  local host_port=""
+
+  if [[ -z "${raw_url}" ]]; then
+    return 1
+  fi
+
+  host_port="${raw_url#*://}"
+  host_port="${host_port%%/*}"
+  host_port="${host_port##*@}"
+  if [[ -z "${host_port}" ]]; then
+    return 1
+  fi
+
+  if [[ "${host_port}" == \[*\]* ]]; then
+    printf '%s\n' "${host_port#\[}" | sed 's/\]$//; s/\]:.*$//'
+    return 0
+  fi
+
+  if [[ "${host_port}" == *:* ]] && [[ "${host_port##*:}" =~ ^[0-9]+$ ]]; then
+    host_port="${host_port%:*}"
+  fi
+
+  if [[ -z "${host_port}" ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${host_port}"
+}
+
+rewrite_loopback_api_base_for_docker() {
+  local raw_url="${1:-}"
+
+  if [[ -z "${raw_url}" ]]; then
+    return 1
+  fi
+
+  if [[ "${raw_url}" == *"://127.0.0.1"* ]]; then
+    printf '%s\n' "${raw_url/"://127.0.0.1"/"://host.docker.internal"}"
+    return 0
+  fi
+  if [[ "${raw_url}" == *"://localhost"* ]]; then
+    printf '%s\n' "${raw_url/"://localhost"/"://host.docker.internal"}"
+    return 0
+  fi
+  if [[ "${raw_url}" == *"://[::1]"* ]]; then
+    printf '%s\n' "${raw_url/"://[::1]"/"://host.docker.internal"}"
+    return 0
+  fi
+
+  printf '%s\n' "${raw_url}"
+  return 1
+}
+
+append_env_csv_value_in_file() {
+  local env_file="$1"
+  local key="$2"
+  local raw_value="$3"
+  local current_value updated_value
+
+  current_value="$(get_env_value_from_file "${env_file}" "${key}")"
+  updated_value="$(append_no_proxy_entry "${current_value}" "${raw_value}")"
+  if [[ "${updated_value}" == "${current_value}" ]]; then
+    return 1
+  fi
+
+  upsert_env_value_in_file "${env_file}" "${key}" "${updated_value}"
+  return 0
+}
+
+rewrite_env_api_base_for_docker() {
+  local env_file="$1"
+  local key="$2"
+  local current_value rewritten_value=""
+
+  current_value="$(get_env_value_from_file "${env_file}" "${key}")"
+  if [[ -z "${current_value}" ]]; then
+    return 0
+  fi
+
+  rewritten_value="$(rewrite_loopback_api_base_for_docker "${current_value}")" || true
+  if [[ -z "${rewritten_value}" || "${rewritten_value}" == "${current_value}" ]]; then
+    return 0
+  fi
+
+  upsert_env_value_in_file "${env_file}" "${key}" "${rewritten_value}"
+  echo "[override] ${key} mapped loopback host to host.docker.internal for docker runtime injection."
+}
+
+append_provider_allowlist_host_from_api_base() {
+  local env_file="$1"
+  local api_base="$2"
+  local source_key="$3"
+  local provider_host=""
+
+  provider_host="$(extract_hostname_from_url "${api_base}" || true)"
+  if [[ -z "${provider_host}" ]]; then
+    return 0
+  fi
+  case "${provider_host,,}" in
+    127.0.0.1|::1|localhost|host.docker.internal)
+      return 0
+      ;;
+  esac
+
+  if append_env_csv_value_in_file \
+    "${env_file}" \
+    "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS" \
+    "${provider_host}"; then
+    echo "[override] MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS appended ${provider_host} from ${source_key}."
+  fi
+}
+
 build_local_no_proxy_value() {
   local effective_no_proxy=""
   local raw_group=""
@@ -738,6 +852,7 @@ apply_profile_runtime_overrides() {
     "INTENT_LLM_API_BASE"
     "INTENT_LLM_API_KEY"
     "INTENT_LLM_MODEL"
+    "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS"
     "MCP_API_KEY"
     "MCP_API_KEY_ALLOW_INSECURE_LOCAL"
   )
@@ -778,6 +893,38 @@ apply_profile_runtime_overrides() {
       upsert_env_value_in_file "${env_file}" "RETRIEVAL_RERANKER_MODEL" "${ROUTER_RERANKER_MODEL}"
       echo "[override] RETRIEVAL_RERANKER_MODEL copied from ROUTER_RERANKER_MODEL for local profile ${selected_profile} runtime injection."
     fi
+
+    rewrite_env_api_base_for_docker "${env_file}" "ROUTER_API_BASE"
+    rewrite_env_api_base_for_docker "${env_file}" "RETRIEVAL_EMBEDDING_API_BASE"
+    rewrite_env_api_base_for_docker "${env_file}" "RETRIEVAL_RERANKER_API_BASE"
+    rewrite_env_api_base_for_docker "${env_file}" "WRITE_GUARD_LLM_API_BASE"
+    rewrite_env_api_base_for_docker "${env_file}" "COMPACT_GIST_LLM_API_BASE"
+    rewrite_env_api_base_for_docker "${env_file}" "INTENT_LLM_API_BASE"
+
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "RETRIEVAL_EMBEDDING_API_BASE")" \
+      "RETRIEVAL_EMBEDDING_API_BASE"
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "RETRIEVAL_RERANKER_API_BASE")" \
+      "RETRIEVAL_RERANKER_API_BASE"
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "WRITE_GUARD_LLM_API_BASE")" \
+      "WRITE_GUARD_LLM_API_BASE"
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "COMPACT_GIST_LLM_API_BASE")" \
+      "COMPACT_GIST_LLM_API_BASE"
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "INTENT_LLM_API_BASE")" \
+      "INTENT_LLM_API_BASE"
+    append_provider_allowlist_host_from_api_base \
+      "${env_file}" \
+      "$(get_env_value_from_file "${env_file}" "ROUTER_API_BASE")" \
+      "ROUTER_API_BASE"
   fi
 }
 

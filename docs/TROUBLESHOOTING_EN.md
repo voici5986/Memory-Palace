@@ -615,6 +615,8 @@ If this command can normally output the version number, starting `mcp_server.py`
 
    > If your local service does not require an API key, drop the `Authorization` header. If the embedding provider rejects `dimensions`, the runtime retries once without that field, but the final vector size still needs to match `RETRIEVAL_EMBEDDING_DIM`.
    >
+   > On the one-click Docker `profile c/d + --allow-runtime-env-injection` path, host-side loopback router / chat bases (`127.0.0.1` / `localhost` / `::1`) are now rewritten to `host.docker.internal` inside the generated Docker env. If you bypass that one-click path and prepare the Docker env yourself, keep writing the container-reachable address manually. Non-loopback private IP literals still stay explicit and still need `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` when applicable.
+   >
    > If you switch to a remote embedding backend through the Setup Assistant, the saved config still needs the real `RETRIEVAL_EMBEDDING_DIM`. On a normal authenticated save, the assistant persists that value together with the backend choice. On a first local save that is still only bootstrapping Dashboard auth, those remote/provider-chain fields may not land until the next save. `openai` is also a supported embedding backend there now. If the backend config is correct but existing vectors still use an older dimension, rebuild the affected scope.
 
    > **Suggested troubleshooting order**:

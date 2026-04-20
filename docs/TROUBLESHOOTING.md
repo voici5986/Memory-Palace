@@ -604,6 +604,8 @@ cd backend
    ```
 
    > 如果你的本地服务本身不要求 API key，就把 `Authorization` 这一行去掉。若 embedding provider 明确拒绝 `dimensions`，运行时会自动重试一次不带这个字段的旧请求，但最终返回的向量维度仍然要和 `RETRIEVAL_EMBEDDING_DIM` 保持一致。
+   >
+   > 对 one-click 的 Docker `profile c/d + --allow-runtime-env-injection` 路径来说，宿主机侧的 loopback router / chat 地址（`127.0.0.1` / `localhost` / `::1`）现在会在生成的 Docker env 里自动改成 `host.docker.internal`。如果你绕过这条 one-click 路径，自己准备最终 Docker env，还是要手动写成容器可达地址。其它 non-loopback private IP 字面量地址仍然保持显式写法，需要时也还是要补 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS`。
 
    > **排障顺序建议**：
    > - 先确认你当前使用的是 `router` 方案，还是分别直配 `RETRIEVAL_EMBEDDING_*`、`RETRIEVAL_RERANKER_*`、`WRITE_GUARD_LLM_* / COMPACT_GIST_LLM_*`。

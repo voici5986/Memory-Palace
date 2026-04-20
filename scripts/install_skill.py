@@ -28,6 +28,11 @@ TARGET_MAP = {
     "agent": ".agent/skills",
     "antigravity": None,
 }
+UNSUPPORTED_IDE_HOST_TARGETS = {
+    "windsurf": "windsurf",
+    "vscode-host": "vscode-host",
+    "vscode": "vscode-host",
+}
 UTF8_ENV = {
     "PYTHONIOENCODING": "utf-8",
     "PYTHONUTF8": "1",
@@ -105,6 +110,27 @@ def resolve_targets(raw: str) -> list[str]:
     requested = [item.strip().lower() for item in raw.split(",") if item.strip()]
     if not requested:
         raise SystemExit("No targets specified.")
+    unsupported_ide_hosts = [
+        item for item in requested if item in UNSUPPORTED_IDE_HOST_TARGETS
+    ]
+    if unsupported_ide_hosts:
+        canonical_hosts: list[str] = []
+        seen_hosts: set[str] = set()
+        for item in unsupported_ide_hosts:
+            canonical = UNSUPPORTED_IDE_HOST_TARGETS[item]
+            if canonical not in seen_hosts:
+                canonical_hosts.append(canonical)
+                seen_hosts.add(canonical)
+        host_list = ", ".join(canonical_hosts)
+        commands = ", ".join(
+            f"python scripts/render_ide_host_config.py --host {host}"
+            for host in canonical_hosts
+        )
+        raise SystemExit(
+            "Unsupported install_skill IDE host target(s): "
+            f"{host_list}. install_skill.py does not install IDE host projections; "
+            f"IDE hosts use repo-local rules plus MCP snippets, so run {commands} instead."
+        )
     if "all" in requested:
         return list(TARGET_MAP)
     invalid = [item for item in requested if item not in TARGET_MAP]

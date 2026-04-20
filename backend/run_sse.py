@@ -489,12 +489,25 @@ class MemoryPalaceSseServerTransport(SseServerTransport):
 
         async def sse_writer():
             async with sse_stream_writer, write_stream_reader:
+                event_index = 0
+
+                def next_event_id() -> str:
+                    nonlocal event_index
+                    event_id = f"{session_id.hex}:{event_index}"
+                    event_index += 1
+                    return event_id
+
                 await sse_stream_writer.send(
-                    {"event": "endpoint", "data": client_post_uri_data}
+                    {
+                        "id": next_event_id(),
+                        "event": "endpoint",
+                        "data": client_post_uri_data,
+                    }
                 )
                 async for session_message in write_stream_reader:
                     await sse_stream_writer.send(
                         {
+                            "id": next_event_id(),
                             "event": "message",
                             "data": session_message.message.model_dump_json(
                                 by_alias=True, exclude_none=True

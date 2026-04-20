@@ -35,10 +35,13 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
         "ROUTER_RERANKER_MODEL",
         "RETRIEVAL_EMBEDDING_DIM",
         "RETRIEVAL_RERANKER_ENABLED",
+        "MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS",
         "INTENT_LLM_ENABLED",
         "INTENT_LLM_API_BASE",
         "INTENT_LLM_API_KEY",
         "INTENT_LLM_MODEL",
+        "WRITE_GUARD_LLM_API_BASE",
+        "COMPACT_GIST_LLM_API_BASE",
         "--wait",
         "--wait-timeout",
         "RETRIEVAL_EMBEDDING_API_BASE copied from ROUTER_API_BASE",
@@ -47,7 +50,24 @@ def test_runtime_env_injection_covers_intent_llm_and_router_fallbacks() -> None:
         "RETRIEVAL_RERANKER_API_BASE copied from ROUTER_API_BASE",
         "RETRIEVAL_RERANKER_API_KEY copied from ROUTER_API_KEY",
         "RETRIEVAL_RERANKER_MODEL copied from ROUTER_RERANKER_MODEL",
+        "append_provider_allowlist_host_from_api_base",
+        "Append-ProviderAllowlistHostFromApiBase",
+        "rewrite_loopback_api_base_for_docker",
+        "Rewrite-LoopbackApiBaseForDocker",
+        "mapped loopback host to host.docker.internal for docker runtime injection.",
     ):
+        if literal == "Append-ProviderAllowlistHostFromApiBase":
+            assert literal in ps1_text
+            continue
+        if literal == "append_provider_allowlist_host_from_api_base":
+            assert literal in shell_text
+            continue
+        if literal == "Rewrite-LoopbackApiBaseForDocker":
+            assert literal in ps1_text
+            continue
+        if literal == "rewrite_loopback_api_base_for_docker":
+            assert literal in shell_text
+            continue
         assert literal in shell_text
         assert literal in ps1_text
 
