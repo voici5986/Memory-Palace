@@ -351,6 +351,10 @@ async def _run_deduped_reflection_prepare(
             await asyncio.shield(wait_for_cancelled_task)
         except asyncio.CancelledError:
             continue
+        except Exception:
+            # A cancelled in-flight prepare can fail during its own cleanup.
+            # New waiters should ignore that terminal error and restart fresh.
+            continue
 
     try:
         result = await asyncio.shield(task)
@@ -373,6 +377,10 @@ async def _run_deduped_reflection_prepare(
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
+                pass
+            except Exception:
+                # Preserve the caller's original cancellation while still
+                # cleaning up the abandoned in-flight entry.
                 pass
             async with _REFLECTION_PREPARE_IN_FLIGHT_LOCK:
                 current = _REFLECTION_PREPARE_IN_FLIGHT.get(dedup_key)
@@ -2074,7 +2082,10 @@ async def _revalidate_search_results(
 
     if callable(get_memories_by_paths) and uri_lookup_pairs:
         try:
-            batched_results = await get_memories_by_paths(list(uri_lookup_pairs.values()))
+            batched_results = await get_memories_by_paths(
+                list(uri_lookup_pairs.values()),
+                reinforce_access=False,
+            )
         except Exception:
             batched_results = None
         if isinstance(batched_results, dict):
@@ -2103,7 +2114,11 @@ async def _revalidate_search_results(
                     path_state_cache[uri_value] = None
                     continue
                 try:
-                    path_state_cache[uri_value] = await get_memory_by_path(path, domain)
+                    path_state_cache[uri_value] = await get_memory_by_path(
+                        path,
+                        domain,
+                        reinforce_access=False,
+                    )
                 except Exception:
                     path_state_cache[uri_value] = None
                     failed_lookups += 1

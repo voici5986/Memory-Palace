@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import {
   bindEventSourceListeners,
   createEventSource,
@@ -269,6 +268,57 @@ describe('createEventSource', () => {
       expect.objectContaining({
         headers: {
           'X-MCP-API-Key': 'secret-token',
+          'Last-Event-ID': 'endpoint-1',
+        },
+      })
+    );
+  });
+
+  it('refreshes authenticated reconnect headers from current auth state instead of the initial snapshot', async () => {
+    const encoder = new TextEncoder();
+    let callCount = 0;
+    let currentAuth = { key: 'initial-secret', mode: 'header' };
+    const fetchImpl = vi.fn(async () => {
+      callCount += 1;
+      return {
+        ok: true,
+        body: createMockReadableBody([
+          encoder.encode(
+            `id: endpoint-${callCount}\nevent: endpoint\ndata: /messages?session_id=refresh-${callCount}\n\n`
+          ),
+        ]),
+        status: 200,
+      };
+    });
+
+    const client = createEventSource('/sse', {
+      auth: { key: 'initial-secret', mode: 'header' },
+      baseUrl: 'http://127.0.0.1:5173',
+      fetchImpl,
+      resolveAuth: () => currentAuth,
+      retryDelayMs: 1,
+    });
+
+    await new Promise((resolve) => {
+      let seen = 0;
+      client.addEventListener('endpoint', () => {
+        seen += 1;
+        if (seen === 1) {
+          currentAuth = { key: 'rotated-secret', mode: 'header' };
+        }
+        if (seen >= 2) {
+          client.close();
+          resolve();
+        }
+      });
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:5173/sse',
+      expect.objectContaining({
+        headers: {
+          'X-MCP-API-Key': 'rotated-secret',
           'Last-Event-ID': 'endpoint-1',
         },
       })

@@ -479,7 +479,7 @@ MEMORY_PALACE_API_PROXY_TARGET=http://127.0.0.1:18000 npm run dev -- --host 127.
 ```bash
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
 
-这条 `/sse` 代理是刻意保留的本地开发路径，主要给 Vite 同源下的 SSE / MCP 调试复用；前端现在已经有共享的 `frontend/src/lib/sse.js` 来走这条路径。没有浏览器侧鉴权时它仍走轻量原生 `EventSource`；有鉴权时会切到可带 header 的 fetch-based SSE，并在非终态断流后自动重连。
+这条 `/sse` 代理是刻意保留的本地开发路径，主要给 Vite 同源下的 SSE / MCP 调试复用；前端现在已经有共享的 `frontend/src/lib/sse.js` 来走这条路径。没有浏览器侧鉴权时它仍走轻量原生 `EventSource`；有鉴权时会切到可带 header 的 fetch-based SSE，并在非终态断流后自动重连。若浏览器里的 Dashboard 鉴权在运行中更新，下一次非终态重连会重新读取当前浏览器里的鉴权状态，不会固定沿用首次连接时的 header/bearer 快照。
 ```
 
 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起转发到你本机单独启动的 `run_sse.py`，仅用于本地 Vite 开发入口联调。

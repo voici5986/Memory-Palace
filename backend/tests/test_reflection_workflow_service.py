@@ -315,6 +315,84 @@ async def test_deduped_reflection_prepare_waits_for_cancelling_task_before_resta
     assert "restart-after-cancel" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
 
 
+@pytest.mark.asyncio
+async def test_deduped_reflection_prepare_preserves_cancellation_when_cleanup_raises() -> None:
+    mcp_server._REFLECTION_PREPARE_IN_FLIGHT.clear()
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+
+    async def _factory() -> dict[str, object]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cleanup_started.set()
+            await allow_cleanup.wait()
+            raise RuntimeError("cleanup exploded")
+
+    waiter = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("cleanup-exception", _factory)
+    )
+    await started.wait()
+
+    waiter.cancel()
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+    allow_cleanup.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    assert "cleanup-exception" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
+
+
+@pytest.mark.asyncio
+async def test_deduped_reflection_prepare_restarts_after_cleanup_exception() -> None:
+    mcp_server._REFLECTION_PREPARE_IN_FLIGHT.clear()
+    first_started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    second_started = asyncio.Event()
+    run_number = 0
+
+    async def _factory() -> dict[str, object]:
+        nonlocal run_number
+        run_number += 1
+        if run_number == 1:
+            first_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup_started.set()
+                await allow_cleanup.wait()
+                raise RuntimeError("cleanup exploded")
+
+        second_started.set()
+        return {"run": 2}
+
+    first_waiter = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("cleanup-restart", _factory)
+    )
+    await first_started.wait()
+
+    first_waiter.cancel()
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+
+    restarted = asyncio.create_task(
+        mcp_server._run_deduped_reflection_prepare("cleanup-restart", _factory)
+    )
+    await asyncio.sleep(0)
+    assert second_started.is_set() is False
+
+    allow_cleanup.set()
+
+    assert await asyncio.wait_for(restarted, timeout=1.0) == {"run": 2}
+    with pytest.raises(asyncio.CancelledError):
+        await first_waiter
+
+    assert "cleanup-restart" not in mcp_server._REFLECTION_PREPARE_IN_FLIGHT
+
+
 async def _capture_import_learn_lock() -> asyncio.Lock:
     return mcp_server._get_import_learn_meta_persist_lock()
 

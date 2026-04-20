@@ -61,7 +61,13 @@ class _SessionConsistencyClient:
             },
         }
 
-    async def get_memory_by_path(self, path: str, domain: str):
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = True,
+    ):
+        _ = reinforce_access
         return self._current_by_uri.get(f"{domain}://{path}")
 
 
@@ -71,23 +77,57 @@ class _BatchSessionConsistencyClient(_SessionConsistencyClient):
         self.batch_calls = []
         self.single_calls = []
 
-    async def get_memories_by_paths(self, path_requests):
-        self.batch_calls.append(list(path_requests))
+    async def get_memories_by_paths(self, path_requests, reinforce_access: bool = True):
+        self.batch_calls.append(
+            {
+                "path_requests": list(path_requests),
+                "reinforce_access": reinforce_access,
+            }
+        )
         return {
             f"{domain}://{path}": self._current_by_uri[f"{domain}://{path}"]
             for domain, path in path_requests
             if f"{domain}://{path}" in self._current_by_uri
         }
 
-    async def get_memory_by_path(self, path: str, domain: str):
-        self.single_calls.append((domain, path))
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = True,
+    ):
+        self.single_calls.append((domain, path, reinforce_access))
         raise AssertionError("single-path lookup should not run when batch lookup exists")
 
 
 class _RaisingSessionConsistencyClient(_SessionConsistencyClient):
-    async def get_memory_by_path(self, path: str, domain: str):
-        _ = path, domain
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = True,
+    ):
+        _ = path, domain, reinforce_access
         raise RuntimeError("lookup exploded")
+
+
+class _SingleLookupSessionConsistencyClient(_SessionConsistencyClient):
+    def __init__(self, current_by_uri, global_results):
+        super().__init__(current_by_uri=current_by_uri, global_results=global_results)
+        self.single_calls = []
+
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = True,
+    ):
+        self.single_calls.append((domain, path, reinforce_access))
+        return await super().get_memory_by_path(
+            path,
+            domain,
+            reinforce_access=reinforce_access,
+        )
 
 
 @pytest.mark.asyncio
@@ -464,6 +504,63 @@ async def test_search_memory_uses_batch_revalidation_when_client_supports_it(
     assert payload["results"][0]["memory_id"] == 42
     assert payload["results"][0]["priority"] == 0
     assert payload["results"][0]["snippet"] == "fresh content from database state"
-    assert client.batch_calls == [[("core", "agent/current")]]
+    assert client.batch_calls == [
+        {
+            "path_requests": [("core", "agent/current")],
+            "reinforce_access": False,
+        }
+    ]
     assert client.single_calls == []
     assert payload["session_first_metrics"]["session_queue_refreshed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_memory_uses_non_reinforcing_single_revalidation_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SingleLookupSessionConsistencyClient(
+        current_by_uri={
+            "core://agent/current": {
+                "id": 42,
+                "content": "fresh content from database state",
+                "priority": 0,
+                "created_at": "2026-03-20T12:00:00Z",
+            }
+        },
+        global_results=[],
+    )
+    session_results = [
+        {
+            "uri": "core://agent/current",
+            "memory_id": 7,
+            "snippet": "stale snippet from session cache",
+            "priority": 3,
+            "updated_at": "2026-03-20T10:00:00Z",
+            "match_type": "session_queue",
+            "source": "session_queue",
+        }
+    ]
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    async def _fake_session_search(*, session_id, query, limit):
+        _ = session_id
+        _ = query
+        _ = limit
+        return list(session_results)
+
+    monkeypatch.setattr(runtime_state.session_cache, "search", _fake_session_search)
+
+    raw = await mcp_server.search_memory(
+        "fresh content",
+        mode="hybrid",
+        max_results=5,
+        include_session=True,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is True
+    assert payload["count"] == 1
+    assert client.single_calls == [("core", "agent/current", False)]

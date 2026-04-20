@@ -545,6 +545,15 @@ export default function ObservabilityPage() {
             mode: maintenanceAuth.mode === 'bearer' ? 'bearer' : 'header',
           }
           : null,
+        resolveAuth: () => {
+          const currentAuth = getMaintenanceAuthState();
+          return currentAuth
+            ? {
+              key: currentAuth.key,
+              mode: currentAuth.mode === 'bearer' ? 'bearer' : 'header',
+            }
+            : null;
+        },
       });
     } catch (_error) {
       return undefined;

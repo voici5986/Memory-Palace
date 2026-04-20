@@ -139,6 +139,94 @@ def test_external_import_guard_rejects_when_total_size_exceeds_limit(
     assert result["rejected_files"][0]["reason"] == "max_total_bytes_exceeded"
 
 
+def test_external_import_guard_rejects_oversized_single_file_before_reading(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    guard, allowed_root = _build_guard(tmp_path, max_total_bytes=4, max_files=5)
+    large_file = allowed_root / "large.txt"
+    large_file.write_text("12345", encoding="utf-8")
+
+    original_fdopen = import_guard.os.fdopen
+    fdopen_calls = {"count": 0}
+
+    def _tracking_fdopen(*args, **kwargs):
+        fdopen_calls["count"] += 1
+        return original_fdopen(*args, **kwargs)
+
+    monkeypatch.setattr(import_guard.os, "fdopen", _tracking_fdopen)
+
+    result = guard.validate_batch(
+        file_paths=[large_file],
+        actor_id="actor-a",
+        session_id="session-1",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "max_total_bytes_exceeded"
+    assert result["file_count"] == 1
+    assert result["total_bytes"] == large_file.stat().st_size
+    assert result["rejected_files"][0]["reason"] == "max_total_bytes_exceeded"
+    assert fdopen_calls["count"] == 0
+
+
+def test_external_import_guard_rejects_invalid_utf8_without_double_close(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    guard, allowed_root = _build_guard(tmp_path)
+    bad_file = allowed_root / "bad.txt"
+    bad_file.write_bytes(b"\xff")
+
+    original_close = import_guard.os.close
+    close_calls = {"count": 0}
+    bad_fd_errors = {"count": 0}
+
+    def _tracking_close(fd: int) -> None:
+        close_calls["count"] += 1
+        try:
+            original_close(fd)
+        except OSError as exc:
+            if exc.errno == errno.EBADF:
+                bad_fd_errors["count"] += 1
+                return
+            raise
+
+    class _InvalidUtf8Handle:
+        def __init__(self, fd: int) -> None:
+            self.fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            import_guard.os.close(self.fd)
+            return False
+
+        def read(self) -> str:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(import_guard.os, "close", _tracking_close)
+    monkeypatch.setattr(
+        import_guard.os,
+        "fdopen",
+        lambda fd, *_args, **_kwargs: _InvalidUtf8Handle(fd),
+    )
+
+    result = guard.validate_batch(
+        file_paths=[bad_file],
+        actor_id="actor-a",
+        session_id="session-1",
+    )
+
+    assert result["ok"] is False
+    assert result["reason"] == "file_validation_failed"
+    assert result["rejected_files"][0]["reason"] == "file_read_failed"
+    assert result["rejected_files"][0]["detail"] == "file is not valid utf-8 text"
+    assert close_calls["count"] >= 1
+    assert bad_fd_errors["count"] == 0
+
+
 def test_external_import_guard_rejects_when_file_count_exceeds_limit(
     tmp_path: Path,
 ) -> None:

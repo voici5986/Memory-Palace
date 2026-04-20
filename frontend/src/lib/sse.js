@@ -101,6 +101,7 @@ const createFetchEventSource = (url, options = {}) => {
   const {
     auth,
     fetchImpl = globalThis.fetch,
+    resolveAuth,
     retryDelayMs = DEFAULT_SSE_RETRY_DELAY_MS,
     maxRetryDelayMs = DEFAULT_SSE_MAX_RETRY_DELAY_MS,
     retryBackoffFactor = DEFAULT_SSE_RETRY_BACKOFF_FACTOR,
@@ -115,7 +116,6 @@ const createFetchEventSource = (url, options = {}) => {
 
   const decoder = new TextDecoder();
   const listeners = new Map();
-  const authHeaders = buildSseAuthHeaders(auth) || {};
   let closed = false;
   const normalizedRetryDelayMs = clampPositiveNumber(retryDelayMs, DEFAULT_SSE_RETRY_DELAY_MS);
   const normalizedMaxRetryDelayMs = clampPositiveNumber(
@@ -207,11 +207,17 @@ const createFetchEventSource = (url, options = {}) => {
     pendingLastEventId: null,
   };
 
-  const buildRequestHeaders = () => (
-    lastEventId
+  const resolveCurrentAuthHeaders = () => {
+    const currentAuth = normalizeSseAuth(resolveAuth?.()) || normalizeSseAuth(auth);
+    return buildSseAuthHeaders(currentAuth) || {};
+  };
+
+  const buildRequestHeaders = () => {
+    const authHeaders = resolveCurrentAuthHeaders();
+    return lastEventId
       ? { ...authHeaders, 'Last-Event-ID': lastEventId }
-      : authHeaders
-  );
+      : authHeaders;
+  };
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -496,6 +502,7 @@ const createFetchEventSource = (url, options = {}) => {
  *   EventSourceImpl?: typeof EventSource,
  *   fetchImpl?: typeof fetch,
  *   auth?: { key: string, mode?: 'header' | 'bearer' } | null,
+ *   resolveAuth?: () => ({ key: string, mode?: 'header' | 'bearer' } | null),
  *   retryDelayMs?: number,
  *   maxRetryDelayMs?: number,
  *   retryBackoffFactor?: number,
@@ -518,6 +525,7 @@ export const createEventSource = (
     withCredentials = false,
     EventSourceImpl = globalThis.EventSource,
     fetchImpl = globalThis.fetch,
+    resolveAuth,
     retryDelayMs = DEFAULT_SSE_RETRY_DELAY_MS,
     maxRetryDelayMs = DEFAULT_SSE_MAX_RETRY_DELAY_MS,
     retryBackoffFactor = DEFAULT_SSE_RETRY_BACKOFF_FACTOR,
@@ -529,6 +537,7 @@ export const createEventSource = (
     return createFetchEventSource(url, {
       auth,
       fetchImpl,
+      resolveAuth,
       retryDelayMs,
       maxRetryDelayMs,
       retryBackoffFactor,

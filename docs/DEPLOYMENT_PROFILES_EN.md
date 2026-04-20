@@ -483,7 +483,7 @@ If you also want the local Vite entry to proxy same-origin SSE, add:
 ```bash
 MEMORY_PALACE_SSE_PROXY_TARGET=http://127.0.0.1:8010
 
-That `/sse` proxy is intentionally kept as the local development path for same-origin SSE / MCP debugging; the frontend now has a shared `frontend/src/lib/sse.js` helper for that path. Without browser-side auth it still behaves like the lightweight native `EventSource` path; with browser-side auth it switches to fetch-based SSE so the client can send auth headers and reconnect after a non-terminal stream drop.
+That `/sse` proxy is intentionally kept as the local development path for same-origin SSE / MCP debugging; the frontend now has a shared `frontend/src/lib/sse.js` helper for that path. Without browser-side auth it still behaves like the lightweight native `EventSource` path; with browser-side auth it switches to fetch-based SSE so the client can send auth headers and reconnect after a non-terminal stream drop. If the browser's Dashboard auth changes at runtime, the next non-terminal reconnect re-reads that current auth state instead of reusing the initial header/bearer snapshot.
 ```
 
 This also forwards `/sse`, `/messages`, and `/sse/messages` to your separately started local `run_sse.py` process, specifically for local Vite-entry debugging.

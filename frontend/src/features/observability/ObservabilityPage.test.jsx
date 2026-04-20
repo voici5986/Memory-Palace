@@ -628,8 +628,6 @@ describe('ObservabilityPage', () => {
 
     render(<ObservabilityPage />);
 
-    expect(await screen.findByText(/queue depth:\s*1/i)).toBeInTheDocument();
-
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/sse'),
@@ -640,6 +638,9 @@ describe('ObservabilityPage', () => {
       );
     });
 
+    await waitFor(() => {
+      expect(api.getObservabilitySummary).toHaveBeenCalledTimes(2);
+    });
     expect(await screen.findByText(/queue depth:\s*6/i)).toBeInTheDocument();
   });
 

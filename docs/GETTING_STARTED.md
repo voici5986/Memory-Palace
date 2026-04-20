@@ -298,7 +298,7 @@ VITE v7.x.x  ready in xxx ms
 >
 > 这样 `/sse`、`/messages` 和 `/sse/messages` 也会一起代理到本机 SSE 进程；不需要再手动改 CORS。
 >
-> 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。当前前端里这层共享 SSE helper 也会跟着这个前缀去解析 `/sse`：没有浏览器侧鉴权时继续走原生 `EventSource`，有鉴权时切到可带 header 的 fetch-based SSE，所以带 basename 的部署不需要再额外把 SSE 手工改回站点根路径。这条 fetch-based SSE 现在还会在 `visibilitychange` / `pagehide` / `pageshow` / `beforeunload` 周期里暂停和恢复，并带指数退避重连与 idle watchdog，减少“页面已挂起但连接还半开着”这种本地调试噪音。
+> 如果你做的是**非根路径部署**（例如前端最终挂在 `/memory-palace/`，后端 API 走 `/memory-palace/api`），前端构建时还可以额外设置 `VITE_API_BASE_URL`。默认情况下它仍然使用 `/api`，更适合本地 Vite proxy 和仓库自带 Docker 入口。当前前端里这层共享 SSE helper 也会跟着这个前缀去解析 `/sse`：没有浏览器侧鉴权时继续走原生 `EventSource`，有鉴权时切到可带 header 的 fetch-based SSE，所以带 basename 的部署不需要再额外把 SSE 手工改回站点根路径。如果浏览器里的 Dashboard 鉴权在运行中变化，下一次非终态重连也会重新读取当前 key / mode。这条 fetch-based SSE 现在还会在 `visibilitychange` / `pagehide` / `pageshow` / `beforeunload` 周期里暂停和恢复，并带指数退避重连与 idle watchdog，减少“页面已挂起但连接还半开着”这种本地调试噪音。
 >
 > 当前前端对这条路径也补过一轮实际行为复核：如果你把 `VITE_API_BASE_URL` 指到一个带前缀的 API 根路径，或者指到你自己的跨源 API 地址，浏览器里保存的 Dashboard 鉴权 key 现在也会继续附加到 `/browse`、`/review`、`/maintenance`、`/setup` 这些受保护请求上；但它仍然不会把这把 key 发到无关第三方绝对 URL。
 
@@ -528,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `1093 passed, 22 skipped`；frontend `193 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `1098 passed, 22 skipped`；frontend `194 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 

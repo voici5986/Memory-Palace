@@ -253,7 +253,7 @@ class ExternalImportGuard:
         rejected_files: list[Dict[str, Any]] = []
         total_bytes = 0
         for raw_path in requested:
-            inspected = self._inspect_candidate(raw_path)
+            inspected = self._inspect_candidate(raw_path, read_content=False)
             if inspected.get("ok"):
                 file_info = inspected["file"]
                 total_bytes += int(file_info["size_bytes"])
@@ -291,11 +291,41 @@ class ExternalImportGuard:
             ]
             return result
 
+        hydrated_files: list[Dict[str, Any]] = []
+        for file_info in allowed_files:
+            inspected = self._inspect_candidate(file_info["path"], read_content=True)
+            if inspected.get("ok"):
+                hydrated_files.append(inspected["file"])
+                continue
+            rejected_files.append(
+                {
+                    "path": file_info["path"],
+                    "reason": inspected.get("reason", "rejected"),
+                    "detail": inspected.get("detail", ""),
+                }
+            )
+
+        result["allowed_files"] = hydrated_files
+        result["rejected_files"] = rejected_files
+        result["file_count"] = len(hydrated_files)
+        result["total_bytes"] = sum(
+            int(item["size_bytes"]) for item in hydrated_files
+        )
+
+        if rejected_files:
+            result["reason"] = "file_validation_failed"
+            return result
+
         result["ok"] = True
         result["reason"] = "ok"
         return result
 
-    def _inspect_candidate(self, raw_path: str) -> Dict[str, Any]:
+    def _inspect_candidate(
+        self,
+        raw_path: str,
+        *,
+        read_content: bool = True,
+    ) -> Dict[str, Any]:
         requested = str(raw_path or "").strip()
         if not requested:
             return {
@@ -369,9 +399,21 @@ class ExternalImportGuard:
                     "reason": "not_a_file",
                     "detail": "path is not a regular file",
                 }
-            with os.fdopen(fd, "r", encoding="utf-8") as handle:
-                content = handle.read()
+            file_info = {
+                "path": requested,
+                "resolved_path": str(resolved),
+                "extension": extension,
+                "size_bytes": int(stat_result.st_size),
+            }
+            if not read_content:
+                return {
+                    "ok": True,
+                    "file": file_info,
+                }
+            handle = os.fdopen(fd, "r", encoding="utf-8")
             fd = -1
+            with handle:
+                content = handle.read()
             current_resolved = candidate.resolve(strict=True)
         except UnicodeDecodeError:
             return {
@@ -399,10 +441,7 @@ class ExternalImportGuard:
         return {
             "ok": True,
             "file": {
-                "path": requested,
-                "resolved_path": str(resolved),
-                "extension": extension,
-                "size_bytes": int(stat_result.st_size),
+                **file_info,
                 "content": content,
             },
         }
