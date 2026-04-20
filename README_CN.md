@@ -56,7 +56,9 @@
 - **repo-local wrapper 现在会更一致地拦住本地 sqlite 误配**：仓库自带的 Python / shell wrapper 现在会先把常见的斜杠和大小写变体归一化，拒绝相对 sqlite 路径，也会把常见的 URL 编码容器路径先解开，再判断本地 `DATABASE_URL` 是否还指着 Docker 内部的 `/app/...` 或 `/data/...`。说人话就是：像 `sqlite+aiosqlite:///demo.db`、`sqlite+aiosqlite://///app/data/...`、`sqlite+aiosqlite:////%2Fapp%2Fdata/...` 这类值，现在都不会再被误放过。
 - **Docker 基础镜像现在也收得更紧了**：仓库自带的 Dockerfile 现在把基础镜像 digest 一起锁住了，后面重建时不容易再因为上游 tag 漂了而悄悄变样。
 - **GHCR 发布镜像现在会先自查 backend 健康脚本了**：backend 镜像现在自带 Docker 级别的 `HEALTHCHECK`，`docker-compose.ghcr.yml` 里的 backend 也继续明确绑在 `0.0.0.0`，发布工作流还会在 push 前先检查 `/usr/local/bin/backend-healthcheck.py` 是否真的在镜像里而且可执行。
-- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试现在是 `1098 passed, 22 skipped`；前端是 `194 passed`；前端 `npm run build` 和 `npm run typecheck` 也都通过。这一轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（`PASS`），并复核了 Docker 的标准就绪/鉴权路径：Dashboard `/` 返回 `200`，backend `/health` 返回 `200`，受保护的 setup/SSE 请求继续保持 fail-close。这一轮还额外复验了 Docker one-click `Profile C/D` 的 `--build` 和 `--no-build` 路径：生成出来的 Docker env 现在会把 loopback LLM/router 地址改成 `host.docker.internal`，private embedding/reranker host 会保留在显式 allowlist 上，之前那两条 `invalid embedding/reranker API base` warning 也不再出现。下面那组 2026-04-18 的 benchmark 表格这次**没有**重新跑。原生 Windows、原生 Linux 宿主 runtime 继续保留目标环境复验边界。
+- **当前这轮公开验证是按这次 session 的 fresh rerun 写的**：后端测试现在是 `1111 passed, 22 skipped`；前端是 `194 passed`；前端 `npm run build` 和 `npm run typecheck` 也都通过。这一轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（`PASS`），复核了 Docker 的标准就绪/鉴权路径（Dashboard `/` 返回 `200`，backend `/health` 返回 `200`，受保护的 setup/SSE 请求继续保持 fail-close），并补做了一次 `BEIR NFCorpus` 小样本 real A/B/C/D 复核（`sample_size=5`，`Profile D` 的 Phase 6 Gate 继续 `PASS`）。这一轮还额外复验了 Docker one-click `Profile C/D` 的 `--build` 和 `--no-build` 路径：生成出来的 Docker env 现在会把 loopback LLM/router 地址改成 `host.docker.internal`，private embedding/reranker host 会保留在显式 allowlist 上，之前那两条 `invalid embedding/reranker API base` warning 也不再出现。下面那组 2026-04-18 的 benchmark 表格这次**没有**重新跑。原生 Windows、原生 Linux 宿主 runtime 继续保留目标环境复验边界。
+- **公开 MCP 契约现在更严格了**：MCP 入口会直接拒绝带控制字符 / 不可见字符 / surrogate 的 URI，也会在真正进库前拦住超长的 `search_memory` / `create_memory` / `update_memory` payload；如果 `add_alias` 已经写入数据库，但 snapshot 补记失败，也会把 alias path 一起回滚掉。
+- **搜索 fail-close 这条链也更收口了**：如果最终 path 状态复核自己出错，`search_memory` 现在会直接丢掉那条结果，而不是把可能已经过期的 URI 继续当正常命中返回。像 `AND` / `OR` / `NOT` / `NEAR` 这类 FTS 控制词，或者 wildcard 很重的查询，也会改成当前请求内回退，而不是让控制语义悄悄改掉匹配结果，或把正常用户输入打成一条吵人的 `fts_query_invalid`。
 - **private provider 字面量地址现在不会再被默认信任**：像 `127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认可用；其它 private IP 字面量现在必须通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式 allowlist 才能继续使用。link-local 和格式错误地址仍然会 fail-close。
 - **Review snapshot 不会再默认一直涨下去了**：每次 snapshot 成功写入后，后端现在会按 age/count 做保守的 session 级清理，同时保护当前 session，并跳过拿不到锁的旧 session。
 - **reflection 后台清理现在更收口了**：同一个 session、source、reason、content 的并发 `prepare` 请求，仍然会复用同一个 prepared review；如果最后一个等待方先走掉了，后端现在也会把这条已经没人等的后台 prepare 一起取消，不再让它自己继续跑完。
@@ -107,7 +109,7 @@
 
 每次 snapshot 成功写入后，后端现在还会按 age/count 做一层保守的 session 级 retention。说人话就是：旧的 Review session 目录默认不会一直涨下去，但当前 session 仍然会被保护，拿不到锁的旧 session 也会先跳过，不会硬删。
 
-如果某条 Review session 的 `manifest.json` 损坏，后端现在只会在**能保住原始数据库作用域**时才重建它。说人话就是：你切到另一份 `.env`、另一个 compose project 或另一份 SQLite 文件后，不会再把旧的损坏会话误认成“当前库”的会话；如果这条会话暂时没法安全识别，它会先被隐藏，而不是被一次只读的会话列表请求顺手删掉。
+如果某条 Review session 的 `manifest.json` 缺失或损坏，后端现在只会在**能保住原始数据库作用域**时才重建它。说人话就是：你切到另一份 `.env`、另一个 compose project 或另一份 SQLite 文件后，不会再把旧会话误认成“当前库”的会话；如果这条会话暂时没法安全识别，它会先被隐藏，而不是被一次只读的会话列表请求顺手删掉。
 
 如果同一个 URI 已经在另一条 Review session 里留下了**更晚的内容快照**，旧快照的 rollback 现在会直接返回 `409`。说人话就是：系统会先挡住“拿旧快照去覆盖较新内容”这种情况，而不是假装回滚成功。
 

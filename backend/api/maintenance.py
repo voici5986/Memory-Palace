@@ -198,10 +198,11 @@ _SEARCH_HARD_MAX_CANDIDATE_MULTIPLIER = _shared_env_int(
 )
 _ENABLE_SESSION_FIRST_SEARCH = _env_bool("RUNTIME_SESSION_FIRST_SEARCH", True)
 ENABLE_WRITE_LANE_QUEUE = _env_bool("RUNTIME_WRITE_LANE_QUEUE", True)
+SEARCH_CONSOLE_QUERY_MAX_CHARS = 8000
 
 
 class SearchConsoleRequest(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=SEARCH_CONSOLE_QUERY_MAX_CHARS)
     mode: Optional[str] = Field(default=None)
     max_results: int = Field(default=8, ge=1, le=50)
     candidate_multiplier: int = Field(default=4, ge=1, le=20)

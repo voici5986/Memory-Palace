@@ -95,6 +95,76 @@ async def test_invalid_fts_query_degrades_only_current_request_without_disabling
 
 
 @pytest.mark.asyncio
+async def test_reserved_fts_operators_do_not_control_query_semantics(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "fts-reserved-operator-regression.db"))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="apple only fruit",
+        priority=1,
+        title="apple",
+        domain="core",
+    )
+    await client.create_memory(
+        parent_path="",
+        content="banana only fruit",
+        priority=1,
+        title="banana",
+        domain="core",
+    )
+
+    result = await client.search_advanced(
+        query="apple OR banana",
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    await client.close()
+
+    assert result["results"] == []
+    assert "fts_query_invalid" not in result.get("degrade_reasons", [])
+
+
+@pytest.mark.asyncio
+async def test_special_character_queries_skip_invalid_fts_errors(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "fts-special-char-regression.db"))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="记忆 宫殿 中文",
+        priority=1,
+        title="cjk",
+        domain="core",
+    )
+
+    result = await client.search_advanced(
+        query="记忆 OR 宫殿",
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    wildcard_result = await client.search_advanced(
+        query="***",
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    await client.close()
+
+    assert "fts_query_invalid" not in result.get("degrade_reasons", [])
+    assert "fts_query_invalid" not in wildcard_result.get("degrade_reasons", [])
+
+
+@pytest.mark.asyncio
 async def test_sqlite_identifier_hardening_rejects_invalid_table_name(
     tmp_path: Path,
 ) -> None:

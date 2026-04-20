@@ -11,13 +11,14 @@ records, and some metric JSONs are typically for development or local use only.
 > folds the 2026-04-17 real A/B/C/D verification into the current public-facing
 > conclusion, records a narrower 2026-04-18 maintenance rerun, and also keeps a
 > 2026-04-21 post-fix validation note for the later review-driven fixes. That
-> 2026-04-21 round reran the full backend suite (`1098 passed, 22 skipped`),
+> 2026-04-21 round reran the full backend suite (`1111 passed, 22 skipped`),
 > frontend tests (`194 passed`), frontend build, frontend typecheck,
 > repo-local live MCP e2e (`PASS`), and a repo-local Profile B browser smoke;
-> it did **not** recalculate the benchmark tables on this page. For the current
-> default interaction profile, the explicit deep-retrieval profiles, and the
-> newest public-facing re-check notes, start with Sections 3, 4, and 5 on this
-> page.
+> the same round also completed a smaller real A/B/C/D rerun on `BEIR NFCorpus`
+> (`sample_size=5`, `Profile D` Phase 6 Gate still `PASS`). It did **not**
+> recalculate the benchmark tables on this page. For the current default
+> interaction profile, the explicit deep-retrieval profiles, and the newest
+> public-facing re-check notes, start with Sections 3, 4, and 5 on this page.
 
 ---
 
@@ -185,8 +186,9 @@ In plain English:
   more latency than `Profile B`.
 - The later 2026-04-21 post-fix pass reran the full backend/frontend suites,
   frontend build, frontend typecheck, repo-local live MCP e2e, and a
-  repo-local `Profile B` browser smoke, but it still did **not** recalculate
-  this benchmark table.
+  repo-local `Profile B` browser smoke; the same round also completed a
+  smaller real A/B/C/D rerun on `BEIR NFCorpus` with `Profile D` Phase 6 Gate
+  still `PASS`, but it still did **not** recalculate this benchmark table.
 - Docker one-click `Profile C/D` was **not** rerun as a separate compose/script
   matrix in this round, so this page keeps that target-environment recheck
   boundary explicit.
@@ -463,11 +465,12 @@ cd backend
 
 ### 5.1 What Was Actually Rechecked In This Session
 
-- Full non-benchmark backend suite: `1098 passed / 22 skipped`
+- Full non-benchmark backend suite: `1111 passed / 22 skipped`
 - Full frontend suite: `194 passed`
 - Frontend `typecheck` / `build`: passed
 - Repo-local `Profile B` real-browser smoke: passed
 - Repo-local live MCP e2e: passed
+- `BEIR NFCorpus` small real A/B/C/D rerun: passed (`sample_size=5`, `extra_distractors=20`, `candidate_multiplier=8`, `Profile D` gate = `PASS`)
 - Docker readiness/auth recheck: Dashboard `/` `200`, backend `/health` `200`, protected setup/SSE requests remained fail-closed
 - Real A/B/C/D benchmark: rerun earlier in this session; not recalculated in the final closeout pass
 - Docker one-click `Profile C/D`: not rerun in this round; the target-environment recheck boundary remains

@@ -331,6 +331,52 @@ class _AliasReadClient(_ReadClient):
         return None
 
 
+class _LightweightRecentReadClient(_ReadClient):
+    def __init__(self, *, content: str) -> None:
+        super().__init__(content=content)
+        self.full_reads = 0
+        self.state_reads = 0
+
+    async def get_memory_by_path(
+        self,
+        path: str,
+        domain: str,
+        reinforce_access: bool = False,
+    ) -> Dict[str, Any] | None:
+        self.full_reads += 1
+        return await super().get_memory_by_path(
+            path,
+            domain,
+            reinforce_access=reinforce_access,
+        )
+
+    async def get_recent_read_state(
+        self,
+        path: str,
+        domain: str = "core",
+    ) -> Dict[str, Any] | None:
+        self.state_reads += 1
+        if (domain, path) != ("core", "agent/foo"):
+            return None
+        return {
+            "memory_id": self.memory["id"],
+            "created_at": self.memory["created_at"],
+            "domain": self.memory["domain"],
+            "path": self.memory["path"],
+            "priority": self.memory["priority"],
+            "disclosure": self.memory["disclosure"],
+            "children": [
+                {
+                    "domain": "core",
+                    "path": "agent/foo/child-1",
+                    "priority": 1,
+                    "disclosure": "When I need child one",
+                    "memory_id": 101,
+                }
+            ],
+        }
+
+
 @pytest.mark.asyncio
 async def test_read_memory_known_uri_fast_path_reuses_recent_read_cache(
     monkeypatch: pytest.MonkeyPatch,
@@ -355,6 +401,34 @@ async def test_read_memory_known_uri_fast_path_reuses_recent_read_cache(
     assert first == "MEMORY: core://agent/foo"
     assert second == "MEMORY: core://agent/foo"
     assert render_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_read_memory_recent_state_fast_path_skips_second_full_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = _LightweightRecentReadClient(content="cached body")
+    render_calls = 0
+
+    async def _fake_fetch_and_format_memory(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal render_calls
+        render_calls += 1
+        return "MEMORY: core://agent/foo"
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: fake_client)
+    monkeypatch.setattr(mcp_server, "_fetch_and_format_memory", _fake_fetch_and_format_memory)
+    monkeypatch.setattr(mcp_server.runtime_state, "recent_reads", SessionRecentReadCache())
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+
+    first = await mcp_server.read_memory("core://agent/foo")
+    second = await mcp_server.read_memory("core://agent/foo")
+
+    assert first == "MEMORY: core://agent/foo"
+    assert second == "MEMORY: core://agent/foo"
+    assert render_calls == 1
+    assert fake_client.full_reads == 1
+    assert fake_client.state_reads == 2
 
 
 @pytest.mark.asyncio

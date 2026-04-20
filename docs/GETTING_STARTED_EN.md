@@ -522,7 +522,7 @@ If you just cloned the GitHub repository, it is normal if you don't see these tw
 
 > The checks here focus on "getting the system running"; if you need additional local Markdown validation summaries, run the validation scripts mentioned above.
 >
-> Current real verification snapshot for this repository session: backend tests `1098 passed, 22 skipped`; frontend `194 passed`; frontend typecheck and the frontend build both passed. This round also reran a repo-local macOS `Profile B` real-browser smoke, reran repo-local live MCP e2e with a full `PASS` summary, and rechecked the Docker readiness/auth path: Dashboard `/` returned `200`, backend `/health` returned `200`, and protected setup/SSE requests remained fail-closed. The public A/B/C/D benchmark tables were not recalculated in this closeout pass. Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths still keep explicit target-environment recheck boundaries.
+> Current real verification snapshot for this repository session: backend tests `1111 passed, 22 skipped`; frontend `194 passed`; frontend typecheck and the frontend build both passed. This round also reran a repo-local macOS `Profile B` real-browser smoke, reran repo-local live MCP e2e with a full `PASS` summary, rechecked the Docker readiness/auth path (`/` = `200`, `/health` = `200`, protected setup/SSE requests still fail-closed), and completed a smaller real A/B/C/D rerun on `BEIR NFCorpus` with `Profile D` Phase 6 Gate still `PASS`. The public A/B/C/D benchmark tables were not recalculated in this closeout pass. Docker one-click `Profile C/D`, and native Windows / native Linux host runtime paths still keep explicit target-environment recheck boundaries.
 
 ### 5.1 Health Check
 

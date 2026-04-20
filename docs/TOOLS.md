@@ -62,7 +62,7 @@ system://boot             ← 系统内置 URI（只读）
 - `writer` — 写作域（故事、章节）
 - `system` — 系统保留（`boot` / `index` / `index-lite` / `audit` / `recent`），不可写入
 
-> 💡 优先级 (`priority`) 是一个整数，**数字越小优先级越高**（0 最高）。它决定了检索排序和冲突解决时的先后顺序。
+> 💡 优先级 (`priority`) 是一个整数，**数字越小优先级越高**（0 最高）。它决定了检索排序和冲突解决时的先后顺序。当前公开工具契约要求这里传的是真正的整数值；`true/false`、`1.9` 这类值会直接拒绝。
 
 ### Write Guard（写入守卫）
 
@@ -152,10 +152,11 @@ create_memory(
 **关键行为：**
 
 1. 创建前自动执行 **Write Guard** 检查
-2. 若 Guard 判定为 `NOOP` / `UPDATE` / `DELETE`，创建会被阻止，返回建议目标 `guard_target_uri`
+2. 若 Guard 判定为 `NOOP` / `UPDATE` / `DELETE`，创建会被阻止，返回建议目标 `guard_target_uri` / `guard_target_id`
 3. 若创建是因为 Write Guard 临时异常或降级而被 fail-closed，响应里还会额外带 `retryable=true` 与 `retry_hint`
 4. `title` 只允许字母、数字、下划线和连字符（不允许空格和特殊字符）
 5. 若省略 `title`，系统自动分配数字 ID
+6. `content` 现在还会在 MCP 入口层做长度校验；超过 `100000` 字符会直接拒绝，不再继续进 DB / Write Guard 链路
 
 **使用示例：**
 
@@ -210,6 +211,8 @@ update_memory(
 > ⚠️ **没有全量替换模式。** 必须通过 `old_string` / `new_string` 明确指定修改内容，防止意外覆盖。
 >
 > ⚠️ **更新前请先 `read_memory`**，确保你了解将被修改的内容。
+>
+> ⚠️ `old_string` / `new_string` / `append` 现在也会在 MCP 入口层做长度校验；任一字段超过 `100000` 字符会直接拒绝，不再继续进 DB / Write Guard 链路。
 >
 > 📌 如果内容更新触发了 `guard_action=UPDATE`，并且返回了有效的 `guard_target_id`，`update_memory` 仍会继续按**当前 URI 原地更新**执行；这里的 `guard_target_uri` / `guard_target_id` 更像“有相似目标，值得你再看一眼”的提示，不是自动把这次更新改写到别的 URI。
 >
@@ -282,6 +285,11 @@ add_alias(
 
 **说明：** 别名可以跨域——例如将 `writer://` 域的记忆链接到 `core://` 域。
 
+**当前边界：**
+
+- `new_uri` / `target_uri` 都会先走和其它写工具一致的 URI 校验；控制字符、不可见格式字符、surrogate 都会直接拒绝
+- 如果 alias 已经写进数据库，但后续 snapshot 记录失败，当前实现会把这条 alias path 一起补偿回滚，避免出现“工具报错但 alias 已经半成功落库”的状态
+
 **使用示例：**
 
 ```python
@@ -305,7 +313,7 @@ add_alias(
 <!-- 源码位置: backend/mcp_server.py -->
 ```python
 search_memory(
-    query: str,                                  # 必填，搜索关键词
+    query: str,                                  # 必填，搜索关键词（当前上限 8000 字符）
     mode: Optional[str] = None,                  # 可选，"keyword" / "semantic" / "hybrid"
     max_results: Optional[int] = None,           # 可选，返回结果数上限
     candidate_multiplier: Optional[int] = None,  # 可选，候选池倍率
@@ -322,7 +330,7 @@ search_memory(
 
 | 模式 | 说明 |
 |---|---|
-| `keyword` | 基于 BM25 关键词匹配（默认模式） |
+| `keyword` | 安全 FTS/BM25 优先；不安全查询会自动回退到转义后的 LIKE 路径（默认模式） |
 | `semantic` | 基于 Embedding 向量语义搜索（需启用可用的 embedding 链路，如 `hash` / `api` / `router` / `openai`） |
 | `hybrid` | 关键词 + 语义混合检索；若已启用 Reranker，会在后面继续重排 |
 
@@ -354,6 +362,7 @@ search_memory(
 - 如果你只关心结果、分数和降级原因，可以传 `verbose=false`，这样返回更短，更适合 MCP 上下文窗口
 - 如果最终路径状态复核本身查库失败，当前实现会直接丢掉那条结果，并在 `degrade_reasons` 里追加 `path_revalidation_lookup_failed`；不会再把一条“当前状态不确定”的旧结果继续当成正常命中返回
 - `candidate_multiplier` 仍然只是“你希望放大多少”的提示值；公开返回先看 `candidate_multiplier_applied`，backend metadata 再看 `candidate_limit_applied`；尤其是 `fast` 交互档下，第一轮 multiplier 现在硬上限固定为 `4`，后续意图策略也不会再把它悄悄抬高
+- `query` 现在会先走一层 FTS 安全检查：像 `AND` / `OR` / `NOT` / `NEAR` 这类保留词，或 wildcard 很重的查询，不再直接改变 FTS 语义；当前实现会按这次请求回退到安全路径，而不是把普通用户输入打成一条全局故障
 
 **使用示例：**
 
@@ -525,6 +534,7 @@ index_status()
 | `guard_action` | `ADD` / `UPDATE` / `NOOP` / `DELETE` / `BYPASS` | Guard 的决策动作 |
 | `guard_reason` | 字符串 | 决策原因 |
 | `guard_method` | `keyword` / `embedding` / `llm` / `write_guard_llm` / `unknown` / `none` / `exception` | 检测方法 |
+| `guard_target_uri` / `guard_target_id` | 字符串 / 整数 | Guard 建议你复查或切换到的目标；它们是提示，不是自动重定向写入 |
 
 ### 索引入队统计字段
 

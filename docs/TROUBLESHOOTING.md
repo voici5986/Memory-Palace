@@ -575,11 +575,17 @@ cd backend
    | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | 当前查询作用域内混入了多种向量维度，或该作用域整体维度和当前配置不一致，需要重建索引 | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API 请求失败 | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker 配置缺失 | `backend/db/sqlite_client.py` |
+   | `fts_query_invalid` | 当前查询不适合直接走 FTS；系统已按这次请求回退到安全路径 | `backend/db/sqlite_client.py` |
+   | `path_revalidation_lookup_failed` | 最终 path 状态复核失败；相关结果已直接丢弃 | `backend/db/sqlite_client.py` |
    | `intent_llm_model_unavailable` | 已开启 intent LLM，但当前配置的模型/后端不可用 | `backend/db/sqlite_client.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM 返回空结果 | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | 索引任务入队被丢弃 | `backend/mcp_server.py` |
 
    > `write_guard_exception` 属于写入/学习链路（如 `create_memory`、`update_memory`、显式学习触发），语义为写入已 fail-closed 拒绝，并非检索质量降级。
+   >
+   > `fts_query_invalid` 现在更像“这次 query 走了安全回退”而不是“整个 FTS 挂了”。常见触发是保留词（如 `AND/OR/NOT/NEAR`）或 wildcard 很重的输入；先看结果有没有按 fallback 返回，再决定是否要重写查询。
+   >
+   > `path_revalidation_lookup_failed` 的语义也要按 fail-close 理解：相关结果已经被直接丢弃，不该把空结果误读成“库里一定没有这条记忆”。
    >
    > 现在这两类请求失败原因还会继续细分。例如你可能看到 `embedding_request_failed:timeout`、`embedding_request_failed:http_status:503`、`embedding_request_failed:connection_failure`、`embedding_request_failed:rate_limited`、`embedding_request_failed:upstream_unavailable`、`embedding_request_failed:retry_exhausted`，或者 `reranker_request_failed:http_status:503`。看法很简单：先看前半段知道是哪条链路挂了，再看后半段确认是超时、限流、上游不可用、连接失败，还是别的请求错误。现在 `compact_gist` / `write_guard` / `intent_llm` 这些请求失败链路也会沿用同一套细分口径。
 

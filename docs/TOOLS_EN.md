@@ -62,7 +62,7 @@ The URI here means a **Memory Palace memory address**, not an operating-system f
 - `writer` — Writing domain (Stories, chapters)
 - `system` — System reserved (`boot` / `index` / `index-lite` / `audit` / `recent`), non-writable
 
-> 💡 Priority (`priority`) is an integer where **lower numbers mean higher priority** (0 is highest). It determines retrieval ranking and precedence during conflict resolution.
+> 💡 Priority (`priority`) is an integer where **lower numbers mean higher priority** (0 is highest). It determines retrieval ranking and precedence during conflict resolution. The current public tool contract expects a real integer here; values such as `true/false` or `1.9` are rejected instead of being coerced.
 
 ### Write Guard
 
@@ -152,10 +152,11 @@ create_memory(
 **Key Behaviors:**
 
 1. Automatically performs a **Write Guard** check before creation.
-2. If Guard decides `NOOP` / `UPDATE` / `DELETE`, creation is blocked, and `guard_target_uri` is returned as a suggestion.
+2. If Guard decides `NOOP` / `UPDATE` / `DELETE`, creation is blocked, and `guard_target_uri` / `guard_target_id` are returned as suggestions.
 3. If creation is fail-closed because Write Guard is temporarily unavailable or degraded, the response may also include `retryable=true` and `retry_hint`.
 4. `title` only allows letters, numbers, underscores, and hyphens (no spaces or special characters).
 5. If `title` is omitted, the system auto-assigns a numeric ID.
+6. `content` is now also length-checked at the MCP boundary; values longer than `100000` characters are rejected before the request enters DB / Write Guard work.
 
 **Usage Examples:**
 
@@ -210,6 +211,8 @@ update_memory(
 > ⚠️ **There is no full-replacement mode.** You must explicitly specify changes via `old_string` / `new_string` to prevent accidental overwrites.
 >
 > ⚠️ **Please `read_memory` before updating** to ensure you understand what is being modified.
+>
+> ⚠️ `old_string` / `new_string` / `append` are now also length-checked at the MCP boundary; any one of them exceeding `100000` characters is rejected before DB / Write Guard work starts.
 >
 > 📌 If a content update returns `guard_action=UPDATE` with a valid `guard_target_id`, `update_memory` still continues as an **in-place update of the current URI**. In plain language: `guard_target_uri` / `guard_target_id` is a “there is a similar target, take a look” hint, not an automatic retargeting of this write to another URI.
 >
@@ -282,6 +285,11 @@ add_alias(
 
 **Description:** Aliases can be cross-domain—for example, linking a memory from `writer://` to the `core://` domain.
 
+**Current Boundaries:**
+
+- `new_uri` / `target_uri` go through the same URI validation used by the other public write tools; control chars, invisible format chars, and surrogates are rejected
+- if the alias row is written first but snapshot capture fails afterwards, the current implementation compensates by rolling back that alias path instead of leaving a half-success state behind
+
 **Usage Example:**
 
 ```python
@@ -305,7 +313,7 @@ add_alias(
 <!-- Source: backend/mcp_server.py -->
 ```python
 search_memory(
-    query: str,                                  # Required: Search query
+    query: str,                                  # Required: Search query (current limit: 8000 chars)
     mode: Optional[str] = None,                  # Optional: "keyword" / "semantic" / "hybrid"
     max_results: Optional[int] = None,           # Optional: Maximum results to return
     candidate_multiplier: Optional[int] = None,  # Optional: Candidate pool multiplier
@@ -322,7 +330,7 @@ search_memory(
 
 | Mode | Description |
 |---|---|
-| `keyword` | BM25-based keyword matching (default) |
+| `keyword` | Safe FTS/BM25 first; unsafe queries automatically fall back to the escaped LIKE path (default) |
 | `semantic` | Embedding-based semantic search (requires an enabled embedding pipeline: `hash` / `api` / `router` / `openai`) |
 | `hybrid` | Combined keyword + semantic retrieval; followed by reranking if Reranker is enabled |
 
@@ -354,6 +362,7 @@ search_memory(
 - If you only care about the final results, scores, and degrade reasons, pass `verbose=false` to keep the response shorter and more MCP-context-friendly
 - If the final path-state revalidation itself hits a lookup error, the current implementation drops that result and appends `path_revalidation_lookup_failed` to `degrade_reasons`; it no longer fail-opens by returning a stale URI as if it were still current
 - `candidate_multiplier` is still only a hint about how far you want the first-round pool to expand; check `candidate_multiplier_applied` in the public response first and `candidate_limit_applied` in backend metadata for the hard ceiling; on the `fast` interaction tier the first-round multiplier is now hard-capped at `4`, and later intent heuristics no longer widen it again
+- `query` now also goes through an FTS-safety check first: reserved control words such as `AND` / `OR` / `NOT` / `NEAR`, or wildcard-heavy inputs, no longer silently steer FTS semantics; the current implementation falls back for that request instead of turning ordinary user text into a global retrieval failure
 
 **Usage Examples:**
 
@@ -525,6 +534,7 @@ Return values for `create_memory` and `update_memory` include the following Writ
 | `guard_action` | `ADD` / `UPDATE` / `NOOP` / `DELETE` / `BYPASS` | Decision action from Guard |
 | `guard_reason` | String | Reason for the decision |
 | `guard_method` | `keyword` / `embedding` / `llm` / `write_guard_llm` / `unknown` / `none` / `exception` | Detection method used |
+| `guard_target_uri` / `guard_target_id` | String / Integer | Suggested target to inspect or switch to; they are hints, not an automatic write redirect |
 
 ### Indexing Queue Stats Fields
 

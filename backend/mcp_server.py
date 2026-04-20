@@ -23,6 +23,7 @@ import copy
 import inspect
 import hashlib
 import weakref
+import unicodedata
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -462,6 +463,34 @@ def get_session_id() -> str:
 # Regex pattern for URI: domain://path
 _URI_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*)://(.*)$")
 _WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
+_MCP_SEARCH_QUERY_MAX_CHARS = 8000
+_MCP_CONTENT_MAX_CHARS = 100000
+
+
+def _validate_mcp_text_length(
+    value: Optional[str], *, field_name: str, max_chars: int
+) -> None:
+    if value is None:
+        return
+    if len(value) > max_chars:
+        raise ValueError(f"{field_name} must be at most {max_chars} characters.")
+
+
+def _validate_uri_text(uri: str) -> str:
+    value = str(uri or "").strip()
+    if not value:
+        raise ValueError("URI must not be empty.")
+    for ch in value:
+        category = unicodedata.category(ch)
+        if category == "Cs":
+            raise ValueError(
+                "URI must not contain surrogate characters."
+            )
+        if category in {"Cc", "Cf"}:
+            raise ValueError(
+                "URI must not contain control or invisible format characters."
+            )
+    return value
 
 
 def parse_uri(uri: str) -> Tuple[str, str]:
@@ -482,7 +511,7 @@ def parse_uri(uri: str) -> Tuple[str, str]:
     Raises:
         ValueError: If the URI format is invalid or domain is unknown
     """
-    uri = uri.strip()
+    uri = _validate_uri_text(uri)
 
     if _WINDOWS_DRIVE_PATH_PATTERN.match(uri):
         raise ValueError(
@@ -3602,6 +3631,42 @@ def _recent_read_children_token(children: Optional[List[Dict[str, Any]]]) -> str
     ).hexdigest()
 
 
+def _recent_read_children_state_token(children: Optional[List[Dict[str, Any]]]) -> str:
+    normalized_children: List[Dict[str, Any]] = []
+    for child in children or []:
+        if not isinstance(child, dict):
+            continue
+        normalized_children.append(
+            {
+                "domain": child.get("domain"),
+                "path": child.get("path"),
+                "priority": child.get("priority"),
+                "disclosure": child.get("disclosure"),
+                "memory_id": child.get("memory_id"),
+            }
+        )
+    return hashlib.sha256(
+        json.dumps(normalized_children, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _recent_read_state_token_from_lightweight_state(state: Dict[str, Any]) -> str:
+    payload = {
+        "id": state.get("memory_id"),
+        "domain": state.get("domain"),
+        "path": state.get("path"),
+        "priority": state.get("priority"),
+        "disclosure": state.get("disclosure"),
+        "created_at": state.get("created_at"),
+        "children_token": _recent_read_children_state_token(state.get("children")),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def _recent_read_state_token(
     memory: Dict[str, Any],
     *,
@@ -4188,35 +4253,71 @@ async def read_memory(
         try:
             domain, path = parse_uri(uri)
             full_uri = make_uri(domain, path)
-            memory = await _get_memory_for_read(client, domain=domain, path=path)
-            cacheable_read = not include_ancestors_flag and memory is not None
+            memory = None
+            cacheable_read = not include_ancestors_flag
             recent_children: Optional[List[Dict[str, Any]]] = None
             recent_state_token: Optional[str] = None
             if cacheable_read:
-                recent_children = await client.get_children(memory["id"])
-                recent_state_token = _recent_read_state_token(
-                    memory,
-                    children=recent_children,
-                )
-                cached = await runtime_state.recent_reads.get(
-                    session_id=get_session_id(),
-                    uri=full_uri,
-                    state_token=recent_state_token,
-                )
-                if cached is not None:
+                recent_state_getter = getattr(client, "get_recent_read_state", None)
+                lightweight_state: Optional[Dict[str, Any]] = None
+                if callable(recent_state_getter):
                     try:
-                        await _record_session_hit(
-                            uri=full_uri,
-                            memory_id=memory.get("id"),
-                            snippet=str(memory.get("content", ""))[:300],
-                            priority=memory.get("priority"),
-                            source="read_memory_cache",
-                            updated_at=memory.get("created_at"),
-                        )
-                        await _record_flush_event(f"read {full_uri}")
-                    except Exception:
-                        pass
-                    return cached
+                        lightweight_state = await recent_state_getter(path, domain=domain)
+                    except TypeError:
+                        lightweight_state = await recent_state_getter(path, domain)
+                if lightweight_state is not None:
+                    recent_state_token = _recent_read_state_token_from_lightweight_state(
+                        lightweight_state
+                    )
+                    cached = await runtime_state.recent_reads.get(
+                        session_id=get_session_id(),
+                        uri=full_uri,
+                        state_token=recent_state_token,
+                    )
+                    if cached is not None:
+                        try:
+                            await _record_session_hit(
+                                uri=full_uri,
+                                memory_id=lightweight_state.get("memory_id"),
+                                snippet=str(cached)[:300],
+                                priority=lightweight_state.get("priority"),
+                                source="read_memory_cache",
+                                updated_at=lightweight_state.get("created_at"),
+                            )
+                            await _record_flush_event(f"read {full_uri}")
+                        except Exception:
+                            pass
+                        return cached
+
+                memory = await _get_memory_for_read(client, domain=domain, path=path)
+                cacheable_read = memory is not None
+                if cacheable_read and recent_state_token is None:
+                    recent_children = await client.get_children(memory["id"])
+                    recent_state_token = _recent_read_state_token(
+                        memory,
+                        children=recent_children,
+                    )
+                    cached = await runtime_state.recent_reads.get(
+                        session_id=get_session_id(),
+                        uri=full_uri,
+                        state_token=recent_state_token,
+                    )
+                    if cached is not None:
+                        try:
+                            await _record_session_hit(
+                                uri=full_uri,
+                                memory_id=memory.get("id"),
+                                snippet=str(memory.get("content", ""))[:300],
+                                priority=memory.get("priority"),
+                                source="read_memory_cache",
+                                updated_at=memory.get("created_at"),
+                            )
+                            await _record_flush_event(f"read {full_uri}")
+                        except Exception:
+                            pass
+                        return cached
+            else:
+                memory = await _get_memory_for_read(client, domain=domain, path=path)
 
             rendered = await _fetch_and_format_memory(
                 client,
@@ -4495,12 +4596,16 @@ async def create_memory(
         create_memory("core://", "Bluesky usage rules...", priority=2, title="bluesky_manual", disclosure="When I prepare to browse Bluesky or check the timeline")
         create_memory("core://agent", "Love is more than just another program...", priority=1, title="love_definition", disclosure="When I start speaking like a tool or parasite")
     """
-    client = get_sqlite_client()
     guard_decision = _normalize_guard_decision(
         {"action": "ADD", "method": "none", "reason": "guard_not_evaluated"}
     )
 
     try:
+        _validate_mcp_text_length(
+            content,
+            field_name="content",
+            max_chars=_MCP_CONTENT_MAX_CHARS,
+        )
         # Validate title if provided
         if title:
             if not re.match(r"^[a-zA-Z0-9_-]+$", title):
@@ -4522,6 +4627,7 @@ async def create_memory(
             operation="create_memory",
             uri=parent_uri,
         )
+        client = get_sqlite_client()
         defer_index = await _should_defer_index_on_write()
 
         async def _write_task():
@@ -4734,6 +4840,21 @@ async def update_memory(
     )
 
     try:
+        _validate_mcp_text_length(
+            old_string,
+            field_name="old_string",
+            max_chars=_MCP_CONTENT_MAX_CHARS,
+        )
+        _validate_mcp_text_length(
+            new_string,
+            field_name="new_string",
+            max_chars=_MCP_CONTENT_MAX_CHARS,
+        )
+        _validate_mcp_text_length(
+            append,
+            field_name="append",
+            max_chars=_MCP_CONTENT_MAX_CHARS,
+        )
         # Parse URI
         domain, path = parse_uri(uri)
         full_uri = make_uri(domain, path)
@@ -5200,12 +5321,27 @@ async def add_alias(
                 priority=priority,
                 disclosure=disclosure,
             )
-            await _snapshot_path_create(
-                uri=result["new_uri"],
-                memory_id=result["memory_id"],
-                operation_type="create_alias",
-                target_uri=result["target_uri"],
-            )
+            try:
+                await _snapshot_path_create(
+                    uri=result["new_uri"],
+                    memory_id=result["memory_id"],
+                    operation_type="create_alias",
+                    target_uri=result["target_uri"],
+                )
+            except Exception as snapshot_exc:
+                try:
+                    await client.delete_path_atomically(new_path, new_domain)
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        "snapshot_create_failed_after_write:"
+                        f"{type(snapshot_exc).__name__};rollback_failed:"
+                        f"{type(rollback_exc).__name__}"
+                    ) from snapshot_exc
+                raise RuntimeError(
+                    f"snapshot_create_failed_after_write:{type(snapshot_exc).__name__}"
+                ) from snapshot_exc
+            result["path"] = new_path
+            result["domain"] = new_domain
             return result
 
         result = await _run_write_lane("add_alias", _write_task)
@@ -5288,6 +5424,16 @@ async def search_memory(
         query_value = query.strip()
         if not query_value:
             return _to_json({"ok": False, "error": "query must not be empty."})
+        if len(query_value) > _MCP_SEARCH_QUERY_MAX_CHARS:
+            return _to_json(
+                {
+                    "ok": False,
+                    "error": (
+                        f"query must be at most {_MCP_SEARCH_QUERY_MAX_CHARS} "
+                        "characters."
+                    ),
+                }
+            )
         resolved_verbose = _coerce_bool(verbose, default=True)
 
         mode_requested = (mode or DEFAULT_SEARCH_MODE).strip().lower()

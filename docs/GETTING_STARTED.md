@@ -528,7 +528,7 @@ cd backend && python ../scripts/evaluate_memory_palace_mcp_e2e.py
 
 > 这里的检查以“先跑通系统”为主；如果你需要额外的本地 Markdown 验证摘要，再运行上面的验证脚本即可。
 >
-> 当前这轮真实验证快照：backend `1098 passed, 22 skipped`；frontend `194 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算；Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
+> 当前这轮真实验证快照：backend `1111 passed, 22 skipped`；frontend `194 passed`；前端 `typecheck` 和 build 都通过。本轮还补跑了 repo-local macOS `Profile B` 的真实浏览器 smoke、repo-local live MCP e2e（全 `PASS`），以及一轮 Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close。本轮还补做了一次 `BEIR NFCorpus` 小样本 real A/B/C/D 复核，`Profile D` 的 Phase 6 Gate 继续 `PASS`；真实 A/B/C/D benchmark 的公开表格没有在这轮收口里重算。Docker one-click 的 `Profile C/D`，以及原生 Windows / Linux 宿主 runtime 仍保留目标环境复核边界。
 
 ### 5.1 健康检查
 

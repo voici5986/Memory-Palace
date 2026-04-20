@@ -650,6 +650,31 @@ class SnapshotManager:
 
             return self._build_manifest_payload(session_id)
 
+        recovered_scope = (
+            self._load_scope_marker(session_id, session_dir=session_dir)
+            or current_scope
+        )
+        rebuilt_manifest = self._rebuild_manifest_from_resources(
+            session_id,
+            scope=recovered_scope,
+            session_dir=session_dir,
+        )
+        if rebuilt_manifest is not None:
+            try:
+                _write_json_atomic(manifest_path, rebuilt_manifest)
+                self._persist_scope_marker(
+                    session_id,
+                    rebuilt_manifest,
+                    session_dir=session_dir,
+                )
+            except OSError as save_exc:
+                logger.warning(
+                    "Failed to persist rebuilt snapshot manifest for session %s: %s",
+                    session_id,
+                    save_exc,
+                )
+            return rebuilt_manifest
+
         return self._build_manifest_payload(
             session_id,
             scope=current_scope or _resolve_current_database_scope(),

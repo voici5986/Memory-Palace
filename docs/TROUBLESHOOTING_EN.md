@@ -585,11 +585,17 @@ If this command can normally output the version number, starting `mcp_server.py`
    | `vector_dim_mixed_requires_reindex` / `vector_dim_mismatch_requires_reindex` | The current query scope contains mixed vector dimensions, or that scope's vectors do not match the active config; reindex is required | `backend/db/sqlite_client.py` |
    | `reranker_request_failed` | Reranker API request failed | `backend/db/sqlite_client.py` |
    | `reranker_config_missing` | Reranker configuration missing | `backend/db/sqlite_client.py` |
+   | `fts_query_invalid` | The current query was not safe for direct FTS; the request fell back to the safe path | `backend/db/sqlite_client.py` |
+   | `path_revalidation_lookup_failed` | Final path-state revalidation failed; the affected result was dropped | `backend/db/sqlite_client.py` |
    | `intent_llm_model_unavailable` | Intent LLM was enabled, but the configured model/backend was not usable | `backend/db/sqlite_client.py` |
    | `compact_gist_llm_empty` | Compact Gist LLM returned empty result | `backend/mcp_server.py` |
    | `index_enqueue_dropped` | Indexing task enqueue dropped | `backend/mcp_server.py` |
 
    > `write_guard_exception` belongs to the write/learn chain (e.g., `create_memory`, `update_memory`, explicit learning trigger), meaning the write has been fail-closed and rejected, rather than a drop in search quality.
+   >
+   > `fts_query_invalid` now usually means “this query used the safe fallback for this request,” not “FTS is globally broken.” Common triggers are reserved control words (`AND/OR/NOT/NEAR`) or wildcard-heavy input; check the fallback result first before treating it as a backend incident.
+   >
+   > `path_revalidation_lookup_failed` is also fail-closed by design: the affected result was already dropped, so do not read the missing hit as proof that the memory does not exist.
    >
    > Those two request-failure markers can now also carry a more specific suffix. In practice you may see values like `embedding_request_failed:timeout`, `embedding_request_failed:http_status:503`, `embedding_request_failed:connection_failure`, `embedding_request_failed:rate_limited`, `embedding_request_failed:upstream_unavailable`, `embedding_request_failed:retry_exhausted`, or `reranker_request_failed:http_status:503`. Read them from left to right: first identify which chain failed, then use the suffix to tell whether it was a timeout, a rate limit, an upstream outage, a connection problem, or another request-side error. The same pattern now also applies to `compact_gist` / `write_guard` / `intent_llm` request failures in the degrade-reason path.
 

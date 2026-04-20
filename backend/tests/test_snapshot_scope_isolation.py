@@ -628,6 +628,48 @@ def test_snapshot_manager_rebuilds_manifest_from_resource_files_when_manifest_co
     assert rebuilt_manifest["resources"]["notes://alpha"]["file"] == "memory_alpha.json"
 
 
+def test_snapshot_manager_rebuilds_manifest_from_resource_files_when_manifest_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    snapshot_dir = tmp_path / "snapshots"
+    session_dir = snapshot_dir / "orphan-session"
+    resources_dir = session_dir / "resources"
+    resources_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("DATABASE_URL", _sqlite_url(tmp_path / "active.db"))
+    scope = snapshot_module._resolve_current_database_scope()
+    (session_dir / ".scope.json").write_text(
+        json.dumps(scope),
+        encoding="utf-8",
+    )
+    (resources_dir / "memory_alpha.json").write_text(
+        json.dumps(
+            {
+                "resource_id": "notes://alpha",
+                "resource_type": "path",
+                "snapshot_time": "2026-03-20T10:00:00",
+                "data": {
+                    "uri": "notes://alpha",
+                    "operation_type": "create",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = SnapshotManager(str(snapshot_dir))
+
+    snapshots = manager.list_snapshots("orphan-session")
+    rebuilt_manifest = json.loads(
+        (session_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert [item["resource_id"] for item in snapshots] == ["notes://alpha"]
+    assert rebuilt_manifest["resources"]["notes://alpha"]["file"] == "memory_alpha.json"
+    assert rebuilt_manifest["database_fingerprint"] == scope["database_fingerprint"]
+
+
 def test_snapshot_manager_logs_and_recovers_when_manifest_json_is_invalid(
     caplog: pytest.LogCaptureFixture,
     monkeypatch,

@@ -2,7 +2,7 @@
 
 本文档汇总 Memory Palace 各档位（A/B/C/D）的检索质量、延迟与语义质量门禁测试结果。这里保留**摘要表 + 复核说明**；公开仓库会保留 `backend/tests/benchmark/` 下的 benchmark helpers 与测试入口，机器相关的原始 benchmark 日志、一次性门禁草稿、阶段性重测记录以及部分指标 JSON 默认只在开发阶段或本地使用。
 
-> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-21 的修复后复核一起收口到公开口径里。2026-04-21 这轮修复后复核重跑了完整 backend 测试（`1098 passed, 22 skipped`）、frontend 测试（`194 passed`）、frontend build、frontend typecheck、repo-local live MCP e2e（`PASS`）和一轮 repo-local `Profile B` 真实浏览器 smoke；本页里的 benchmark 表格并没有在这轮收口里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
+> 状态说明（2026-04）：本页保留 2026-02 的公开基线表格，同时把 2026-04-17 的真实 A/B/C/D 复核、2026-04-18 的当前 rerun，以及 2026-04-21 的修复后复核一起收口到公开口径里。2026-04-21 这轮修复后复核重跑了完整 backend 测试（`1111 passed, 22 skipped`）、frontend 测试（`194 passed`）、frontend build、frontend typecheck、repo-local live MCP e2e（`PASS`）和一轮 repo-local `Profile B` 真实浏览器 smoke；同一轮还补做了一次 `BEIR NFCorpus` 小样本 real A/B/C/D 复核（`sample_size=5`，`Profile D` 的 Phase 6 Gate 继续 `PASS`）。本页里的 benchmark 表格并没有在这轮收口里重算。当前交互默认档位、深检索档位和新的门禁项，请优先看本页第 3 节和第 4 节。
 
 ---
 
@@ -125,7 +125,7 @@
 - `Profile B` 还是默认交互档，质量已经明显高于 A，延迟也还很低。
 - `Profile C/D` 这轮质量都跑满了，但时延明显更高，属于按需打开的深检索档。
 - `Profile A` 依旧只是低配兜底，不适合拿来代表语义检索质量。
-- 后续 2026-04-21 的修复后复核重跑了完整 backend/frontend 测试、frontend build/typecheck、repo-local live MCP e2e 和 repo-local `Profile B` 真实浏览器 smoke；这张 benchmark 表本身没有在那轮重算。
+- 后续 2026-04-21 的修复后复核重跑了完整 backend/frontend 测试、frontend build/typecheck、repo-local live MCP e2e 和 repo-local `Profile B` 真实浏览器 smoke；同一轮还补做了一次 `BEIR NFCorpus` 小样本 real A/B/C/D 复核，`Profile D` 的 Phase 6 Gate 继续 `PASS`。这张 benchmark 表本身没有在那轮重算。
 
 ### 3.3 2026-04-20 同配置 follow-up（默认 reranker 权重）
 
@@ -324,11 +324,12 @@ curl -fsS http://127.0.0.1:8000/health
 
 ### 5.1 本 session 已实际复核到哪里
 
-- Backend 非 benchmark 全量：`1098 passed / 22 skipped`
+- Backend 非 benchmark 全量：`1111 passed / 22 skipped`
 - Frontend 全量：`194 passed`
 - Frontend `typecheck` / `build`：通过
 - repo-local `Profile B` 真实浏览器 smoke：通过
 - repo-local live MCP e2e：通过（`docs/skills/MCP_LIVE_E2E_REPORT.md` 全 `PASS`）
+- `BEIR NFCorpus` 小样本 real A/B/C/D rerun：通过（`sample_size=5`，`extra_distractors=20`，`candidate_multiplier=8`，`Profile D` 的 Phase 6 Gate = `PASS`）
 - Docker 就绪/鉴权复核：Dashboard `/` `200`、backend `/health` `200`，受保护的 setup/SSE 请求继续保持 fail-close
 - 真实 A/B/C/D benchmark：本 session 早些时候已重跑；这轮收口未重算，继续沿用第 3 节表格
 - Docker one-click `Profile C/D`：本轮未重跑，继续保留目标环境复核边界

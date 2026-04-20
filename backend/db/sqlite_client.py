@@ -77,6 +77,7 @@ DEFAULT_EMBEDDING_BACKEND = "hash"
 DEFAULT_EMBEDDING_MODEL = "hash-v1"
 DEFAULT_EMBEDDING_DIM = 64
 _LATIN_RETRIEVAL_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
+_FTS_CONTROL_TOKEN_PATTERN = re.compile(r"\b(?:AND|OR|NOT|NEAR)\b", re.IGNORECASE)
 _CJK_RETRIEVAL_TOKEN_PATTERN = re.compile(
     r"[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7A3\uF900-\uFAFF\U00020000-\U0002EBEF]+"
 )
@@ -4406,6 +4407,98 @@ class SQLiteClient:
                 "gist_source_hash": gist.get("source_hash"),
             }
 
+    async def _get_recent_read_children_state_in_session(
+        self,
+        session: AsyncSession,
+        memory_id: int,
+    ) -> List[Dict[str, Any]]:
+        parent_paths_result = await session.execute(
+            select(Path.domain, Path.path).where(Path.memory_id == memory_id)
+        )
+        parent_paths = parent_paths_result.all()
+
+        if not parent_paths:
+            return []
+
+        child_conditions = []
+        for parent_domain, parent_path in parent_paths:
+            safe_parent = (
+                parent_path.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            safe_prefix = f"{safe_parent}/"
+            child_conditions.append(
+                and_(
+                    Path.domain == parent_domain,
+                    Path.path.like(f"{safe_prefix}%", escape="\\"),
+                    Path.path.not_like(f"{safe_prefix}%/%", escape="\\"),
+                )
+            )
+
+        result = await session.execute(
+            select(
+                Path.domain,
+                Path.path,
+                Path.priority,
+                Path.disclosure,
+                Path.memory_id,
+            )
+            .where(or_(*child_conditions))
+            .order_by(Path.priority.asc(), Path.path)
+        )
+
+        seen: set[tuple[str, str]] = set()
+        children: List[Dict[str, Any]] = []
+        for domain, path, priority, disclosure, child_memory_id in result.all():
+            key = (domain, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            children.append(
+                {
+                    "domain": domain,
+                    "path": path,
+                    "priority": priority,
+                    "disclosure": disclosure,
+                    "memory_id": child_memory_id,
+                }
+            )
+        return children
+
+    async def get_recent_read_state(
+        self,
+        path: str,
+        domain: str = "core",
+    ) -> Optional[Dict[str, Any]]:
+        """Return a lightweight state snapshot for exact-URI read cache validation."""
+        async with self.session() as session:
+            result = await session.execute(
+                select(Memory.id, Memory.created_at, Path.domain, Path.path, Path.priority, Path.disclosure)
+                .join(Path, Memory.id == Path.memory_id)
+                .where(Path.domain == domain)
+                .where(Path.path == path)
+                .where(Memory.deprecated == False)
+            )
+            row = result.first()
+            if not row:
+                return None
+
+            memory_id, created_at, row_domain, row_path, priority, disclosure = row
+            children = await self._get_recent_read_children_state_in_session(
+                session,
+                int(memory_id),
+            )
+            return {
+                "memory_id": int(memory_id),
+                "created_at": created_at.isoformat() if created_at else None,
+                "domain": row_domain,
+                "path": row_path,
+                "priority": priority,
+                "disclosure": disclosure,
+                "children": children,
+            }
+
     async def get_memories_by_paths(
         self,
         path_requests: Sequence[Tuple[str, str]],
@@ -5513,6 +5606,18 @@ class SQLiteClient:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     @staticmethod
+    def _build_safe_fts_query(query: str) -> Optional[str]:
+        normalized = str(query or "").strip()
+        if not normalized:
+            return None
+        if "*" in normalized or _FTS_CONTROL_TOKEN_PATTERN.search(normalized):
+            return None
+        terms = re.findall(r"[a-zA-Z0-9_]+", normalized)
+        if terms:
+            return " ".join(terms)
+        return normalized
+
+    @staticmethod
     def _make_snippet(text_content: str, query: str, around: int = 50) -> str:
         if not text_content:
             return ""
@@ -6535,44 +6640,44 @@ class SQLiteClient:
 
             if mode_value in {"keyword", "hybrid"}:
                 if self._fts_available:
-                    terms = re.findall(r"[a-zA-Z0-9_]+", query)
-                    fts_query = " ".join(terms) if terms else query
-                    try:
-                        keyword_result = await session.execute(
-                            text(
-                                "SELECT "
-                                "mc.id AS chunk_id, mc.memory_id AS memory_id, "
-                                "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
-                                "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
-                                "m.created_at AS created_at, bm25(memory_chunks_fts) AS text_rank "
-                                "FROM memory_chunks_fts "
-                                "JOIN memory_chunks mc ON mc.id = memory_chunks_fts.chunk_id "
-                                "JOIN memories m ON m.id = mc.memory_id "
-                                "JOIN paths p ON p.memory_id = mc.memory_id "
-                                f"WHERE {where_clause} "
-                                "AND memory_chunks_fts MATCH :fts_query "
-                                "ORDER BY text_rank ASC "
-                                "LIMIT :candidate_limit"
-                            ),
-                            {
-                                **where_params,
-                                "fts_query": fts_query,
-                                "candidate_limit": candidate_limit,
-                            },
-                        )
-                        keyword_rows = [dict(row) for row in keyword_result.mappings().all()]
-                    except Exception as exc:
-                        if self._should_mark_fts_unavailable(exc):
-                            self._fts_available = False
-                            await self._set_index_meta(session, "fts_available", "0")
-                        else:
-                            self._append_degrade_reason(
-                                degrade_reasons, "fts_query_invalid"
+                    fts_query = self._build_safe_fts_query(query)
+                    if fts_query:
+                        try:
+                            keyword_result = await session.execute(
+                                text(
+                                    "SELECT "
+                                    "mc.id AS chunk_id, mc.memory_id AS memory_id, "
+                                    "mc.chunk_text AS chunk_text, mc.char_start AS char_start, mc.char_end AS char_end, "
+                                    "p.domain AS domain, p.path AS path, p.priority AS priority, p.disclosure AS disclosure, "
+                                    "m.created_at AS created_at, bm25(memory_chunks_fts) AS text_rank "
+                                    "FROM memory_chunks_fts "
+                                    "JOIN memory_chunks mc ON mc.id = memory_chunks_fts.chunk_id "
+                                    "JOIN memories m ON m.id = mc.memory_id "
+                                    "JOIN paths p ON p.memory_id = mc.memory_id "
+                                    f"WHERE {where_clause} "
+                                    "AND memory_chunks_fts MATCH :fts_query "
+                                    "ORDER BY text_rank ASC "
+                                    "LIMIT :candidate_limit"
+                                ),
+                                {
+                                    **where_params,
+                                    "fts_query": fts_query,
+                                    "candidate_limit": candidate_limit,
+                                },
                             )
-                            self._append_degrade_reason(
-                                degrade_reasons,
-                                f"fts_query_invalid:{type(exc).__name__}",
-                            )
+                            keyword_rows = [dict(row) for row in keyword_result.mappings().all()]
+                        except Exception as exc:
+                            if self._should_mark_fts_unavailable(exc):
+                                self._fts_available = False
+                                await self._set_index_meta(session, "fts_available", "0")
+                            else:
+                                self._append_degrade_reason(
+                                    degrade_reasons, "fts_query_invalid"
+                                )
+                                self._append_degrade_reason(
+                                    degrade_reasons,
+                                    f"fts_query_invalid:{type(exc).__name__}",
+                                )
 
                 if not keyword_rows:
                     escaped_query = self._escape_like_pattern(query.lower())

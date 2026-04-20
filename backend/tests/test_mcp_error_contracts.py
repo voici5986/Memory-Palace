@@ -94,6 +94,41 @@ class _SnapshotFailureCreateClient:
         raise ValueError("path not found")
 
 
+class _SnapshotFailureAliasClient:
+    def __init__(self) -> None:
+        self.alias_exists = False
+        self.rollback_calls = 0
+
+    async def add_path(
+        self,
+        *,
+        new_path: str,
+        target_path: str,
+        new_domain: str,
+        target_domain: str,
+        priority: int,
+        disclosure=None,
+    ):
+        _ = target_path, target_domain, priority, disclosure
+        self.alias_exists = True
+        return {
+            "new_uri": f"{new_domain}://{new_path}",
+            "target_uri": "core://target-node",
+            "memory_id": 41,
+            "path": new_path,
+        }
+
+    async def delete_path_atomically(
+        self, path: str, domain: str, *, before_delete=None
+    ):
+        _ = before_delete
+        if self.alias_exists and (domain, path) == ("core", "alias-node"):
+            self.alias_exists = False
+            self.rollback_calls += 1
+            return {"removed_uri": f"{domain}://{path}", "memory_id": 41}
+        raise ValueError("alias not found")
+
+
 @pytest.mark.asyncio
 async def test_read_memory_partial_validation_errors_return_json() -> None:
     raw = await mcp_server.read_memory("core://agent/index", chunk_id=-1)
@@ -152,6 +187,20 @@ async def test_search_memory_invalid_mode_validated_before_db_init(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_search_memory_rejects_overlong_query_before_db_init(monkeypatch) -> None:
+    def _boom():
+        raise RuntimeError("should_not_init_db_for_overlong_query")
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", _boom)
+
+    raw = await mcp_server.search_memory("x" * 8001)
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert "at most 8000 characters" in payload["error"]
+
+
+@pytest.mark.asyncio
 async def test_create_memory_rejects_system_domain_writes(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
 
@@ -203,6 +252,23 @@ async def test_create_memory_rejects_non_integer_priority_before_db_write(
     assert payload["ok"] is False
     assert payload["created"] is False
     assert "priority must be an integer >= 0" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_create_memory_rejects_overlong_content_before_db_write(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.create_memory(
+        parent_uri="core://",
+        content="x" * 100001,
+        priority=1,
+        title="blocked",
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["created"] is False
+    assert "at most 100000 characters" in payload["message"]
 
 
 @pytest.mark.asyncio
@@ -316,6 +382,21 @@ async def test_update_memory_rejects_non_integer_priority_before_db_write(
 
 
 @pytest.mark.asyncio
+async def test_update_memory_rejects_overlong_append_before_db_write(monkeypatch) -> None:
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
+
+    raw = await mcp_server.update_memory(
+        uri="core://agent/index",
+        append="x" * 100001,
+    )
+    payload = json.loads(raw)
+
+    assert payload["ok"] is False
+    assert payload["updated"] is False
+    assert "at most 100000 characters" in payload["message"]
+
+
+@pytest.mark.asyncio
 async def test_delete_memory_rejects_system_domain_writes(monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: _NoWriteClient())
     raw = await mcp_server.delete_memory("system://boot")
@@ -382,6 +463,34 @@ async def test_add_alias_rejects_non_integer_priority_before_db_write(
 
     assert raw.startswith("Error:")
     assert "priority must be an integer >= 0" in raw
+
+
+@pytest.mark.asyncio
+async def test_add_alias_snapshot_failure_rolls_back_written_alias(monkeypatch) -> None:
+    client = _SnapshotFailureAliasClient()
+
+    async def _raise_snapshot(*_args, **_kwargs):
+        raise OSError("snapshot_fs_failed")
+
+    async def _run_write_inline(_operation: str, task):
+        return await task()
+
+    async def _noop_async(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _raise_snapshot)
+    monkeypatch.setattr(mcp_server, "_run_write_lane", _run_write_inline)
+    monkeypatch.setattr(mcp_server, "_record_session_hit", _noop_async)
+    monkeypatch.setattr(mcp_server, "_record_flush_event", _noop_async)
+    monkeypatch.setattr(mcp_server, "_maybe_auto_flush", _noop_async)
+
+    raw = await mcp_server.add_alias("core://alias-node", "core://target-node")
+
+    assert raw.startswith("Error:")
+    assert "snapshot" in raw.lower()
+    assert client.rollback_calls == 1
+    assert client.alias_exists is False
 
 
 def test_get_session_id_stays_stable_within_shared_context_session(
