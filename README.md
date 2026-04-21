@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="README_CN.md">中文</a> · <a href="docs/README_EN.md">Docs</a> · <a href="docs/GETTING_STARTED_EN.md">Quick Start</a> · <a href="docs/EVALUATION_EN.md">Benchmarks</a>
+  <a href="README_CN.md">中文</a> · <a href="https://agi-is-going-to-arrive.github.io/Memory-Palace/">Landing Page</a> · <a href="docs/README_EN.md">Docs</a> · <a href="docs/GETTING_STARTED_EN.md">Quick Start</a> · <a href="docs/EVALUATION_EN.md">Benchmarks</a>
 </p>
 
 ---
