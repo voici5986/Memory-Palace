@@ -536,7 +536,10 @@ def test_docker_publish_workflow_builds_and_publishes_tag_refs_directly() -> Non
         encoding="utf-8"
     )
 
-    assert "type=sha,prefix=sha-,format=short" in workflow
+    assert "concurrency:" in workflow
+    assert "group: docker-publish-${{ github.sha }}" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "type=sha,prefix=sha-,format=short,enable=${{ github.ref_type != 'tag' }}" in workflow
     assert "type=ref,event=tag" in workflow
     assert "promote_tag:" not in workflow
     assert "docker buildx imagetools inspect" not in workflow
