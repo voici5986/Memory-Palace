@@ -2868,7 +2868,26 @@ async def drain_pending_flush_summaries(
             "disabled": False,
         }
 
-    client = get_sqlite_client()
+    try:
+        client = get_sqlite_client()
+    except ValueError as exc:
+        if "DATABASE_URL environment variable is not set" not in str(exc):
+            raise
+        return {
+            "attempted": 0,
+            "flushed": 0,
+            "skipped": len(session_ids),
+            "failed": 0,
+            "results": [
+                {
+                    "session_id": session_id,
+                    "flushed": False,
+                    "reason": "database_not_configured",
+                }
+                for session_id in session_ids
+            ],
+            "disabled": False,
+        }
     results: List[Dict[str, Any]] = []
     flushed = 0
     skipped = 0
@@ -4993,9 +5012,8 @@ async def update_memory(
             field_name="append",
             max_chars=_MCP_CONTENT_MAX_CHARS,
         )
-        # Parse URI
+        # Parse URI and validate cheap preconditions before touching the DB client.
         domain, path = parse_uri(uri)
-        client = get_sqlite_client()
         full_uri = make_uri(domain, path)
         _validate_writable_domain(
             domain,
@@ -5052,6 +5070,7 @@ async def update_memory(
                 **_guard_fields(guard_decision),
             )
 
+        client = get_sqlite_client()
         defer_index = await _should_defer_index_on_write()
         preview_text: Optional[str] = None
 

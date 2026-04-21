@@ -481,6 +481,36 @@ async def test_drain_pending_flush_summaries_flushes_each_pending_session(
 
 
 @pytest.mark.asyncio
+async def test_drain_pending_flush_summaries_skips_when_database_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _PendingOnlyTracker:
+        async def pending_session_ids(self) -> List[str]:
+            return ["session-a", "session-b"]
+
+    def _raise_missing_database() -> Any:
+        raise ValueError(
+            "DATABASE_URL environment variable is not set. Please check your .env file."
+        )
+
+    monkeypatch.setattr(mcp_server.runtime_state, "flush_tracker", _PendingOnlyTracker())
+    monkeypatch.setattr(mcp_server, "get_sqlite_client", _raise_missing_database)
+    monkeypatch.setattr(mcp_server, "AUTO_FLUSH_ENABLED", True)
+    mcp_server._AUTO_FLUSH_IN_PROGRESS.clear()
+
+    payload = await mcp_server.drain_pending_flush_summaries(reason="runtime.shutdown")
+
+    assert payload["attempted"] == 0
+    assert payload["flushed"] == 0
+    assert payload["failed"] == 0
+    assert payload["skipped"] == 2
+    assert payload["results"] == [
+        {"session_id": "session-a", "flushed": False, "reason": "database_not_configured"},
+        {"session_id": "session-b", "flushed": False, "reason": "database_not_configured"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_compact_context_write_guard_exception_is_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
