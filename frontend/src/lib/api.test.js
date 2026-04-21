@@ -5,6 +5,7 @@ import {
   extractApiError,
   getMaintenanceAuthState,
   saveStoredMaintenanceAuth,
+  subscribeMaintenanceAuthChanges,
 } from './api';
 
 const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
@@ -241,5 +242,80 @@ describe('extractApiError', () => {
         Object.defineProperty(window, 'sessionStorage', originalDescriptor);
       }
     }
+  });
+});
+
+describe('maintenance auth browser storage', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
+    clearStoredMaintenanceAuth();
+    delete window.__MEMORY_PALACE_RUNTIME__;
+    delete window.__MCP_RUNTIME_CONFIG__;
+    vi.restoreAllMocks();
+  });
+
+  it('notifies subscribers when browser auth is saved and cleared', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeMaintenanceAuthChanges(listener);
+
+    const saved = saveStoredMaintenanceAuth('stored-key', 'header');
+    expect(saved).toMatchObject({
+      key: 'stored-key',
+      mode: 'header',
+      source: 'stored',
+    });
+
+    expect(clearStoredMaintenanceAuth()).toBe(true);
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        key: 'stored-key',
+        mode: 'header',
+        source: 'stored',
+      }),
+    );
+    expect(listener).toHaveBeenNthCalledWith(2, null);
+  });
+
+  it('stops notifying subscribers after unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeMaintenanceAuthChanges(listener);
+
+    unsubscribe();
+    saveStoredMaintenanceAuth('stored-key', 'header');
+    clearStoredMaintenanceAuth();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('notifies subscribers for matching storage events', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeMaintenanceAuthChanges(listener);
+
+    window.sessionStorage.setItem(
+      DASHBOARD_AUTH_STORAGE_KEY,
+      JSON.stringify({
+        maintenanceApiKey: 'stored-key',
+        maintenanceApiKeyMode: 'header',
+      }),
+    );
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: DASHBOARD_AUTH_STORAGE_KEY,
+      }),
+    );
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'stored-key',
+        mode: 'header',
+        source: 'stored',
+      }),
+    );
   });
 });

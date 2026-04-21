@@ -220,6 +220,35 @@ def _resolve_existing_probe_path(path: Optional[FilePath]) -> Optional[FilePath]
     return candidate
 
 
+def _validate_existing_sqlite_file_integrity(database_file: Optional[FilePath]) -> None:
+    if database_file is None:
+        return
+    resolved = _resolve_existing_probe_path(database_file)
+    if resolved is None or not resolved.exists() or not resolved.is_file():
+        return
+    connection = None
+    try:
+        connection = sqlite3.connect(str(resolved))
+        rows = connection.execute("PRAGMA quick_check(1)").fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError(
+            f"sqlite quick_check failed for existing database '{resolved}': {exc}"
+        ) from exc
+    finally:
+        if connection is not None:
+            connection.close()
+    normalized_rows = [
+        str(row[0]).strip().lower()
+        for row in rows
+        if isinstance(row, tuple) and row and row[0] is not None
+    ]
+    if normalized_rows != ["ok"]:
+        raise RuntimeError(
+            f"sqlite quick_check failed for existing database '{resolved}': "
+            f"{normalized_rows or ['unknown']}"
+        )
+
+
 def _detect_filesystem_type(probe_path: Optional[FilePath]) -> str:
     if probe_path is None:
         return ""
@@ -1277,6 +1306,7 @@ class SQLiteClient:
 
     async def _run_init_db_unlocked(self):
         """Run the full database bootstrap without any process-level lock."""
+        _validate_existing_sqlite_file_integrity(self._database_file)
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             # Migration: add migrated_to column if not present (for existing DBs)
@@ -1597,10 +1627,35 @@ class SQLiteClient:
                 .having(func.count(MemoryChunk.id) == 0)
             )
             missing_ids = [row[0] for row in (await session.execute(missing_query)).all()]
+            fts_missing_ids: List[int] = []
+            if self._fts_available:
+                fts_missing_query = text(
+                    "SELECT DISTINCT mc.memory_id "
+                    "FROM memory_chunks mc "
+                    "JOIN memories m ON m.id = mc.memory_id "
+                    "LEFT JOIN memory_chunks_fts fts ON fts.chunk_id = mc.id "
+                    "WHERE m.deprecated = 0 AND fts.chunk_id IS NULL"
+                )
+                fts_missing_ids = [
+                    int(row[0])
+                    for row in (await session.execute(fts_missing_query)).all()
+                    if row and row[0] is not None
+                ]
+            target_ids = list(
+                dict.fromkeys(
+                    int(memory_id)
+                    for memory_id in [*missing_ids, *fts_missing_ids]
+                    if int(memory_id) > 0
+                )
+            )
             reindexed = 0
-            for memory_id in missing_ids:
+            for memory_id in target_ids:
                 reindexed += await self._reindex_memory(session, memory_id)
-            await self._set_index_meta(session, "bootstrap_indexed_memories", str(len(missing_ids)))
+            await self._set_index_meta(
+                session,
+                "bootstrap_indexed_memories",
+                str(len(target_ids)),
+            )
             await self._set_index_meta(session, "bootstrap_indexed_chunks", str(reindexed))
 
     @staticmethod
@@ -3888,7 +3943,7 @@ class SQLiteClient:
             try:
                 yield session
                 await session.commit()
-            except Exception:
+            except BaseException:
                 await session.rollback()
                 raise
 
@@ -4821,6 +4876,9 @@ class SQLiteClient:
             Created memory info with full path
         """
         priority_value = self._validate_priority(priority)
+        content_value = str(content or "")
+        if not content_value.strip():
+            raise ValueError("content must not be empty")
 
         async with self.session() as session:
             # Validate parent exists (if specified)
@@ -4855,7 +4913,7 @@ class SQLiteClient:
                 raise ValueError(f"Path '{domain}://{final_path}' already exists")
 
             # Create memory (content only, no title stored)
-            memory = Memory(content=content)
+            memory = Memory(content=content_value)
             session.add(memory)
             await session.flush()  # Get the ID
 
@@ -5607,15 +5665,41 @@ class SQLiteClient:
 
     @staticmethod
     def _build_safe_fts_query(query: str) -> Optional[str]:
-        normalized = str(query or "").strip()
+        normalized = SQLiteClient._normalize_retrieval_text(str(query or ""))
         if not normalized:
             return None
-        if "*" in normalized or _FTS_CONTROL_TOKEN_PATTERN.search(normalized):
+        if "*" in normalized:
             return None
+        if _FTS_CONTROL_TOKEN_PATTERN.search(normalized):
+            cjk_terms = list(dict.fromkeys(_CJK_RETRIEVAL_TOKEN_PATTERN.findall(normalized)))
+            latin_terms = [
+                token
+                for token in _LATIN_RETRIEVAL_TOKEN_PATTERN.findall(normalized)
+                if not _FTS_CONTROL_TOKEN_PATTERN.fullmatch(token)
+                and not _CJK_RETRIEVAL_TOKEN_PATTERN.fullmatch(token)
+            ]
+            sanitized_terms = [*cjk_terms, *latin_terms]
+            return " ".join(sanitized_terms) if sanitized_terms else None
         terms = re.findall(r"[a-zA-Z0-9_]+", normalized)
         if terms:
             return " ".join(terms)
         return normalized
+
+    @staticmethod
+    def _build_keyword_fallback_terms(query: str) -> List[str]:
+        normalized = SQLiteClient._normalize_retrieval_text(str(query or ""))
+        if not normalized:
+            return []
+        if _FTS_CONTROL_TOKEN_PATTERN.search(normalized):
+            cjk_terms = list(dict.fromkeys(_CJK_RETRIEVAL_TOKEN_PATTERN.findall(normalized)))
+            latin_terms = [
+                token
+                for token in _LATIN_RETRIEVAL_TOKEN_PATTERN.findall(normalized)
+                if not _FTS_CONTROL_TOKEN_PATTERN.fullmatch(token)
+                and not _CJK_RETRIEVAL_TOKEN_PATTERN.fullmatch(token)
+            ]
+            return [*cjk_terms, *latin_terms]
+        return [normalized]
 
     @staticmethod
     def _make_snippet(text_content: str, query: str, around: int = 50) -> str:
@@ -6680,8 +6764,22 @@ class SQLiteClient:
                                 )
 
                 if not keyword_rows:
-                    escaped_query = self._escape_like_pattern(query.lower())
-                    like_pattern = f"%{escaped_query}%"
+                    fallback_terms = self._build_keyword_fallback_terms(query)
+                    if not fallback_terms:
+                        fallback_terms = [self._normalize_retrieval_text(query)]
+                    term_conditions = []
+                    term_params: Dict[str, Any] = {
+                        **where_params,
+                        "candidate_limit": candidate_limit,
+                    }
+                    for index, term in enumerate(fallback_terms):
+                        escaped_term = self._escape_like_pattern(term.lower())
+                        param_name = f"like_pattern_{index}"
+                        term_conditions.append(
+                            f"LOWER(mc.chunk_text) LIKE :{param_name} ESCAPE '\\' "
+                            f"OR LOWER(p.path) LIKE :{param_name} ESCAPE '\\'"
+                        )
+                        term_params[param_name] = f"%{escaped_term}%"
                     keyword_result = await session.execute(
                         text(
                             "SELECT "
@@ -6693,16 +6791,11 @@ class SQLiteClient:
                             "JOIN memories m ON m.id = mc.memory_id "
                             "JOIN paths p ON p.memory_id = mc.memory_id "
                             f"WHERE {where_clause} "
-                            "AND (LOWER(mc.chunk_text) LIKE :like_pattern ESCAPE '\\' "
-                            "OR LOWER(p.path) LIKE :like_pattern ESCAPE '\\') "
+                            f"AND ({' OR '.join(term_conditions)}) "
                             "ORDER BY p.priority ASC, m.created_at DESC "
                             "LIMIT :candidate_limit"
                         ),
-                        {
-                            **where_params,
-                            "like_pattern": like_pattern,
-                            "candidate_limit": candidate_limit,
-                        },
+                        term_params,
                     )
                     keyword_rows = [dict(row) for row in keyword_result.mappings().all()]
 
@@ -6784,6 +6877,10 @@ class SQLiteClient:
                     max(candidate_limit * 12, max_results * 64, 128),
                     5000,
                 )
+                python_scoring_pool_limit = min(
+                    int(semantic_pool_limit),
+                    int(candidate_limit),
+                )
                 if selected_vector_engine == "vec":
                     if not self._sqlite_vec_knn_ready:
                         self._append_degrade_reason(
@@ -6794,7 +6891,7 @@ class SQLiteClient:
                             where_clause=where_clause,
                             where_params=where_params,
                             query_embedding=query_embedding,
-                            semantic_pool_limit=semantic_pool_limit,
+                            semantic_pool_limit=python_scoring_pool_limit,
                             candidate_limit=candidate_limit,
                             degrade_reasons=degrade_reasons,
                         )
@@ -6823,7 +6920,7 @@ class SQLiteClient:
                                 where_clause=where_clause,
                                 where_params=where_params,
                                 query_embedding=query_embedding,
-                                semantic_pool_limit=semantic_pool_limit,
+                                semantic_pool_limit=python_scoring_pool_limit,
                                 candidate_limit=candidate_limit,
                                 degrade_reasons=degrade_reasons,
                             )
@@ -6836,7 +6933,7 @@ class SQLiteClient:
                         where_clause=where_clause,
                         where_params=where_params,
                         query_embedding=query_embedding,
-                        semantic_pool_limit=semantic_pool_limit,
+                        semantic_pool_limit=python_scoring_pool_limit,
                         candidate_limit=candidate_limit,
                         degrade_reasons=degrade_reasons,
                     )
@@ -7732,6 +7829,7 @@ class SQLiteClient:
             .where(Memory.migrated_to == memory_id)
             .values(migrated_to=successor_id)
         )
+        await self._clear_memory_index(session, memory_id)
         await session.execute(delete(Path).where(Path.memory_id == memory_id))
         result = await session.execute(delete(Memory).where(Memory.id == memory_id))
 

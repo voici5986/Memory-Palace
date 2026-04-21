@@ -512,12 +512,19 @@ def parse_uri(uri: str) -> Tuple[str, str]:
         ValueError: If the URI format is invalid or domain is unknown
     """
     uri = _validate_uri_text(uri)
-
     if _WINDOWS_DRIVE_PATH_PATTERN.match(uri):
         raise ValueError(
             "Filesystem paths like 'C:/...' are not valid memory URIs. "
             "Use a memory URI such as 'core://path/to/memory' instead."
         )
+    decoded_uri = unquote(uri)
+    if decoded_uri != uri:
+        decoded_uri = _validate_uri_text(decoded_uri)
+        if _WINDOWS_DRIVE_PATH_PATTERN.match(decoded_uri):
+            raise ValueError(
+                "Filesystem paths like 'C:/...' are not valid memory URIs. "
+                "Use a memory URI such as 'core://path/to/memory' instead."
+            )
 
     match = _URI_PATTERN.match(uri)
     if match:
@@ -535,6 +542,63 @@ def parse_uri(uri: str) -> Tuple[str, str]:
     # Assume default domain (core)
     path = uri.strip("/")
     return (DEFAULT_DOMAIN, path)
+
+
+def _path_lookup_candidates(path: str) -> List[str]:
+    normalized_path = str(path or "").strip("/")
+    candidates = [normalized_path]
+    decoded_path = unquote(normalized_path)
+    if decoded_path != normalized_path:
+        decoded_path = _validate_uri_text(decoded_path).strip("/")
+        if _WINDOWS_DRIVE_PATH_PATTERN.match(decoded_path):
+            raise ValueError(
+                "Filesystem paths like 'C:/...' are not valid memory URIs. "
+                "Use a memory URI such as 'core://path/to/memory' instead."
+            )
+        if decoded_path not in candidates:
+            candidates.append(decoded_path)
+    return candidates
+
+
+async def _get_memory_by_path_variants(
+    client: Any,
+    *,
+    domain: str,
+    path: str,
+    reinforce_access: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    for candidate in _path_lookup_candidates(path):
+        try:
+            if reinforce_access:
+                memory = await client.get_memory_by_path(candidate, domain)
+            else:
+                memory = await client.get_memory_by_path(
+                    candidate,
+                    domain,
+                    reinforce_access=False,
+                )
+        except TypeError:
+            memory = await client.get_memory_by_path(candidate, domain)
+        if memory:
+            return memory, candidate
+    return None, path
+
+
+async def _resolve_existing_path_if_supported(
+    client: Any,
+    *,
+    domain: str,
+    path: str,
+    reinforce_access: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    if not callable(getattr(client, "get_memory_by_path", None)):
+        return None, path
+    return await _get_memory_by_path_variants(
+        client,
+        domain=domain,
+        path=path,
+        reinforce_access=reinforce_access,
+    )
 
 
 def make_uri(domain: str, path: str) -> str:
@@ -1680,45 +1744,19 @@ async def run_explicit_learn_service(
                 operation_type="create",
                 session_id=normalized_review_session_id,
             )
-        except Exception as snapshot_exc:
-            delete_path_atomically = getattr(learn_client, "delete_path_atomically", None)
-            remove_path = getattr(learn_client, "remove_path", None)
-            permanently_delete_memory = getattr(
-                learn_client, "permanently_delete_memory", None
-            )
-            try:
-                if callable(delete_path_atomically):
-                    await delete_path_atomically(
-                        created_memory_payload["path"],
-                        created_memory_payload["domain"],
-                    )
-                elif callable(remove_path):
-                    await remove_path(
-                        created_memory_payload["path"],
-                        domain=created_memory_payload["domain"],
-                    )
-                if callable(permanently_delete_memory):
-                    await permanently_delete_memory(
-                        created_memory_payload["id"],
-                        require_orphan=True,
-                    )
-            except Exception as rollback_exc:
-                raise RuntimeError(
-                    "snapshot_create_failed_after_write:"
-                    f"{type(snapshot_exc).__name__};rollback_failed:"
-                    f"{type(rollback_exc).__name__}"
-                ) from snapshot_exc
-            namespace_cleanup = await _cleanup_created_namespace_after_failed_write(
+        except BaseException as snapshot_exc:
+            cleanup_issues = await _cleanup_explicit_learn_execution_artifacts(
                 learn_client,
-                created_namespace_memories,
+                created_memory_payload=created_memory_payload,
+                created_namespace_memories=created_namespace_memories,
+                review_session_id=normalized_review_session_id,
             )
-            namespace_cleanup_issues = namespace_cleanup.get("issues") or []
-            if namespace_cleanup_issues:
+            if cleanup_issues and not isinstance(snapshot_exc, asyncio.CancelledError):
                 issue_types = ",".join(
                     sorted(
                         {
                             str(item.get("reason") or "namespace_cleanup_incomplete")
-                            for item in namespace_cleanup_issues
+                            for item in cleanup_issues
                             if isinstance(item, dict)
                         }
                     )
@@ -1728,6 +1766,8 @@ async def run_explicit_learn_service(
                     f"{type(snapshot_exc).__name__};namespace_cleanup_incomplete:"
                     f"{issue_types or 'unknown'}"
                 ) from snapshot_exc
+            if isinstance(snapshot_exc, asyncio.CancelledError):
+                raise
             raise RuntimeError(
                 f"snapshot_create_failed_after_write:{type(snapshot_exc).__name__}"
             ) from snapshot_exc
@@ -1736,24 +1776,35 @@ async def run_explicit_learn_service(
             "resource_id": created_memory_payload["uri"],
             "resource_type": "path",
         }
-    await _record_import_learn_event(
-        event_type="learn",
-        operation=operation,
-        decision="executed",
-        reason="executed",
-        source=normalized_source,
-        session_id=normalized_session_id,
-        actor_id=normalized_actor_id,
-        batch_id=batch_id,
-        metadata={
-            "domain": normalized_domain,
-            "path_prefix": normalized_path_prefix,
-            "target_parent_uri": target_parent_uri,
-            "created_memory_id": created_memory_payload["id"],
-            "created_uri": created_memory_payload["uri"],
-            "created_namespace_count": len(namespace_memory_ids),
-        },
-    )
+    try:
+        await _record_import_learn_event(
+            event_type="learn",
+            operation=operation,
+            decision="executed",
+            reason="executed",
+            source=normalized_source,
+            session_id=normalized_session_id,
+            actor_id=normalized_actor_id,
+            batch_id=batch_id,
+            metadata={
+                "domain": normalized_domain,
+                "path_prefix": normalized_path_prefix,
+                "target_parent_uri": target_parent_uri,
+                "created_memory_id": created_memory_payload["id"],
+                "created_uri": created_memory_payload["uri"],
+                "created_namespace_count": len(namespace_memory_ids),
+            },
+        )
+    except BaseException:
+        cleanup_issues = await _cleanup_explicit_learn_execution_artifacts(
+            learn_client,
+            created_memory_payload=created_memory_payload,
+            created_namespace_memories=created_namespace_memories,
+            review_session_id=normalized_review_session_id,
+        )
+        if cleanup_issues:
+            payload["cleanup_issues"] = cleanup_issues
+        raise
     return payload
 
 
@@ -2294,6 +2345,70 @@ async def _cleanup_created_namespace_after_failed_write(
         "deleted_memory_ids": deleted_memory_ids,
         "issues": issues,
     }
+
+
+async def _cleanup_explicit_learn_execution_artifacts(
+    client: Any,
+    *,
+    created_memory_payload: Dict[str, Any],
+    created_namespace_memories: List[Dict[str, Any]],
+    review_session_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    created_uri = str(created_memory_payload.get("uri") or "").strip()
+    created_domain = str(created_memory_payload.get("domain") or "").strip().lower()
+    created_path = str(created_memory_payload.get("path") or "").strip().strip("/")
+    created_memory_id = _safe_int(created_memory_payload.get("id"), default=0)
+
+    if review_session_id and created_uri:
+        try:
+            get_snapshot_manager().delete_snapshot(review_session_id, created_uri)
+        except Exception as exc:
+            issues.append(
+                {
+                    "uri": created_uri,
+                    "reason": f"snapshot_delete_failed:{type(exc).__name__}",
+                }
+            )
+
+    delete_path_atomically = getattr(client, "delete_path_atomically", None)
+    remove_path = getattr(client, "remove_path", None)
+    permanently_delete_memory = getattr(client, "permanently_delete_memory", None)
+
+    if created_path:
+        try:
+            if callable(delete_path_atomically):
+                await delete_path_atomically(created_path, created_domain)
+            elif callable(remove_path):
+                await remove_path(created_path, domain=created_domain)
+        except Exception as exc:
+            issues.append(
+                {
+                    "uri": created_uri or f"{created_domain}://{created_path}",
+                    "reason": str(exc) or type(exc).__name__,
+                }
+            )
+
+    if created_memory_id > 0 and callable(permanently_delete_memory):
+        try:
+            await permanently_delete_memory(created_memory_id, require_orphan=True)
+        except Exception as exc:
+            issues.append(
+                {
+                    "uri": created_uri or f"{created_domain}://{created_path}",
+                    "memory_id": created_memory_id,
+                    "reason": str(exc) or type(exc).__name__,
+                }
+            )
+
+    namespace_cleanup = await _cleanup_created_namespace_after_failed_write(
+        client,
+        created_namespace_memories,
+    )
+    for item in namespace_cleanup.get("issues") or []:
+        if isinstance(item, dict):
+            issues.append(dict(item))
+    return issues
 
 
 _AUTO_FLUSH_IN_PROGRESS: set[str] = set()
@@ -3478,7 +3593,12 @@ async def _fetch_and_format_memory(
     domain, path = parse_uri(uri)
 
     # Get the memory
-    memory = await client.get_memory_by_path(path, domain)
+    memory, path = await _get_memory_by_path_variants(
+        client,
+        domain=domain,
+        path=path,
+        reinforce_access=True,
+    )
 
     if not memory:
         raise ValueError(f"URI '{make_uri(domain, path)}' not found.")
@@ -3599,15 +3719,13 @@ async def _get_memory_for_read(
     *,
     domain: str,
     path: str,
-) -> Optional[Dict[str, Any]]:
-    try:
-        return await client.get_memory_by_path(
-            path,
-            domain,
-            reinforce_access=False,
-        )
-    except TypeError:
-        return await client.get_memory_by_path(path, domain)
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    return await _get_memory_by_path_variants(
+        client,
+        domain=domain,
+        path=path,
+        reinforce_access=False,
+    )
 
 
 def _recent_read_children_token(children: Optional[List[Dict[str, Any]]]) -> str:
@@ -4289,7 +4407,9 @@ async def read_memory(
                             pass
                         return cached
 
-                memory = await _get_memory_for_read(client, domain=domain, path=path)
+                memory, path = await _get_memory_for_read(client, domain=domain, path=path)
+                if memory is not None:
+                    full_uri = make_uri(domain, path)
                 cacheable_read = memory is not None
                 if cacheable_read and recent_state_token is None:
                     recent_children = await client.get_children(memory["id"])
@@ -4317,11 +4437,17 @@ async def read_memory(
                             pass
                         return cached
             else:
-                memory = await _get_memory_for_read(client, domain=domain, path=path)
+                memory, path = await _get_memory_for_read(
+                    client,
+                    domain=domain,
+                    path=path,
+                )
+                if memory is not None:
+                    full_uri = make_uri(domain, path)
 
             rendered = await _fetch_and_format_memory(
                 client,
-                uri,
+                full_uri,
                 include_ancestors=include_ancestors_flag,
                 prefetched_children=recent_children,
             )
@@ -4406,6 +4532,8 @@ async def read_memory(
     except ValueError as e:
         return _partial_error(str(e))
 
+    resolved_memory, path = await _get_memory_for_read(client, domain=domain, path=path)
+
     method_name, _, raw_memory = await _try_client_method_variants(
         client,
         [
@@ -4478,7 +4606,9 @@ async def read_memory(
         )
 
     if not content:
-        memory = await client.get_memory_by_path(path, domain)
+        memory = resolved_memory
+        if memory is None:
+            memory, path = await _get_memory_for_read(client, domain=domain, path=path)
         if not memory:
             return _partial_error(f"URI '{make_uri(domain, path)}' not found.")
         memory_id = memory.get("id")
@@ -4628,6 +4758,14 @@ async def create_memory(
             uri=parent_uri,
         )
         client = get_sqlite_client()
+        if parent_path:
+            parent_memory, resolved_parent_path = await _resolve_existing_path_if_supported(
+                client,
+                domain=domain,
+                path=parent_path,
+            )
+            if parent_memory is not None:
+                parent_path = resolved_parent_path
         defer_index = await _should_defer_index_on_write()
 
         async def _write_task():
@@ -4857,6 +4995,7 @@ async def update_memory(
         )
         # Parse URI
         domain, path = parse_uri(uri)
+        client = get_sqlite_client()
         full_uri = make_uri(domain, path)
         _validate_writable_domain(
             domain,
@@ -4914,16 +5053,25 @@ async def update_memory(
             )
 
         defer_index = await _should_defer_index_on_write()
-        client = get_sqlite_client()
         preview_text: Optional[str] = None
 
         async def _write_task():
-            nonlocal guard_decision, preview_text
+            nonlocal guard_decision, preview_text, full_uri
+            working_path = path
+            resolved_memory, working_path = await _resolve_existing_path_if_supported(
+                client,
+                domain=domain,
+                path=path,
+            )
+            if resolved_memory is not None:
+                full_uri = make_uri(domain, working_path)
             current_memory_id: Optional[int] = None
             content = None
 
             if old_string is not None:
-                memory = await client.get_memory_by_path(path, domain)
+                memory = resolved_memory or await client.get_memory_by_path(
+                    working_path, domain
+                )
                 if not memory:
                     return _tool_response(
                         ok=False,
@@ -4982,7 +5130,9 @@ async def update_memory(
                         uri=full_uri,
                         **_guard_fields(guard_decision),
                     )
-                memory = await client.get_memory_by_path(path, domain)
+                memory = resolved_memory or await client.get_memory_by_path(
+                    working_path, domain
+                )
                 if not memory:
                     return _tool_response(
                         ok=False,
@@ -5014,7 +5164,11 @@ async def update_memory(
                         await client.write_guard(
                             content=content,
                             domain=domain,
-                            path_prefix=path.rsplit("/", 1)[0] if "/" in path else None,
+                            path_prefix=(
+                                working_path.rsplit("/", 1)[0]
+                                if "/" in working_path
+                                else None
+                            ),
                             exclude_memory_id=current_memory_id,
                         )
                     )
@@ -5078,7 +5232,7 @@ async def update_memory(
                 await _snapshot_path_meta(full_uri)
 
             result = await client.update_memory(
-                path=path,
+                path=working_path,
                 content=content,
                 priority=priority,
                 disclosure=disclosure,
@@ -5211,11 +5365,21 @@ async def delete_memory(uri: str) -> str:
         )
 
         async def _write_task():
+            nonlocal full_uri
+            working_path = path
+            resolved_memory, working_path = await _resolve_existing_path_if_supported(
+                client,
+                domain=domain,
+                path=path,
+            )
+            if resolved_memory is not None:
+                full_uri = make_uri(domain, working_path)
+
             async def _snapshot_before_delete(memory: Dict[str, Any]) -> None:
                 await _snapshot_path_delete(full_uri, memory=memory)
 
             return await client.delete_path_atomically(
-                path,
+                working_path,
                 domain,
                 before_delete=_snapshot_before_delete,
             )
@@ -5313,9 +5477,15 @@ async def add_alias(
         )
 
         async def _write_task():
+            working_target_path = target_path
+            _, working_target_path = await _resolve_existing_path_if_supported(
+                client,
+                domain=target_domain,
+                path=target_path,
+            )
             result = await client.add_path(
                 new_path=new_path,
-                target_path=target_path,
+                target_path=working_target_path,
                 new_domain=new_domain,
                 target_domain=target_domain,
                 priority=priority,

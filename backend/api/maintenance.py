@@ -51,6 +51,14 @@ _FORWARDED_HEADER_NAMES = {
 }
 
 
+class _VitalityCleanupAtomicDeleteError(RuntimeError):
+    def __init__(self, memory_id: int, reason: str, exc: BaseException):
+        self.memory_id = int(memory_id)
+        self.reason = str(reason or "error")
+        self.original = exc
+        super().__init__(str(exc) or type(exc).__name__)
+
+
 def _get_configured_mcp_api_key() -> str:
     return str(os.getenv(_MCP_API_KEY_ENV) or "").strip()
 
@@ -3985,6 +3993,8 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
             return "chain_referenced"
         return "active_paths"
 
+    delete_targets: List[Tuple[int, str]] = []
+
     for memory_id in selected_ids:
         latest_item = latest_by_id.get(memory_id)
         if latest_item is None:
@@ -4002,40 +4012,114 @@ async def confirm_vitality_cleanup(payload: VitalityCleanupConfirmRequest):
         if not expected_hash:
             skipped.append({"memory_id": memory_id, "reason": "stale_state"})
             continue
+        delete_targets.append((memory_id, expected_hash))
 
+    if delete_targets:
         try:
-            async def _write_task(
-                _memory_id: int = memory_id,
-                _expected_hash: str = expected_hash,
-            ) -> Dict[str, Any]:
-                return await client.permanently_delete_memory(
-                    _memory_id,
-                    require_orphan=True,
-                    expected_state_hash=_expected_hash,
+            async def _write_task() -> Dict[str, Any]:
+                session_manager = getattr(client, "session", None)
+                delete_in_session = getattr(
+                    client,
+                    "_permanently_delete_memory_in_session",
+                    None,
                 )
+                if callable(session_manager) and callable(delete_in_session):
+                    deleted_memory_ids: List[int] = []
+                    async with client.session() as session:
+                        for _memory_id, _expected_hash in delete_targets:
+                            try:
+                                await delete_in_session(
+                                    session,
+                                    _memory_id,
+                                    require_orphan=True,
+                                    expected_state_hash=_expected_hash,
+                                )
+                            except RuntimeError as exc:
+                                if str(exc) == "stale_state":
+                                    raise _VitalityCleanupAtomicDeleteError(
+                                        _memory_id,
+                                        "stale_state",
+                                        exc,
+                                    ) from exc
+                                raise _VitalityCleanupAtomicDeleteError(
+                                    _memory_id,
+                                    "error",
+                                    exc,
+                                ) from exc
+                            except PermissionError as exc:
+                                raise _VitalityCleanupAtomicDeleteError(
+                                    _memory_id,
+                                    _classify_delete_permission_error(exc),
+                                    exc,
+                                ) from exc
+                            except ValueError as exc:
+                                raise _VitalityCleanupAtomicDeleteError(
+                                    _memory_id,
+                                    "memory_missing",
+                                    exc,
+                                ) from exc
+                            deleted_memory_ids.append(_memory_id)
+                    return {"deleted_memory_ids": deleted_memory_ids}
 
-            await _run_write_lane(
+                if len(delete_targets) > 1:
+                    raise _VitalityCleanupAtomicDeleteError(
+                        0,
+                        "atomic_batch_delete_unavailable",
+                        RuntimeError("atomic_batch_delete_unavailable"),
+                    )
+
+                deleted_memory_ids = []
+                for _memory_id, _expected_hash in delete_targets:
+                    try:
+                        await client.permanently_delete_memory(
+                            _memory_id,
+                            require_orphan=True,
+                            expected_state_hash=_expected_hash,
+                        )
+                    except RuntimeError as exc:
+                        if str(exc) == "stale_state":
+                            raise _VitalityCleanupAtomicDeleteError(
+                                _memory_id,
+                                "stale_state",
+                                exc,
+                            ) from exc
+                        raise _VitalityCleanupAtomicDeleteError(
+                            _memory_id,
+                            "error",
+                            exc,
+                        ) from exc
+                    except PermissionError as exc:
+                        raise _VitalityCleanupAtomicDeleteError(
+                            _memory_id,
+                            _classify_delete_permission_error(exc),
+                            exc,
+                        ) from exc
+                    except ValueError as exc:
+                        raise _VitalityCleanupAtomicDeleteError(
+                            _memory_id,
+                            "memory_missing",
+                            exc,
+                        ) from exc
+                    deleted_memory_ids.append(_memory_id)
+                return {"deleted_memory_ids": deleted_memory_ids}
+
+            delete_result = await _run_write_lane(
                 "maintenance.vitality.cleanup.confirm.delete",
                 _write_task,
                 session_id=write_lane_session_id,
             )
-            deleted.append(memory_id)
-        except RuntimeError as exc:
-            if str(exc) == "stale_state":
-                skipped.append({"memory_id": memory_id, "reason": "stale_state"})
-                continue
-            errors.append({"memory_id": memory_id, "error": str(exc)})
-        except PermissionError as exc:
-            skipped.append(
-                {
-                    "memory_id": memory_id,
-                    "reason": _classify_delete_permission_error(exc),
-                }
+            deleted.extend(
+                int(item)
+                for item in (delete_result or {}).get("deleted_memory_ids", [])
+                if int(item) > 0
             )
-        except ValueError:
-            skipped.append({"memory_id": memory_id, "reason": "memory_missing"})
+        except _VitalityCleanupAtomicDeleteError as exc:
+            if exc.reason in {"stale_state", "chain_referenced", "active_paths", "memory_missing"}:
+                skipped.append({"memory_id": exc.memory_id, "reason": exc.reason})
+            else:
+                errors.append({"memory_id": exc.memory_id, "error": str(exc)})
         except Exception as exc:
-            errors.append({"memory_id": memory_id, "error": str(exc)})
+            errors.append({"memory_id": 0, "error": str(exc)})
 
     status = "executed" if not errors else "partially_failed"
     return {

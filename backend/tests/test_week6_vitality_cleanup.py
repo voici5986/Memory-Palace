@@ -1145,7 +1145,7 @@ async def test_vitality_cleanup_confirm_collects_unexpected_delete_errors(
     async def _boom(*_args, **_kwargs):
         raise RuntimeError("delete_boom")
 
-    monkeypatch.setattr(client, "permanently_delete_memory", _boom)
+    monkeypatch.setattr(client, "_permanently_delete_memory_in_session", _boom)
 
     confirm_result = await maintenance_api.confirm_vitality_cleanup(
         maintenance_api.VitalityCleanupConfirmRequest(
@@ -1168,6 +1168,433 @@ async def test_vitality_cleanup_confirm_collects_unexpected_delete_errors(
     assert confirm_result["error_count"] == 1
     assert confirm_result["errors"][0]["memory_id"] == created["id"]
     assert "delete_boom" in confirm_result["errors"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_vitality_cleanup_confirm_does_not_partially_delete_when_second_delete_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-cleanup-second-delete-fails.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    async def _make_candidate(title: str, content: str) -> Dict[str, Any]:
+        created = await client.create_memory(
+            parent_path="",
+            content=content,
+            priority=1,
+            title=title,
+            domain="core",
+        )
+        await client.remove_path(path=title, domain="core")
+        async with client.session() as session:
+            memory = await session.get(Memory, created["id"])
+            assert memory is not None
+            memory.vitality_score = 0.04
+            memory.last_accessed_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)
+            )
+            memory.access_count = 0
+            session.add(memory)
+        return created
+
+    first = await _make_candidate("delete_fail_first", "Delete fail first")
+    second = await _make_candidate("delete_fail_second", "Delete fail second")
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "cleanup_reviews", CleanupReviewCoordinator()
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
+    )
+
+    query_payload = await client.get_vitality_cleanup_candidates(
+        threshold=0.2,
+        inactive_days=14,
+        limit=10,
+        memory_ids=[first["id"], second["id"]],
+    )
+    items = sorted(query_payload["items"], key=lambda item: int(item["memory_id"]))
+    assert [item["memory_id"] for item in items] == [first["id"], second["id"]]
+
+    prepare_result = await maintenance_api.prepare_vitality_cleanup(
+        maintenance_api.VitalityCleanupPrepareRequest(
+            action="delete",
+            selections=[
+                maintenance_api.CleanupSelectionItem(
+                    memory_id=item["memory_id"],
+                    state_hash=item["state_hash"],
+                )
+                for item in items
+            ],
+            reviewer="test-user",
+        )
+    )
+    review = prepare_result["review"]
+
+    original_delete_in_session = client._permanently_delete_memory_in_session
+
+    async def _delete_with_second_failure(
+        session,
+        memory_id: int,
+        *,
+        require_orphan: bool = False,
+        expected_state_hash: str | None = None,
+    ) -> Dict[str, Any]:
+        if memory_id == second["id"]:
+            raise RuntimeError("delete_boom_second")
+        return await original_delete_in_session(
+            session,
+            memory_id,
+            require_orphan=require_orphan,
+            expected_state_hash=expected_state_hash,
+        )
+
+    monkeypatch.setattr(
+        client,
+        "_permanently_delete_memory_in_session",
+        _delete_with_second_failure,
+    )
+
+    confirm_result = await maintenance_api.confirm_vitality_cleanup(
+        maintenance_api.VitalityCleanupConfirmRequest(
+            review_id=review["review_id"],
+            token=review["token"],
+            confirmation_phrase=review["confirmation_phrase"],
+        )
+    )
+
+    async with client.session() as session:
+        first_still_exists = await session.get(Memory, first["id"])
+        second_still_exists = await session.get(Memory, second["id"])
+        assert first_still_exists is not None
+        assert second_still_exists is not None
+
+    await client.close()
+    assert confirm_result["ok"] is False
+    assert confirm_result["status"] == "partially_failed"
+    assert confirm_result["deleted_count"] == 0
+    assert confirm_result["error_count"] == 1
+    assert confirm_result["errors"][0]["memory_id"] == second["id"]
+    assert "delete_boom_second" in confirm_result["errors"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_vitality_cleanup_confirm_does_not_partially_delete_when_second_delete_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-cleanup-second-delete-cancelled.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    async def _make_candidate(title: str, content: str) -> Dict[str, Any]:
+        created = await client.create_memory(
+            parent_path="",
+            content=content,
+            priority=1,
+            title=title,
+            domain="core",
+        )
+        await client.remove_path(path=title, domain="core")
+        async with client.session() as session:
+            memory = await session.get(Memory, created["id"])
+            assert memory is not None
+            memory.vitality_score = 0.04
+            memory.last_accessed_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)
+            )
+            memory.access_count = 0
+            session.add(memory)
+        return created
+
+    first = await _make_candidate("delete_cancel_first", "Delete cancel first")
+    second = await _make_candidate("delete_cancel_second", "Delete cancel second")
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "cleanup_reviews", CleanupReviewCoordinator()
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
+    )
+
+    query_payload = await client.get_vitality_cleanup_candidates(
+        threshold=0.2,
+        inactive_days=14,
+        limit=10,
+        memory_ids=[first["id"], second["id"]],
+    )
+    items = sorted(query_payload["items"], key=lambda item: int(item["memory_id"]))
+    assert [item["memory_id"] for item in items] == [first["id"], second["id"]]
+
+    prepare_result = await maintenance_api.prepare_vitality_cleanup(
+        maintenance_api.VitalityCleanupPrepareRequest(
+            action="delete",
+            selections=[
+                maintenance_api.CleanupSelectionItem(
+                    memory_id=item["memory_id"],
+                    state_hash=item["state_hash"],
+                )
+                for item in items
+            ],
+            reviewer="test-user",
+        )
+    )
+    review = prepare_result["review"]
+
+    original_delete_in_session = client._permanently_delete_memory_in_session
+
+    async def _delete_with_second_cancel(
+        session,
+        memory_id: int,
+        *,
+        require_orphan: bool = False,
+        expected_state_hash: str | None = None,
+    ) -> Dict[str, Any]:
+        if memory_id == second["id"]:
+            raise asyncio.CancelledError()
+        return await original_delete_in_session(
+            session,
+            memory_id,
+            require_orphan=require_orphan,
+            expected_state_hash=expected_state_hash,
+        )
+
+    monkeypatch.setattr(
+        client,
+        "_permanently_delete_memory_in_session",
+        _delete_with_second_cancel,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await maintenance_api.confirm_vitality_cleanup(
+            maintenance_api.VitalityCleanupConfirmRequest(
+                review_id=review["review_id"],
+                token=review["token"],
+                confirmation_phrase=review["confirmation_phrase"],
+            )
+        )
+
+    async with client.session() as session:
+        first_still_exists = await session.get(Memory, first["id"])
+        second_still_exists = await session.get(Memory, second["id"])
+        assert first_still_exists is not None
+        assert second_still_exists is not None
+
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_vitality_cleanup_confirm_rejects_non_atomic_multi_delete_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-cleanup-non-atomic-multi-delete.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    async def _make_candidate(title: str, content: str) -> Dict[str, Any]:
+        created = await client.create_memory(
+            parent_path="",
+            content=content,
+            priority=1,
+            title=title,
+            domain="core",
+        )
+        await client.remove_path(path=title, domain="core")
+        async with client.session() as session:
+            memory = await session.get(Memory, created["id"])
+            assert memory is not None
+            memory.vitality_score = 0.04
+            memory.last_accessed_at = (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)
+            )
+            memory.access_count = 0
+            session.add(memory)
+        return created
+
+    first = await _make_candidate("non_atomic_first", "Non atomic first")
+    second = await _make_candidate("non_atomic_second", "Non atomic second")
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "cleanup_reviews", CleanupReviewCoordinator()
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
+    )
+
+    query_payload = await client.get_vitality_cleanup_candidates(
+        threshold=0.2,
+        inactive_days=14,
+        limit=10,
+        memory_ids=[first["id"], second["id"]],
+    )
+    items = sorted(query_payload["items"], key=lambda item: int(item["memory_id"]))
+
+    prepare_result = await maintenance_api.prepare_vitality_cleanup(
+        maintenance_api.VitalityCleanupPrepareRequest(
+            action="delete",
+            selections=[
+                maintenance_api.CleanupSelectionItem(
+                    memory_id=item["memory_id"],
+                    state_hash=item["state_hash"],
+                )
+                for item in items
+            ],
+            reviewer="test-user",
+        )
+    )
+    review = prepare_result["review"]
+
+    class _FallbackOnlyClient:
+        def __init__(self, inner: SQLiteClient) -> None:
+            self._inner = inner
+
+        async def get_vitality_cleanup_candidates(self, **kwargs):
+            return await self._inner.get_vitality_cleanup_candidates(**kwargs)
+
+        async def permanently_delete_memory(self, *args, **kwargs):
+            return await self._inner.permanently_delete_memory(*args, **kwargs)
+
+    monkeypatch.setattr(
+        maintenance_api,
+        "get_sqlite_client",
+        lambda: _FallbackOnlyClient(client),
+    )
+
+    confirm_result = await maintenance_api.confirm_vitality_cleanup(
+        maintenance_api.VitalityCleanupConfirmRequest(
+            review_id=review["review_id"],
+            token=review["token"],
+            confirmation_phrase=review["confirmation_phrase"],
+        )
+    )
+
+    async with client.async_session() as session:
+        first_still_exists = await session.get(Memory, first["id"])
+        second_still_exists = await session.get(Memory, second["id"])
+        assert first_still_exists is not None
+        assert second_still_exists is not None
+
+    await client.close()
+    assert confirm_result["ok"] is False
+    assert confirm_result["status"] == "partially_failed"
+    assert confirm_result["deleted_count"] == 0
+    assert confirm_result["error_count"] == 1
+    assert confirm_result["errors"][0]["memory_id"] == 0
+    assert "atomic_batch_delete_unavailable" in confirm_result["errors"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_vitality_cleanup_confirm_allows_single_delete_without_atomic_batch_support(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "week6-cleanup-single-delete-fallback.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    created = await client.create_memory(
+        parent_path="",
+        content="Single fallback candidate",
+        priority=1,
+        title="single_fallback",
+        domain="core",
+    )
+    await client.remove_path(path="single_fallback", domain="core")
+    async with client.session() as session:
+        memory = await session.get(Memory, created["id"])
+        assert memory is not None
+        memory.vitality_score = 0.04
+        memory.last_accessed_at = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)
+        )
+        memory.access_count = 0
+        session.add(memory)
+
+    async def _ensure_started(_factory) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance_api, "get_sqlite_client", lambda: client)
+    monkeypatch.setattr(maintenance_api.runtime_state, "ensure_started", _ensure_started)
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "cleanup_reviews", CleanupReviewCoordinator()
+    )
+    monkeypatch.setattr(
+        maintenance_api.runtime_state, "vitality_decay", VitalityDecayCoordinator()
+    )
+
+    query_payload = await client.get_vitality_cleanup_candidates(
+        threshold=0.2,
+        inactive_days=14,
+        limit=10,
+        memory_ids=[created["id"]],
+    )
+    item = query_payload["items"][0]
+
+    prepare_result = await maintenance_api.prepare_vitality_cleanup(
+        maintenance_api.VitalityCleanupPrepareRequest(
+            action="delete",
+            selections=[
+                maintenance_api.CleanupSelectionItem(
+                    memory_id=item["memory_id"],
+                    state_hash=item["state_hash"],
+                )
+            ],
+            reviewer="test-user",
+        )
+    )
+    review = prepare_result["review"]
+
+    class _FallbackOnlyClient:
+        def __init__(self, inner: SQLiteClient) -> None:
+            self._inner = inner
+
+        async def get_vitality_cleanup_candidates(self, **kwargs):
+            return await self._inner.get_vitality_cleanup_candidates(**kwargs)
+
+        async def permanently_delete_memory(self, *args, **kwargs):
+            return await self._inner.permanently_delete_memory(*args, **kwargs)
+
+    monkeypatch.setattr(
+        maintenance_api,
+        "get_sqlite_client",
+        lambda: _FallbackOnlyClient(client),
+    )
+
+    confirm_result = await maintenance_api.confirm_vitality_cleanup(
+        maintenance_api.VitalityCleanupConfirmRequest(
+            review_id=review["review_id"],
+            token=review["token"],
+            confirmation_phrase=review["confirmation_phrase"],
+        )
+    )
+
+    async with client.async_session() as session:
+        deleted_memory = await session.get(Memory, created["id"])
+        assert deleted_memory is None
+
+    await client.close()
+    assert confirm_result["ok"] is True
+    assert confirm_result["status"] == "executed"
+    assert confirm_result["deleted"] == [created["id"]]
+    assert confirm_result["error_count"] == 0
 
 
 @pytest.mark.asyncio

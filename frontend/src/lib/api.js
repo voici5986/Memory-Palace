@@ -17,6 +17,7 @@ const LONG_RUNNING_REQUEST_TIMEOUT_MS = 60000;
 
 const DASHBOARD_AUTH_STORAGE_KEY = 'memory-palace.dashboardAuth';
 const STORED_AUTH_RUNTIME_OVERRIDE_KEY = 'preferStoredOverRuntime';
+const MAINTENANCE_AUTH_CHANGED_EVENT = 'memory-palace:maintenance-auth-changed';
 
 // Handle URI encoding for resource IDs which might contain special chars
 const encodeId = (id) => encodeURIComponent(id);
@@ -135,6 +136,37 @@ export const getMaintenanceAuthState = () => {
   return null;
 };
 
+const notifyMaintenanceAuthChanged = () => {
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') {
+    return;
+  }
+  window.dispatchEvent(new Event(MAINTENANCE_AUTH_CHANGED_EVENT));
+};
+
+export const subscribeMaintenanceAuthChanges = (listener) => {
+  if (typeof window === 'undefined' || typeof listener !== 'function') {
+    return () => {};
+  }
+
+  const notify = () => {
+    listener(getMaintenanceAuthState());
+  };
+
+  const handleStorage = (event) => {
+    if (!event || event.key === null || event.key === DASHBOARD_AUTH_STORAGE_KEY) {
+      notify();
+    }
+  };
+
+  window.addEventListener(MAINTENANCE_AUTH_CHANGED_EVENT, notify);
+  window.addEventListener('storage', handleStorage);
+
+  return () => {
+    window.removeEventListener(MAINTENANCE_AUTH_CHANGED_EVENT, notify);
+    window.removeEventListener('storage', handleStorage);
+  };
+};
+
 export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
   const normalized = normalizeMaintenanceAuth({
     maintenanceApiKey: key,
@@ -156,6 +188,7 @@ export const saveStoredMaintenanceAuth = (key, mode = 'header') => {
   } catch (_error) {
     return false;
   }
+  notifyMaintenanceAuthChanged();
   return getMaintenanceAuthState();
 };
 
@@ -164,6 +197,9 @@ export const clearStoredMaintenanceAuth = () => {
   const localStorage = getBrowserStorage('localStorage');
   const sessionCleared = removeStoredMaintenanceAuthFrom(sessionStorage);
   const legacyCleared = removeStoredMaintenanceAuthFrom(localStorage);
+  if (sessionCleared || legacyCleared) {
+    notifyMaintenanceAuthChanged();
+  }
   return sessionCleared && legacyCleared;
 };
 

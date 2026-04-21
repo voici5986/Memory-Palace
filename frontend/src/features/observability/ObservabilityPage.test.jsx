@@ -14,6 +14,7 @@ vi.mock('../../lib/api', () => ({
   getObservabilitySummary: vi.fn(),
   retryIndexJob: vi.fn(),
   runObservabilitySearch: vi.fn(),
+  subscribeMaintenanceAuthChanges: vi.fn(() => () => {}),
   triggerIndexRebuild: vi.fn(),
   triggerMemoryReindex: vi.fn(),
   triggerSleepConsolidation: vi.fn(),
@@ -111,6 +112,7 @@ describe('ObservabilityPage', () => {
     api.getIndexJob.mockResolvedValue({ job: null });
     api.retryIndexJob.mockResolvedValue({ job_id: 'retry-default' });
     api.runObservabilitySearch.mockResolvedValue({ results: [] });
+    api.subscribeMaintenanceAuthChanges.mockImplementation(() => () => {});
     api.triggerIndexRebuild.mockResolvedValue({ job_id: 'rebuild-default' });
     api.triggerMemoryReindex.mockResolvedValue({ job_id: 'reindex-default' });
     api.triggerSleepConsolidation.mockResolvedValue({ job_id: 'sleep-default' });
@@ -642,6 +644,89 @@ describe('ObservabilityPage', () => {
       expect(api.getObservabilitySummary).toHaveBeenCalledTimes(2);
     });
     expect(await screen.findByText(/queue depth:\s*6/i)).toBeInTheDocument();
+  });
+
+  it('re-establishes authenticated SSE after a terminal 401 when maintenance auth changes', async () => {
+    const encoder = new TextEncoder();
+    let authChangeListener = null;
+    let maintenanceAuth = {
+      key: 'expired-maintenance-key',
+      mode: 'header',
+      source: 'runtime',
+    };
+    api.getMaintenanceAuthState.mockImplementation(() => maintenanceAuth);
+    api.subscribeMaintenanceAuthChanges.mockImplementation((listener) => {
+      authChangeListener = listener;
+      return () => {
+        if (authChangeListener === listener) {
+          authChangeListener = null;
+        }
+      };
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          body: new ReadableStream({
+            start(controller) {
+              controller.close();
+            },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode('event: endpoint\ndata: /messages?session_id=auth-recovered\n\n')
+              );
+              controller.close();
+            },
+          }),
+        })
+    );
+    api.getObservabilitySummary
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 1, timestamp: '2026-01-01T00:00:00Z' }))
+      .mockResolvedValueOnce(buildSummary({ queueDepth: 8, timestamp: '2026-01-01T00:00:08Z' }));
+
+    render(<ObservabilityPage />);
+
+    expect(await screen.findByText(/queue depth:\s*1/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/sse'),
+        expect.objectContaining({
+          headers: { 'X-MCP-API-Key': 'expired-maintenance-key' },
+        })
+      );
+    });
+
+    maintenanceAuth = {
+      key: 'refreshed-maintenance-key',
+      mode: 'header',
+      source: 'runtime',
+    };
+    await act(async () => {
+      authChangeListener?.(maintenanceAuth);
+    });
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+      expect(globalThis.fetch).toHaveBeenLastCalledWith(
+        expect.stringContaining('/sse'),
+        expect.objectContaining({
+          headers: { 'X-MCP-API-Key': 'refreshed-maintenance-key' },
+        })
+      );
+    });
+    await waitFor(() => {
+      expect(api.getObservabilitySummary).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText(/queue depth:\s*8/i)).toBeInTheDocument();
   });
 
   it('blocks diagnostic search when max priority is not an integer', async () => {

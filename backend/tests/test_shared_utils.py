@@ -1,3 +1,4 @@
+import socket
 from datetime import datetime
 
 import pytest
@@ -88,6 +89,36 @@ def test_normalize_http_api_base_allows_private_ip_literals_when_allowlisted(
     monkeypatch.setenv(PRIVATE_PROVIDER_TARGETS_ENV, "10.0.0.0/8,fc00::/7")
     assert normalize_http_api_base("http://10.0.0.8:11435/v1") == "http://10.0.0.8:11435/v1"
     assert normalize_http_api_base("http://[fc00::1]/v1") == "http://[fc00::1]/v1"
+
+
+def test_normalize_http_api_base_rejects_private_hostnames_without_allowlist(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv(PRIVATE_PROVIDER_TARGETS_ENV, raising=False)
+    monkeypatch.setattr(
+        "shared_utils.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 11435))
+        ],
+    )
+    with pytest.raises(ValueError, match="private-address hostname"):
+        normalize_http_api_base("http://router.internal:11435/v1")
+
+
+def test_normalize_http_api_base_allows_private_hostnames_when_allowlisted(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(PRIVATE_PROVIDER_TARGETS_ENV, "router.internal")
+    monkeypatch.setattr(
+        "shared_utils.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 11435))
+        ],
+    )
+    assert (
+        normalize_http_api_base("http://router.internal:11435/v1")
+        == "http://router.internal:11435/v1"
+    )
 
 
 def test_utc_iso_now_returns_utc_z_suffix() -> None:

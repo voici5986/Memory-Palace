@@ -152,7 +152,7 @@ Authorization: Bearer <MCP_API_KEY>
 1. `readRuntimeMaintenanceAuth()` 读取 `window.__MEMORY_PALACE_RUNTIME__`
 2. axios 请求拦截器 `isProtectedApiRequest()` 判断请求是否需要鉴权
 3. 对 `/maintenance/*`、`/review/*`、`/browse/*` 以及新的 `/setup/*` 自动注入鉴权头
-4. Observability 订阅 `/sse` 时也会复用这套鉴权：没有浏览器侧 Dashboard key 时继续走原生 `EventSource`；有 key 时切到可带 header/bearer 的 fetch-based SSE，这样不会把 key 拼到 URL 里；而且每次重连都会重新读取当前浏览器里的 Dashboard 鉴权，并继续带上 `Last-Event-ID`；明确的 `4xx` 鉴权失败则会停止重试
+4. Observability 订阅 `/sse` 时也会复用这套鉴权：没有浏览器侧 Dashboard key 时继续走原生 `EventSource`；有 key 时切到可带 header/bearer 的 fetch-based SSE，这样不会把 key 拼到 URL 里；而且每次重连都会重新读取当前浏览器里的 Dashboard 鉴权，并继续带上 `Last-Event-ID`；明确的 `4xx` 鉴权失败则会停止重试。现在只要浏览器侧 Dashboard 鉴权被修改、清空，前端还会额外发出一条 maintenance-auth 变更事件；Observability 会利用这条事件，再加上重新聚焦标签页时的检查，在鉴权变更后或终态 `401` 之后重建带鉴权的连接。
 
 > 兼容性：也支持旧字段名 `window.__MCP_RUNTIME_CONFIG__`（见 `frontend/src/lib/api.js` 中的 runtime config fallback 逻辑）。
 >
@@ -177,7 +177,7 @@ Authorization: Bearer <MCP_API_KEY>
 - 如果服务端 Dashboard 鉴权已经生效，前端不会只因为浏览器本地还没保存 Dashboard key 就自动弹出首启配置向导；这样能减少在 proxy-held key 部署里把真实 `MCP_API_KEY` 再存进浏览器的误操作。
 - 向导切档时，当前已经隐藏掉的旧字段会跟着本次保存一起清掉，减少把上一档残留的 router/API 字段继续带进本次提交的风险。
 - 切到远端 embedding backend 时，setup 保存会显式写入 `RETRIEVAL_EMBEDDING_DIM`；`/setup/config` 现在也支持 `openai` embedding backend。
-- provider API base 字段现在会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉；格式不对、带凭证、或指到 link-local 的地址会直接拒绝。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意指到其它 private IP 字面量，还要通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。
+- provider API base 字段现在会先做归一化和校验：`/embeddings`、`/rerank`、`/chat/completions`、`/responses` 这类常见尾缀会自动去掉；格式不对、带凭证、或指到 link-local 的地址会直接拒绝。`127.0.0.1` / `::1` 这类 loopback IP 字面量，再加上 `localhost`，仍然默认允许；如果你故意指到其它 private IP 字面量，或者指到一个解析后会落到 private 非 loopback 地址的 hostname，还要通过 `MEMORY_PALACE_ALLOWED_PRIVATE_PROVIDER_TARGETS` 显式放行。
 - 当前运行时如果读到无效的 `chat / embedding / reranker` API base，也会按 fail-closed 处理：直接忽略这条配置并走降级/回退，不会继续拿这类地址发请求。
 - Memory 页在确认弹窗不可用时也会保持同样的 fail-closed 边界：不会继续执行删除或跳转，而是直接拦下动作并给出页内提示。
 
@@ -186,7 +186,8 @@ Authorization: Bearer <MCP_API_KEY>
 - `backend/tests/test_setup_api.py` — 验证本地 loopback 访问、远程鉴权、白名单 `.env` 写入、远端 `embedding_dim` 显式必填、`/setup/status` 默认汇总与运行时默认值一致，以及 Docker fail-closed
 - `backend/tests/test_reflection_workflow_api.py` — 验证 reflection rollback 在已知 `session_id` 时会继续做一致性校验，只带 `job_id` 时会先恢复原始 `session_id`，并在 review rollback 后继续做 best-effort namespace cleanup
 - `frontend/src/App.test.jsx` — 验证首启自动弹出、“只保存 Dashboard 密钥”交互，以及 proxy-held auth 已生效时不误弹
-- `frontend/src/features/observability/ObservabilityPage.test.jsx` — 验证 Observability 在有浏览器侧鉴权时会改走可带鉴权头的 SSE 路径，并在事件到达后刷新 summary
+- `frontend/src/features/observability/ObservabilityPage.test.jsx` — 验证 Observability 在有浏览器侧鉴权时会改走可带鉴权头的 SSE 路径，并在事件到达后刷新 summary，也会在鉴权变化后重建这条带鉴权的连接
+- `frontend/src/lib/api.test.js` — 验证浏览器侧 maintenance-auth 变更通知会在保存/清除和匹配的 storage 事件上触发
 - `frontend/src/lib/api.contract.test.js` — 验证 `/setup/*` 也走统一鉴权头注入
 - `frontend/src/lib/sse.test.js` — 验证带鉴权头的 fetch-based SSE 会在临时断流后重连、重连时刷新当前浏览器鉴权并保留 `Last-Event-ID`，以及在终态 `4xx` 鉴权失败时停止重试
 - `backend/tests/test_external_import_guard_security.py` — 验证外部导入会在读正文前先按 metadata 拦住超大单文件/超大批次，且非 UTF-8 文本会稳定返回 `file_read_failed`，不会再冒出 fd 重复关闭错误

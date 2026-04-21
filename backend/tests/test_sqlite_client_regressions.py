@@ -21,6 +21,37 @@ class _CaptureCursor:
         self.executed.append(sql)
 
 
+async def _get_memory_index_counts(
+    client: SQLiteClient,
+    memory_id: int,
+    *,
+    include_fts: bool = False,
+) -> dict[str, int]:
+    async with client.session() as session:
+        chunk_count = await session.execute(
+            text("SELECT COUNT(*) FROM memory_chunks WHERE memory_id = :memory_id"),
+            {"memory_id": int(memory_id)},
+        )
+        vec_count = await session.execute(
+            text("SELECT COUNT(*) FROM memory_chunks_vec WHERE memory_id = :memory_id"),
+            {"memory_id": int(memory_id)},
+        )
+        counts = {
+            "memory_chunks": int(chunk_count.scalar() or 0),
+            "memory_chunks_vec": int(vec_count.scalar() or 0),
+        }
+        if include_fts:
+            fts_count = await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM memory_chunks_fts "
+                    "WHERE memory_id = :memory_id"
+                ),
+                {"memory_id": int(memory_id)},
+            )
+            counts["memory_chunks_fts"] = int(fts_count.scalar() or 0)
+        return counts
+
+
 @pytest.fixture(autouse=True)
 def _force_local_retrieval_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RETRIEVAL_EMBEDDING_BACKEND", "hash")
@@ -57,6 +88,49 @@ async def test_get_index_status_does_not_persist_missing_fts_state(
     await client.close()
 
     assert restored_status["capabilities"]["fts_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_init_db_runs_integrity_check_for_existing_database(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "init-db-integrity-check.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+    await client.close()
+
+    seen_paths: list[Path | None] = []
+    original_check = sqlite_client_module._validate_existing_sqlite_file_integrity
+
+    def _capture_check(path: Path | None) -> None:
+        seen_paths.append(path)
+        original_check(path)
+
+    monkeypatch.setattr(
+        sqlite_client_module,
+        "_validate_existing_sqlite_file_integrity",
+        _capture_check,
+    )
+
+    reloaded = SQLiteClient(_sqlite_url(db_path))
+    await reloaded.init_db()
+    await reloaded.close()
+
+    assert seen_paths == [db_path]
+
+
+@pytest.mark.asyncio
+async def test_init_db_fails_closed_for_corrupt_existing_database(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "init-db-corrupt-existing.db"
+    db_path.write_bytes(b"not a sqlite database")
+
+    client = SQLiteClient(_sqlite_url(db_path))
+    with pytest.raises(RuntimeError, match="quick_check failed"):
+        await client.init_db()
+    await client.close()
 
 
 @pytest.mark.asyncio
@@ -125,8 +199,10 @@ async def test_reserved_fts_operators_do_not_control_query_semantics(
     )
     await client.close()
 
-    assert result["results"] == []
+    uris = [row["uri"] for row in result["results"]]
     assert "fts_query_invalid" not in result.get("degrade_reasons", [])
+    assert "core://apple" in uris
+    assert "core://banana" in uris
 
 
 @pytest.mark.asyncio
@@ -162,6 +238,53 @@ async def test_special_character_queries_skip_invalid_fts_errors(
 
     assert "fts_query_invalid" not in result.get("degrade_reasons", [])
     assert "fts_query_invalid" not in wildcard_result.get("degrade_reasons", [])
+
+
+@pytest.mark.asyncio
+async def test_semantic_python_scoring_pool_limit_respects_candidate_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "semantic-pool-cap-regression.db"))
+    await client.init_db()
+    client._vector_available = True
+
+    captured: dict[str, int] = {}
+
+    async def _fake_get_indexed_vector_dims(*args, **kwargs) -> list[int]:
+        return [int(client._embedding_dim)]
+
+    async def _fake_get_embedding(*args, **kwargs) -> list[float]:
+        return [0.0] * int(client._embedding_dim)
+
+    async def _fake_fetch_semantic_rows_python_scoring(*args, **kwargs):
+        captured["semantic_pool_limit"] = int(kwargs["semantic_pool_limit"])
+        captured["candidate_limit"] = int(kwargs["candidate_limit"])
+        return []
+
+    monkeypatch.setattr(client, "_resolve_vector_engine_for_query", lambda query: "legacy")
+    monkeypatch.setattr(client, "_get_indexed_vector_dims", _fake_get_indexed_vector_dims)
+    monkeypatch.setattr(client, "_get_embedding", _fake_get_embedding)
+    monkeypatch.setattr(
+        client,
+        "_fetch_semantic_rows_python_scoring",
+        _fake_fetch_semantic_rows_python_scoring,
+    )
+
+    payload = await client.search_advanced(
+        query="semantic pool hard cap regression",
+        mode="semantic",
+        max_results=100,
+        candidate_multiplier=50,
+        filters={},
+    )
+    await client.close()
+
+    metadata = payload["metadata"]
+    assert metadata["vector_engine_path"] == "legacy_python_scoring"
+    assert metadata["candidate_limit_applied"] == client._search_candidate_limit_hard_cap
+    assert captured["candidate_limit"] == client._search_candidate_limit_hard_cap
+    assert captured["semantic_pool_limit"] <= client._search_candidate_limit_hard_cap
 
 
 @pytest.mark.asyncio
@@ -329,6 +452,154 @@ async def test_permanently_delete_memory_rejects_referenced_orphan_chain_tail(
     await client.close()
 
     assert still_exists is not None
+
+
+@pytest.mark.asyncio
+async def test_permanently_delete_memory_clears_chunk_tables_and_fts_rows(
+    tmp_path: Path,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "permanent-delete-index-cleanup.db"))
+    await client.init_db()
+
+    if not client._fts_available:
+        await client.close()
+        pytest.skip("SQLite FTS5 not available in this environment")
+
+    created = await client.create_memory(
+        parent_path="",
+        content="记忆宫殿 删除回归测试 " * 20,
+        priority=1,
+        title="delete-index-cleanup",
+        domain="core",
+    )
+    memory_id = int(created["id"])
+
+    before_counts = await _get_memory_index_counts(client, memory_id, include_fts=True)
+    await client.permanently_delete_memory(memory_id)
+    after_counts = await _get_memory_index_counts(client, memory_id, include_fts=True)
+
+    async with client.session() as session:
+        deleted_memory = await session.get(Memory, memory_id)
+
+    await client.close()
+
+    assert before_counts["memory_chunks"] > 0
+    assert before_counts["memory_chunks_vec"] == before_counts["memory_chunks"]
+    assert before_counts["memory_chunks_fts"] == before_counts["memory_chunks"]
+    assert deleted_memory is None
+    assert after_counts == {
+        "memory_chunks": 0,
+        "memory_chunks_vec": 0,
+        "memory_chunks_fts": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_init_db_rebuilds_fts_rows_when_fts_table_was_missing(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "init-db-fts-repair.db"
+    client = SQLiteClient(_sqlite_url(db_path))
+    await client.init_db()
+
+    if not client._fts_available:
+        await client.close()
+        pytest.skip("SQLite FTS5 not available in this environment")
+
+    created = await client.create_memory(
+        parent_path="",
+        content="记忆 宫殿 FTS repair regression " * 16,
+        priority=1,
+        title="fts-repair-target",
+        domain="core",
+    )
+    memory_id = int(created["id"])
+    before_counts = await _get_memory_index_counts(client, memory_id, include_fts=True)
+
+    async with client.session() as session:
+        await session.execute(text("DROP TABLE memory_chunks_fts"))
+
+    await client.close()
+
+    repair_client = SQLiteClient(_sqlite_url(db_path))
+    await repair_client.init_db()
+
+    async with repair_client.session() as session:
+        fts_exists_result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'memory_chunks_fts'"
+            )
+        )
+        fts_exists = int(fts_exists_result.scalar() or 0)
+
+    after_counts = await _get_memory_index_counts(
+        repair_client,
+        memory_id,
+        include_fts=True,
+    )
+    await repair_client.close()
+
+    assert before_counts["memory_chunks"] > 0
+    assert before_counts["memory_chunks_fts"] == before_counts["memory_chunks"]
+    assert fts_exists == 1
+    assert after_counts["memory_chunks"] == before_counts["memory_chunks"]
+    assert after_counts["memory_chunks_fts"] == before_counts["memory_chunks"]
+
+
+@pytest.mark.asyncio
+async def test_cjk_control_word_query_returns_term_matches(tmp_path: Path) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "cjk-control-word-regression.db"))
+    await client.init_db()
+
+    await client.create_memory(
+        parent_path="",
+        content="这条记录包含记忆与宫殿两个词。",
+        priority=1,
+        title="cjk-control-word-hit",
+        domain="core",
+    )
+    await client.create_memory(
+        parent_path="",
+        content="这里只有花园，没有目标词。",
+        priority=1,
+        title="cjk-control-word-miss",
+        domain="core",
+    )
+
+    result = await client.search_advanced(
+        query="记忆 OR 宫殿",
+        mode="keyword",
+        max_results=5,
+        candidate_multiplier=4,
+        filters={},
+    )
+    await client.close()
+
+    uris = [row["uri"] for row in result["results"]]
+    assert "fts_query_invalid" not in result.get("degrade_reasons", [])
+    assert "core://cjk-control-word-hit" in uris
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["", "   \n\t  "])
+async def test_create_memory_rejects_blank_content(
+    tmp_path: Path,
+    content: str,
+) -> None:
+    client = SQLiteClient(_sqlite_url(tmp_path / "blank-content-regression.db"))
+    await client.init_db()
+
+    with pytest.raises(ValueError, match="content must not be empty"):
+        await client.create_memory(
+            parent_path="",
+            content=content,
+            priority=1,
+            title="blank-content",
+            domain="core",
+        )
+
+    await client.close()
 
 
 @pytest.mark.asyncio

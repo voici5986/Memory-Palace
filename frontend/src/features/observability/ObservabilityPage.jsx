@@ -22,6 +22,7 @@ import {
   getObservabilitySummary,
   retryIndexJob,
   runObservabilitySearch,
+  subscribeMaintenanceAuthChanges,
   triggerIndexRebuild,
   triggerMemoryReindex,
   triggerSleepConsolidation,
@@ -251,6 +252,12 @@ const formatDateTime = (value, lng) => {
   }) || value;
 };
 
+const getMaintenanceAuthFingerprint = () => {
+  const authState = getMaintenanceAuthState();
+  if (!authState?.key) return '';
+  return `${authState.mode === 'bearer' ? 'bearer' : 'header'}:${authState.key}`;
+};
+
 const normalizeObservabilityToken = (value) => {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -443,6 +450,7 @@ export default function ObservabilityPage() {
   const [summary, setSummary] = useState(/** @type {ObservabilitySummary | null} */ (null));
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryErrorState, setSummaryErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
+  const [authRefreshToken, setAuthRefreshToken] = useState(0);
 
   const [searching, setSearching] = useState(false);
   const [searchErrorState, setSearchErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
@@ -457,6 +465,8 @@ export default function ObservabilityPage() {
   const [detailJobErrorState, setDetailJobErrorState] = useState(/** @type {ObservabilityErrorState | null} */ (null));
   const [inspectedJobId, setInspectedJobId] = useState(/** @type {string | null} */ (null));
   const summaryRequestSeqRef = useRef(0);
+  const maintenanceAuthFingerprint = getMaintenanceAuthFingerprint();
+  const maintenanceAuthFingerprintRef = useRef(maintenanceAuthFingerprint);
   const initialDefaultQuery = coerceTranslationText(
     i18n.t('observability.defaultQuery', { lng: i18n.resolvedLanguage || i18n.language || 'en' }),
   );
@@ -535,6 +545,33 @@ export default function ObservabilityPage() {
   }, [loadSummary]);
 
   useEffect(() => {
+    if (maintenanceAuthFingerprint === maintenanceAuthFingerprintRef.current) {
+      return;
+    }
+    maintenanceAuthFingerprintRef.current = maintenanceAuthFingerprint;
+    setAuthRefreshToken((value) => value + 1);
+  }, [maintenanceAuthFingerprint]);
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      const nextFingerprint = getMaintenanceAuthFingerprint();
+      if (nextFingerprint === maintenanceAuthFingerprintRef.current) {
+        return;
+      }
+      maintenanceAuthFingerprintRef.current = nextFingerprint;
+      setAuthRefreshToken((value) => value + 1);
+    };
+
+    const detach = subscribeMaintenanceAuthChanges(handleAuthChange);
+    window.addEventListener('focus', handleAuthChange);
+
+    return () => {
+      detach();
+      window.removeEventListener('focus', handleAuthChange);
+    };
+  }, []);
+
+  useEffect(() => {
     let eventSource;
     try {
       const maintenanceAuth = getMaintenanceAuthState();
@@ -574,7 +611,7 @@ export default function ObservabilityPage() {
         eventSource.close();
       }
     };
-  }, [loadSummary]);
+  }, [authRefreshToken, loadSummary]);
 
   useEffect(() => {
     let disposed = false;

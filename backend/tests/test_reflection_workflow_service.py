@@ -814,6 +814,49 @@ async def test_reflection_execute_snapshot_failure_cleans_up_created_namespace(
 
 
 @pytest.mark.asyncio
+async def test_reflection_execute_cancelled_snapshot_cleanup_removes_created_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _SnapshotFailureCleanupClient()
+    monkeypatch.setenv("AUTO_LEARN_EXPLICIT_ENABLED", "true")
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "import_learn_tracker",
+        ImportLearnAuditTracker(),
+    )
+    monkeypatch.setattr(
+        mcp_server.runtime_state,
+        "flush_tracker",
+        _FakeFlushTracker("Session compaction notes:\n- cancel snapshot cleanup"),
+    )
+
+    async def _snapshot_path_create(
+        uri: str,
+        memory_id: int,
+        operation_type: str = "create",
+        target_uri: str | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> bool:
+        _ = uri, memory_id, operation_type, target_uri, session_id
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(mcp_server, "_snapshot_path_create", _snapshot_path_create)
+
+    with pytest.raises(asyncio.CancelledError):
+        await mcp_server.run_reflection_workflow_service(
+            mode="execute",
+            source="session_summary",
+            reason="cancel snapshot cleanup",
+            session_id="s-reflection-cancelled-cleanup",
+            client=client,
+        )
+
+    assert client._paths == {}
+    assert client.deleted_memory_ids == [3, 2, 1]
+
+
+@pytest.mark.asyncio
 async def test_same_session_concurrent_reflection_and_explicit_learn_do_not_fail_on_namespace_uniqueness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

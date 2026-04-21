@@ -1,5 +1,6 @@
 import os
 import math
+import socket
 from datetime import datetime, timezone
 from ipaddress import ip_address, ip_network
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -181,6 +182,13 @@ def normalize_http_api_base(
         host_ip = ip_address(parsed.hostname)
     except ValueError:
         host_ip = None
+    private_targets = allowed_private_provider_targets()
+    if private_target_allowlist is not None:
+        private_targets = frozenset(
+            str(item or "").strip().lower()
+            for item in private_target_allowlist
+            if str(item or "").strip()
+        ) | LOOPBACK_HOSTS
     if host_ip is not None and (
         host_ip.is_unspecified or host_ip.is_multicast or host_ip.is_link_local
     ):
@@ -188,13 +196,6 @@ def normalize_http_api_base(
             "API base URL cannot point to an unspecified, multicast, or link-local address."
         )
     if host_ip is not None and host_ip.is_private and not host_ip.is_loopback:
-        private_targets = allowed_private_provider_targets()
-        if private_target_allowlist is not None:
-            private_targets = frozenset(
-                str(item or "").strip().lower()
-                for item in private_target_allowlist
-                if str(item or "").strip()
-            ) | LOOPBACK_HOSTS
         if not _private_provider_target_matches(
             hostname=str(parsed.hostname or ""),
             host_ip=host_ip,
@@ -203,6 +204,46 @@ def normalize_http_api_base(
             raise ValueError(
                 "API base URL cannot point to a private IP literal unless it is explicitly "
                 f"allowlisted via {PRIVATE_PROVIDER_TARGETS_ENV}."
+            )
+    if host_ip is None:
+        try:
+            resolved_addresses = socket.getaddrinfo(
+                str(parsed.hostname or ""),
+                parsed.port or 0,
+                type=socket.SOCK_STREAM,
+            )
+        except OSError:
+            resolved_addresses = []
+        resolved_private_hosts = []
+        for _family, _socktype, _proto, _canonname, sockaddr in resolved_addresses:
+            host_value = str((sockaddr or ("",))[0] or "").strip()
+            if not host_value:
+                continue
+            try:
+                resolved_ip = ip_address(host_value)
+            except ValueError:
+                continue
+            if (
+                resolved_ip.is_unspecified
+                or resolved_ip.is_multicast
+                or resolved_ip.is_link_local
+            ):
+                raise ValueError(
+                    "API base URL cannot point to an unspecified, multicast, or link-local address."
+                )
+            if resolved_ip.is_private and not resolved_ip.is_loopback:
+                resolved_private_hosts.append(resolved_ip)
+        if resolved_private_hosts and not any(
+            _private_provider_target_matches(
+                hostname=str(parsed.hostname or ""),
+                host_ip=resolved_ip,
+                targets=private_targets,
+            )
+            for resolved_ip in resolved_private_hosts
+        ):
+            raise ValueError(
+                "API base URL cannot point to a private-address hostname unless it is "
+                f"explicitly allowlisted via {PRIVATE_PROVIDER_TARGETS_ENV}."
             )
 
     path = str(parsed.path or "").rstrip("/")
@@ -340,6 +381,11 @@ def normalize_search_filters(
                     parsed_domain,
                     allowed_domains=allowed_domains_list,
                 )
+                existing_domain = str(normalized.get("domain") or "").strip().lower()
+                if existing_domain and normalized_domain and existing_domain != normalized_domain:
+                    raise ValueError(
+                        "filters.domain conflicts with filters.path_prefix URI domain"
+                    )
                 if normalized_domain:
                     normalized.setdefault("domain", normalized_domain)
                 normalized["path_prefix"] = parsed_path

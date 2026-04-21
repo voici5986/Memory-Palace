@@ -56,6 +56,12 @@ system://boot             ← Built-in system URI (read-only)
 
 The URI here means a **Memory Palace memory address**, not an operating-system file path. Windows file paths such as `C:/notes.txt` or `C:\notes.txt` are now explicitly rejected; if you mean a memory, use `core://...` rather than passing a local disk path into an MCP tool.
 
+Literal percent sequences are also valid path text. In plain terms: a path named
+`foo%20bar` stays literal, while public tools can still resolve an existing
+memory through encoded spaces or slashes such as `core://foo%20bar` or
+`core://chapter_1%2Fscene_2` when those spellings map to the stored path.
+Percent-decoded Windows filesystem paths such as `C%3A/...` are rejected too.
+
 **Common Domains:**
 
 - `core` — Core memories (Personality, preferences, key facts)
@@ -127,6 +133,10 @@ read_memory("core://agent", chunk_id=0)
 read_memory("core://agent", range="0:500")
 ```
 
+> 📌 Public tools keep a raw-path-first, decoded-variant-second lookup rule for
+> existing memories. This means encoded spaces/slashes can still reach an
+> existing path, while a literal percent path keeps its literal spelling.
+
 > ⚠️ `chunk_id` and `range` **cannot be used simultaneously**.
 
 ---
@@ -157,6 +167,7 @@ create_memory(
 4. `title` only allows letters, numbers, underscores, and hyphens (no spaces or special characters).
 5. If `title` is omitted, the system auto-assigns a numeric ID.
 6. `content` is now also length-checked at the MCP boundary; values longer than `100000` characters are rejected before the request enters DB / Write Guard work.
+7. `parent_uri` follows the same URI contract as the read/delete tools: encoded spaces or slashes can still target an existing parent path, while a literal percent path remains literal.
 
 **Usage Examples:**
 
@@ -257,6 +268,7 @@ delete_memory(
 - If a memory has multiple alias paths, deleting one does not affect others.
 - It is recommended to `read_memory` to confirm content before deletion.
 - The current return value is a **structured JSON string**, with common fields such as `ok`, `deleted`, `uri`, and `message`.
+- The same URI compatibility applies here too: encoded spaces/slashes can still reach an existing path, while a literal percent path keeps its literal spelling.
 
 **Usage Example:**
 
